@@ -1,0 +1,146 @@
+/* ============================================================
+   DUX Digitech — Color tokens
+   Two themes: LIGHT (default, :root) and DARK ([data-theme="dark"]).
+   Toggle by setting  <html data-theme="dark">  (or on any wrapper).
+
+   Naming:
+   · Base ramps   →  --iris-*, --cyan-*, --fg-*, --surface-* …
+   · Semantic     →  --text-*, --bg-*, --border-*, --brand-* …
+   Always prefer the SEMANTIC aliases in product code; they re-map
+   automatically across themes.
+   ============================================================ */
+
+:root {
+  /* ---- Brand: Iris (primary) ---- */
+  --iris:        #5C4DE6;
+  --iris-soft:   #6D5EF6;
+  --iris-deep:   #4A3CD0;
+  --iris-tint:   rgba(92, 77, 230, .10);
+
+  /* ---- Brand: Cyan (data / accent) ---- */
+  --cyan:        #0E9C8B;
+  --cyan-soft:   #0CB4A0;
+  --cyan-tint:   rgba(14, 156, 139, .12);
+
+  /* ---- Brand gradient (iris → blue → cyan) ---- */
+  --brand-grad:  linear-gradient(90deg, var(--iris) 0%, #4F9FD8 55%, var(--cyan) 100%);
+
+  /* ---- Neutral surfaces ---- */
+  --canvas:      #F3F4F7;   /* app background        */
+  --surface-1:   #FFFFFF;   /* raised panels         */
+  --surface-2:   #FFFFFF;   /* cards on canvas       */
+  --surface-3:   #F0F1F5;   /* sunken / pill wells   */
+  --card-bg:     #FFFFFF;
+  --pill-bg:     #F5F6F9;
+  --th-bg:       #FAFAFC;   /* table header fill     */
+  --meta-bg:     #FAFAFC;
+  --hdr-bg:      rgba(255, 255, 255, .82);  /* blurred header backdrop */
+
+  /* ---- Hairlines / borders ---- */
+  --hairline:    #E7E9EE;
+  --hairline-2:  #DCDFE6;
+
+  /* ---- Foreground / text ramp ---- */
+  --fg-1:        #1A2030;   /* primary text          */
+  --fg-2:        #586273;   /* secondary             */
+  --fg-3:        #8A93A3;   /* tertiary / muted       */
+  --fg-4:        #AAB2BF;   /* faint / disabled       */
+
+  /* ---- Status ---- */
+  --ok:          #15916A;   --ok-bg:      rgba(21, 145, 106, .10);
+  --pending:     #B0741A;   --pending-bg: rgba(176, 116, 26, .11);
+  --err:         #C8475E;   --err-bg:     rgba(200, 71, 94, .09);
+
+  /* ---- Component-specific ---- */
+  --row-hover:   rgba(92, 77, 230, .045);
+  --avatar-bg:   #F4F4FC;
+  --user-bg:     linear-gradient(180deg, rgba(92,77,230,.12), rgba(92,77,230,.08));
+  --user-border: rgba(92, 77, 230, .28);
+  --user-fg:     #2C2566;
+  --scrollthumb: #D4D8E0;
+
+  /* ---- Ambient depth wash (page backdrop) ---- */
+  --ambient:
+    radial-gradient(120% 64% at 50% -16%, rgba(92,77,230,.06), transparent 60%),
+    radial-gradient(80% 50% at 88% 6%, rgba(14,156,139,.045), transparent 55%); /* @kind other */
+
+  /* ===================================================
+     SEMANTIC ALIASES — use these in product code
+     =================================================== */
+  --bg-app:        var(--canvas);
+  --bg-surface:    var(--surface-1);
+  --bg-card:       var(--card-bg);
+  --bg-sunken:     var(--surface-3);
+
+  --text-primary:   var(--fg-1);
+  --text-secondary: var(--fg-2);
+  --text-muted:     var(--fg-3);
+  --text-faint:     var(--fg-4);
+  --text-brand:     var(--iris);
+  --text-data:      var(--cyan);
+  --text-on-brand:  #FFFFFF;
+
+  --border-subtle:  var(--hairline);
+  --border-strong:  var(--hairline-2);
+
+  --brand-primary:  var(--iris);
+  --brand-accent:   var(--cyan);
+
+  --focus-ring:     var(--iris);
+
+  /* Mascot/mark theme-swap toggles (consumed by BrandAvatar inline styles) */
+  --mark-light-display: block; /* @kind other */
+  --mark-white-display: none; /* @kind other */
+}
+
+/* ============================================================
+   DARK THEME — focused "instrument" surface
+   ============================================================ */
+[data-theme="dark"] {
+  --iris:        #6D5EF6;
+  --iris-soft:   #8A7DF8;
+  --iris-deep:   #5B4DE0;
+  --iris-tint:   rgba(109, 94, 246, .14);
+
+  --cyan:        #2DD4BF;
+  --cyan-soft:   #5CE6D5;
+  --cyan-tint:   rgba(45, 212, 191, .14);
+
+  --canvas:      #0A0D13;
+  --surface-1:   #11151E;
+  --surface-2:   #181D29;
+  --surface-3:   #1E2433;
+  --card-bg:     linear-gradient(180deg, #181D29, #161A25);
+  --pill-bg:     #1E2433;
+  --th-bg:       #141926;
+  --meta-bg:     rgba(255, 255, 255, .008);
+  --hdr-bg:      rgba(17, 21, 30, .80);
+
+  --hairline:    #232938;
+  --hairline-2:  #2C3344;
+
+  --fg-1:        #E8EAF1;
+  --fg-2:        #9AA3B7;
+  --fg-3:        #5E6678;
+  --fg-4:        #424A5C;
+
+  --ok:          #34D39A;   --ok-bg:      rgba(52, 211, 154, .10);
+  --pending:     #E0A85C;   --pending-bg: rgba(224, 168, 92, .11);
+  --err:         #E8738A;   --err-bg:     rgba(232, 115, 138, .10);
+
+  --row-hover:   rgba(109, 94, 246, .06);
+  --avatar-bg:   rgba(255, 255, 255, .035);
+  --user-bg:     linear-gradient(180deg, rgba(109,94,246,.20), rgba(109,94,246,.13));
+  --user-border: rgba(124, 110, 248, .34);
+  --user-fg:     #F1F0FF;
+  --scrollthumb: #2C3344;
+
+  --ambient:
+    radial-gradient(120% 70% at 50% -12%, rgba(109,94,246,.16), transparent 60%),
+    radial-gradient(90% 60% at 88% 8%, rgba(45,212,191,.07), transparent 55%); /* @kind other */
+
+  --text-on-brand: #FFFFFF;
+
+  --mark-light-display: none; /* @kind other */
+  --mark-white-display: block; /* @kind other */
+}

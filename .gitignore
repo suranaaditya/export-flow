@@ -53,3 +53,10 @@ jspm_packages/
 
 # Aider AI Chat
 .aider*
+
+# frontend
+frontend/node_modules
+exportflow/public/frontend
+# build artifact: npm run build copies the built index.html here (Raven pattern)
+exportflow/www/exportflow.html
+frontend/*.tsbuildinfo

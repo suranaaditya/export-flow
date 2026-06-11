@@ -1,0 +1,26 @@
+{
+  "name": "exportflow-frontend",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build --base=/assets/exportflow/frontend/ && npm run copy-html-entry",
+    "copy-html-entry": "cp ../exportflow/public/frontend/index.html ../exportflow/www/exportflow.html",
+    "typecheck": "tsc -b --noEmit"
+  },
+  "dependencies": {
+    "frappe-react-sdk": "^1.15.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.30.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "~5.6.2",
+    "vite": "^5.4.14"
+  }
+}

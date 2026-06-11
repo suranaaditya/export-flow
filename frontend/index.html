@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>ExportFlow · DUX Digitech</title>
+	</head>
+	<body>
+		<div id="root"></div>
+		<script>
+			window.csrf_token = '{{ csrf_token }}';
+			// Pre-paint theme restore — avoids a light-theme flash for dark users
+			try {
+				if (localStorage.getItem('exportflow:theme') === 'dark') {
+					document.documentElement.dataset.theme = 'dark';
+				}
+			} catch (e) {}
+		</script>
+		<script type="module" src="/src/main.tsx"></script>
+	</body>
+</html>

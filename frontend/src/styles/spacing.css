@@ -1,0 +1,48 @@
+/* ============================================================
+   DUX Digitech — Spacing, radii, shadows, motion
+   The surface reads as a "precision instrument": crisp hairlines,
+   soft ambient shadows, a hairline brand-gradient accent, and
+   spring-eased micro-motion. Radii are generous (8–22px).
+   ============================================================ */
+
+:root {
+  /* ---- Spacing scale (4px base) ---- */
+  --sp-1:  4px;
+  --sp-2:  8px;
+  --sp-3:  12px;
+  --sp-4:  16px;
+  --sp-5:  20px;
+  --sp-6:  24px;
+  --sp-8:  32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+
+  /* ---- Corner radii ---- */
+  --r-sm:  8px;
+  --r-md:  12px;
+  --r-lg:  16px;
+  --r-xl:  22px;
+  --r-pill: 999px;
+
+  /* ---- Elevation / shadows (LIGHT) ---- */
+  --shadow-card: 0 6px 26px rgba(22, 28, 46, .07);
+  --shadow-pop:  0 10px 34px rgba(22, 28, 46, .10);
+  --inset-hi:    inset 0 1px 0 rgba(255, 255, 255, .6);
+
+  /* Send-button brand glow */
+  --shadow-brand: 0 6px 18px rgba(109, 94, 246, .40);
+
+  /* ---- Motion ---- */
+  --spring: cubic-bezier(.22, 1, .36, 1); /* @kind other */
+  --ease:   cubic-bezier(.4, 0, .2, 1); /* @kind other */
+  --dur-fast:  .18s; /* @kind other */
+  --dur-base:  .25s; /* @kind other */
+  --dur-slow:  .45s; /* @kind other */
+}
+
+/* Shadows soften & deepen in dark to keep cards legible on near-black */
+[data-theme="dark"] {
+  --shadow-card: 0 18px 50px rgba(0, 0, 0, .42);
+  --shadow-pop:  0 14px 40px rgba(0, 0, 0, .40);
+  --inset-hi:    inset 0 1px 0 rgba(255, 255, 255, .045);
+}

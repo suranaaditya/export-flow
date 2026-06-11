@@ -1,0 +1,8 @@
+/* ============================================================
+   DUX Digitech — Webfonts
+   Geist        → UI / product typography
+   JetBrains Mono → numerics, IDs, timestamps, code
+   Sourced from Google Fonts. To self-host, drop the .woff2 files
+   in assets/fonts/ and replace these @import lines with @font-face.
+   ============================================================ */
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@300;400;450;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
