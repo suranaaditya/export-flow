@@ -38,15 +38,18 @@ interface InputProps {
 	type?: 'text' | 'date' | 'number';
 	mono?: boolean;
 	step?: string;
+	/** id of a <datalist> for type-ahead suggestions with free-text fallback */
+	listId?: string;
 }
 
-export function TextInput({ value, onChange, placeholder, disabled, type = 'text', mono, step }: InputProps) {
+export function TextInput({ value, onChange, placeholder, disabled, type = 'text', mono, step, listId }: InputProps) {
 	return (
 		<input
 			className={`inp${mono ? ' mono' : ''}`}
 			type={type}
 			value={value}
 			step={step}
+			list={listId}
 			placeholder={placeholder}
 			disabled={disabled}
 			onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}

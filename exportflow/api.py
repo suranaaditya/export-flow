@@ -134,7 +134,89 @@ def get_new_so_context() -> dict:
 		"currencies": frappe.get_all(
 			"Currency", filters={"enabled": 1}, pluck="name", order_by="name asc"
 		),
+		"ports": frappe.get_all(
+			"Port",
+			filters={"disabled": 0},
+			fields=["name", "unlocode", "city", "country", "mode"],
+			order_by="country asc, port_name asc",
+			limit_page_length=500,
+		),
+		"uoms": frappe.get_all(
+			"UOM", filters={"enabled": 1}, pluck="name", order_by="name asc", limit_page_length=300
+		),
+		"countries": frappe.get_all("Country", pluck="name", order_by="name asc", limit_page_length=300),
 	}
+
+
+@frappe.whitelist()
+def create_customer(values) -> dict:
+	"""Quick-create from the deal form / Settings — fills the ERPNext-required
+	group/territory with sensible defaults."""
+	frappe.has_permission("Customer", "create", throw=True)
+	if isinstance(values, str):
+		values = json.loads(values)
+	if not (values.get("customer_name") or "").strip():
+		frappe.throw(_("Customer name is required"))
+	doc = frappe.get_doc(
+		{
+			"doctype": "Customer",
+			"customer_name": values["customer_name"].strip(),
+			"customer_type": "Company",
+			"customer_group": frappe.db.get_value("Customer Group", {"is_group": 0}, "name"),
+			"territory": frappe.db.get_value("Territory", {"is_group": 0}, "name"),
+			"default_currency": values.get("default_currency") or None,
+			"default_incoterm": values.get("default_incoterm") or None,
+			"destination_country": values.get("destination_country") or None,
+		}
+	).insert()
+	return {"name": doc.name, "customer_name": doc.customer_name}
+
+
+@frappe.whitelist()
+def create_supplier(values) -> dict:
+	frappe.has_permission("Supplier", "create", throw=True)
+	if isinstance(values, str):
+		values = json.loads(values)
+	if not (values.get("supplier_name") or "").strip():
+		frappe.throw(_("Supplier name is required"))
+	doc = frappe.get_doc(
+		{
+			"doctype": "Supplier",
+			"supplier_name": values["supplier_name"].strip(),
+			"supplier_group": frappe.db.get_value("Supplier Group", {}, "name"),
+			"country": values.get("country") or "India",
+			"default_merchant_export_scheme": 1 if values.get("default_merchant_export_scheme") else 0,
+		}
+	).insert()
+	return {"name": doc.name, "supplier_name": doc.supplier_name}
+
+
+@frappe.whitelist()
+def create_item(values) -> dict:
+	"""Pharma trading item: never stocked (goods go supplier → port), always
+	buyable and sellable."""
+	frappe.has_permission("Item", "create", throw=True)
+	if isinstance(values, str):
+		values = json.loads(values)
+	if not (values.get("item_name") or "").strip():
+		frappe.throw(_("Item name is required"))
+	doc = frappe.get_doc(
+		{
+			"doctype": "Item",
+			"item_code": values["item_name"].strip(),
+			"item_name": values["item_name"].strip(),
+			"item_group": frappe.db.get_value("Item Group", {"is_group": 0}, "name"),
+			"stock_uom": values.get("stock_uom") or "Kg",
+			"is_stock_item": 0,
+			"is_sales_item": 1,
+			"is_purchase_item": 1,
+			"pharmacopoeia_grade": values.get("pharmacopoeia_grade") or None,
+			"customs_tariff_number": values.get("customs_tariff_number") or None,
+			"cas_number": values.get("cas_number") or None,
+			"default_pack_size": values.get("default_pack_size") or None,
+		}
+	).insert()
+	return {"name": doc.name, "item_name": doc.item_name, "stock_uom": doc.stock_uom}
 
 
 @frappe.whitelist()

@@ -106,6 +106,40 @@ export function LRow({
 	);
 }
 
+/** Modal dialog in the card language (hairline, 16px radius, settle-in). */
+export function Modal({
+	title,
+	icon,
+	onClose,
+	children,
+}: {
+	title: string;
+	icon: IconName;
+	onClose: () => void;
+	children: ReactNode;
+}) {
+	return (
+		<div
+			className="overlay"
+			onClick={(e) => {
+				if (e.target === e.currentTarget) onClose();
+			}}
+		>
+			<div className="modal" role="dialog" aria-label={title}>
+				<div className="chead">
+					<Icon name={icon} size={16} />
+					<span className="ttl">{title}</span>
+					<span className="spacer" />
+					<button className="xbtn" onClick={onClose} aria-label="Close">
+						<Icon name="close" size={14} />
+					</button>
+				</div>
+				{children}
+			</div>
+		</div>
+	);
+}
+
 /** Centered empty-state body for cards (no mascot variant for data panels). */
 export function EmptyMsg({ title, text }: { title: string; text?: string }) {
 	return (

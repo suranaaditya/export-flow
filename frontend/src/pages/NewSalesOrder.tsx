@@ -2,10 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 import { useFrappeGetCall, useFrappePostCall } from 'frappe-react-sdk';
 import { Link, useNavigate } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
+import { MasterModal } from '@/components/MasterModal';
 import { Field, SelectInput, TextArea, TextInput } from '@/components/form';
 import { Card, CHead, Facts } from '@/components/ui';
 import { API, parseServerError, type ItemInfo, type NewSOContext } from '@/lib/api';
 import { fmtMoney } from '@/lib/format';
+import { GRADE_OPTIONS, MASTERS, PORT_MODES, type OptionSource } from '@/lib/masters';
+
+const CUSTOMER_DEF = MASTERS.find((m) => m.doctype === 'Customer')!;
+const ITEM_DEF = MASTERS.find((m) => m.doctype === 'Item')!;
 
 interface DealRow {
 	item_code: string;
@@ -43,6 +48,7 @@ export function NewSalesOrder() {
 	const [terms, setTerms] = useState('');
 	const [rows, setRows] = useState<DealRow[]>([{ ...EMPTY_ROW }]);
 	const [err, setErr] = useState<string | null>(null);
+	const [quickCreate, setQuickCreate] = useState<'customer' | 'item' | null>(null);
 
 	// customer defaults flow into the deal header
 	useEffect(() => {
@@ -150,6 +156,15 @@ export function NewSalesOrder() {
 		);
 	}
 
+	const masterOptions: Record<OptionSource, string[]> = {
+		currencies: ctx?.currencies ?? [],
+		incoterms: ctx?.incoterms ?? [],
+		uoms: ctx?.uoms ?? [],
+		countries: ctx?.countries ?? [],
+		grades: GRADE_OPTIONS,
+		portModes: PORT_MODES,
+	};
+
 	const customers = (ctx?.customers ?? []).map((c) => ({ value: c.name, label: c.customer_name }));
 	const items = (ctx?.items ?? []).map((i) => ({
 		value: i.name,
@@ -172,7 +187,12 @@ export function NewSalesOrder() {
 					<CHead icon="file-text" title="Deal" count={ctx ? ctx.company : undefined} />
 					<div className="formgrid">
 						<Field label="Customer" required>
-							<SelectInput value={customer} onChange={setCustomer} options={customers} allowEmpty />
+							<div style={{ display: 'flex', gap: 8 }}>
+								<SelectInput value={customer} onChange={setCustomer} options={customers} allowEmpty />
+								<button type="button" className="addbtn" title="New customer" onClick={() => setQuickCreate('customer')}>
+									<Icon name="plus" size={15} />
+								</button>
+							</div>
 						</Field>
 						<Field label="Order date">
 							<TextInput type="date" value={orderDate} onChange={setOrderDate} />
@@ -207,8 +227,15 @@ export function NewSalesOrder() {
 						<Field label="Incoterm">
 							<SelectInput value={incoterm} onChange={setIncoterm} options={(ctx?.incoterms ?? []).map((i) => ({ value: i }))} allowEmpty />
 						</Field>
-						<Field label="Named port / place">
-							<TextInput value={namedPlace} onChange={setNamedPlace} placeholder="e.g. Jebel Ali" />
+						<Field label="Named port / place" hint="Pick a port or type any place">
+							<TextInput value={namedPlace} onChange={setNamedPlace} listId="ef-ports" placeholder="e.g. Jebel Ali" />
+							<datalist id="ef-ports">
+								{(ctx?.ports ?? []).map((p) => (
+									<option key={p.name} value={p.unlocode ? `${p.name} · ${p.unlocode}` : p.name}>
+										{[p.city, p.country, p.mode].filter(Boolean).join(' · ')}
+									</option>
+								))}
+							</datalist>
 						</Field>
 						<div className="span2">
 							<Field label="Payment terms" hint="As negotiated, e.g. 30% advance, 70% against B/L copy">
@@ -244,9 +271,12 @@ export function NewSalesOrder() {
 							</button>
 						</div>
 					))}
-					<div style={{ padding: '8px 18px 14px' }}>
+					<div style={{ padding: '8px 18px 14px', display: 'flex', gap: 10 }}>
 						<button type="button" className="btn" onClick={() => setRows((rs) => [...rs, { ...EMPTY_ROW }])}>
 							<Icon name="plus" size={15} /> Add item
+						</button>
+						<button type="button" className="btn" onClick={() => setQuickCreate('item')}>
+							<Icon name="cube" size={15} /> New item master
 						</button>
 					</div>
 
@@ -293,6 +323,32 @@ export function NewSalesOrder() {
 					</Card>
 				</div>
 			</div>
+
+			{quickCreate !== null && (
+				<MasterModal
+					def={quickCreate === 'customer' ? CUSTOMER_DEF : ITEM_DEF}
+					options={masterOptions}
+					record={null}
+					onClose={() => setQuickCreate(null)}
+					onSaved={(name) => {
+						const which = quickCreate;
+						setQuickCreate(null);
+						void ctxResult.mutate();
+						if (which === 'customer') {
+							setCustomer(name);
+						} else {
+							// select the new item on the first empty row (or append one)
+							setRows((rs) => {
+								const idx = rs.findIndex((r) => !r.item_code);
+								const next = idx >= 0 ? rs : [...rs, { ...EMPTY_ROW }];
+								return next;
+							});
+							const targetIdx = rows.findIndex((r) => !r.item_code);
+							void onPickItem(targetIdx >= 0 ? targetIdx : rows.length, name);
+						}
+					}}
+				/>
+			)}
 
 			<footer>
 				<b>ExportFlow</b> · DUX Digitech

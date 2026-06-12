@@ -29,6 +29,9 @@ export interface NewSOContext {
 	items: { name: string; item_name: string; stock_uom: string; pharmacopoeia_grade: string | null }[];
 	incoterms: string[];
 	currencies: string[];
+	ports: { name: string; unlocode: string | null; city: string | null; country: string | null; mode: string }[];
+	uoms: string[];
+	countries: string[];
 }
 
 export interface ItemInfo {
@@ -90,6 +93,9 @@ export const API = {
 	exchangeRate: 'exportflow.api.get_exchange_rate_to_company',
 	createSo: 'exportflow.api.create_export_sales_order',
 	submitSo: 'exportflow.api.submit_sales_order',
+	createCustomer: 'exportflow.api.create_customer',
+	createSupplier: 'exportflow.api.create_supplier',
+	createItem: 'exportflow.api.create_item',
 } as const;
 
 /** Status → mockup chip tone (.tag.ok / .tag.pend / .tag.err). */

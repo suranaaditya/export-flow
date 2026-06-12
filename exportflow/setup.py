@@ -50,6 +50,13 @@ GRANTS = {
 	},
 	"Incoterm": {role: [] for role in EXPORT_ROLES},
 	"Currency": {role: [] for role in EXPORT_ROLES},
+	"Country": {role: [] for role in EXPORT_ROLES},
+	"UOM": {
+		"Export Admin": MASTER_PTYPES,
+		"Export Operations": MASTER_PTYPES,
+		"Export Accounts": [],
+		"Export Viewer": [],
+	},
 }
 
 
@@ -65,5 +72,25 @@ def setup_export_role_permissions():
 	frappe.clear_cache()
 
 
+def seed_ports():
+	"""Insert the curated port list; existing/renamed records are left alone."""
+	from exportflow.ports_data import SEED_PORTS
+
+	for port_name, unlocode, mode, city, country in SEED_PORTS:
+		if frappe.db.exists("Port", port_name) or frappe.db.exists("Port", {"unlocode": unlocode}):
+			continue
+		frappe.get_doc(
+			{
+				"doctype": "Port",
+				"port_name": port_name,
+				"unlocode": unlocode,
+				"mode": mode,
+				"city": city,
+				"country": country if frappe.db.exists("Country", country) else None,
+			}
+		).insert(ignore_permissions=True)
+
+
 def after_install():
 	setup_export_role_permissions()
+	seed_ports()

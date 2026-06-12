@@ -46,6 +46,11 @@ export function AppShell() {
 							<span className="lbl">{item.label}</span>
 						</NavLink>
 					))}
+					<div className="push" />
+					<NavLink to="/settings" className={({ isActive }) => (isActive ? 'on' : '')}>
+						<Icon name="sliders" size={16} />
+						<span className="lbl">Settings</span>
+					</NavLink>
 				</nav>
 				<div className="sfoot">
 					<button className="icbtn" onClick={toggle} title="Toggle theme" aria-label="Toggle theme">

@@ -12,6 +12,7 @@ import { ProFormaInvoicePage } from '@/pages/ProFormaInvoicePage';
 import { Purchases } from '@/pages/Purchases';
 import { SalesOrderDetail } from '@/pages/SalesOrderDetail';
 import { SalesOrders } from '@/pages/SalesOrders';
+import { Settings } from '@/pages/Settings';
 import { Shipments } from '@/pages/Shipments';
 
 /**
@@ -53,6 +54,7 @@ export default function App() {
 								<Route path="shipments" element={<Shipments />} />
 								<Route path="documents" element={<Documents />} />
 								<Route path="compliance" element={<Compliance />} />
+								<Route path="settings" element={<Settings />} />
 							</Route>
 						</Routes>
 					</BrowserRouter>

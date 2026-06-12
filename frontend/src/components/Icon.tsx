@@ -52,6 +52,7 @@ const PATHS: Record<string, string> = {
 	warning: '<path d="M12 3 2 20h20zM12 10v4M12 17.5v.5"/>',
 	exclamation: '<path d="M12 6v6M12 16.5v.5"/>',
 	'link-boxes': '<path d="M3 7h7v7H3zM14 10h7v7h-7zM6.5 14v3.5h7.5"/>',
+	sliders: '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3"/><path d="M1 14h6M9 8h6M17 16h6"/>',
 };
 
 export type IconName = keyof typeof PATHS;
