@@ -172,10 +172,12 @@ def get_exchange_rate_to_company(currency: str) -> float:
 
 @frappe.whitelist()
 def create_export_sales_order(deal) -> dict:
-	"""Build the native drop-ship Sales Order from the ExportFlow deal form.
+	"""Build the native Sales Order from the ExportFlow deal form.
 
-	Every item line is delivered_by_supplier (spec §4.1 — goods never touch
-	the client's premises) with its drop-ship supplier set.
+	Suppliers are deliberately NOT captured here — the client negotiates
+	procurement after the deal is booked. Lines stay plain at SO time; the
+	Phase-3 PO flow sets supplier + delivered_by_supplier per line and maps
+	the drop-ship POs with row-level SO links.
 	"""
 	frappe.has_permission("Sales Order", "create", throw=True)
 	if isinstance(deal, str):
@@ -191,8 +193,6 @@ def create_export_sales_order(deal) -> dict:
 			frappe.throw(_("Row {0}: quantity must be greater than zero").format(idx))
 		if flt(row.get("rate")) <= 0:
 			frappe.throw(_("Row {0}: rate must be greater than zero").format(idx))
-		if not row.get("supplier"):
-			frappe.throw(_("Row {0}: drop-ship supplier is required").format(idx))
 
 	company = frappe.db.get_single_value("Global Defaults", "default_company")
 	company_currency = frappe.db.get_value("Company", company, "default_currency")
@@ -219,8 +219,6 @@ def create_export_sales_order(deal) -> dict:
 					"item_code": row["item_code"],
 					"qty": flt(row["qty"]),
 					"rate": flt(row["rate"]),
-					"supplier": row["supplier"],
-					"delivered_by_supplier": 1,
 				}
 				for row in items
 			],

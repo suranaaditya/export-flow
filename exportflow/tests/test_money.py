@@ -272,10 +272,21 @@ class TestMoneyFlow(IntegrationTestCase):
 		self.assertIn("overdue by 4 days", mine[0]["subject"])
 
 	def test_create_export_sales_order_endpoint(self):
-		"""The in-app deal form builds a native drop-ship SO server-side."""
+		"""The in-app deal form books the SO with NO supplier — procurement is
+		negotiated later, so lines stay plain until the Phase-3 PO flow."""
 		sfx = _suffix()
-		supplier = make_supplier(f"_Test EF Supplier Form {sfx}")
-		item = make_dropship_item(f"_Test EF Item Form {sfx}", supplier, self.company)
+		# plain sales item: no item-level drop-ship flag, like the client's real items
+		item = frappe.get_doc(
+			{
+				"doctype": "Item",
+				"item_code": f"_Test EF Plain Item {sfx}",
+				"item_group": frappe.db.get_value("Item Group", {"is_group": 0}, "name"),
+				"stock_uom": "Kg",
+				"is_stock_item": 0,
+				"is_sales_item": 1,
+				"is_purchase_item": 1,
+			}
+		).insert(ignore_permissions=True)
 		customer = make_customer(f"_Test EF Customer Form {sfx}")
 		company_currency = frappe.db.get_value("Company", self.company, "default_currency")
 		deal_currency = "EUR" if company_currency != "EUR" else "USD"
@@ -288,21 +299,20 @@ class TestMoneyFlow(IntegrationTestCase):
 				"conversion_rate": 83,
 				"named_place": "Jebel Ali",
 				"payment_terms_narrative": "30% advance",
-				"items": [{"item_code": item, "qty": 100, "rate": 12, "supplier": supplier}],
+				"items": [{"item_code": item.name, "qty": 100, "rate": 12}],
 			}
 		)
 		so = frappe.get_doc("Sales Order", result["name"])
 		self.assertEqual(so.docstatus, 0, "Saved as draft by default")
 		self.assertEqual(so.currency, deal_currency)
 		self.assertEqual(so.payment_terms_narrative, "30% advance")
-		self.assertTrue(all(r.delivered_by_supplier for r in so.items))
-		self.assertEqual(so.items[0].supplier, supplier)
+		self.assertFalse(so.items[0].supplier, "No supplier at deal-entry time")
 		self.assertEqual(flt(so.grand_total), 1200.0)
 
 		submitted = submit_sales_order(so.name)
-		self.assertEqual(submitted["docstatus"], 1)
+		self.assertEqual(submitted["docstatus"], 1, "Submits without a supplier")
 
-		# missing drop-ship supplier must be rejected up front
+		# zero-rate rows must be rejected up front
 		with self.assertRaises(frappe.ValidationError):
 			create_export_sales_order(
 				{
@@ -310,7 +320,7 @@ class TestMoneyFlow(IntegrationTestCase):
 					"delivery_date": add_days(nowdate(), 30),
 					"currency": deal_currency,
 					"conversion_rate": 83,
-					"items": [{"item_code": item, "qty": 5, "rate": 10}],
+					"items": [{"item_code": item.name, "qty": 5, "rate": 0}],
 				}
 			)
 

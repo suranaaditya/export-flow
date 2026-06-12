@@ -11,11 +11,10 @@ interface DealRow {
 	item_code: string;
 	qty: string;
 	rate: string;
-	supplier: string;
 	uom: string;
 }
 
-const EMPTY_ROW: DealRow = { item_code: '', qty: '', rate: '', supplier: '', uom: '' };
+const EMPTY_ROW: DealRow = { item_code: '', qty: '', rate: '', uom: '' };
 
 function todayISO(): string {
 	const d = new Date();
@@ -83,7 +82,6 @@ export function NewSalesOrder() {
 			setRow(i, {
 				item_code: itemCode,
 				uom: info.stock_uom ?? listed?.stock_uom ?? '',
-				supplier: rows[i].supplier || info.default_supplier || '',
 				rate: rows[i].rate || (info.standard_rate ? String(info.standard_rate) : ''),
 			});
 		} catch {
@@ -107,7 +105,6 @@ export function NewSalesOrder() {
 			if (!r.item_code) return setErr(`Item row ${i + 1}: pick the item.`);
 			if (!r.qty || Number(r.qty) <= 0) return setErr(`Item row ${i + 1}: quantity is required.`);
 			if (!r.rate || Number(r.rate) <= 0) return setErr(`Item row ${i + 1}: rate is required.`);
-			if (!r.supplier) return setErr(`Item row ${i + 1}: pick the drop-ship supplier.`);
 		}
 		setErr(null);
 		try {
@@ -126,7 +123,6 @@ export function NewSalesOrder() {
 						item_code: r.item_code,
 						qty: Number(r.qty),
 						rate: Number(r.rate),
-						supplier: r.supplier,
 					})),
 				},
 			});
@@ -155,7 +151,6 @@ export function NewSalesOrder() {
 	}
 
 	const customers = (ctx?.customers ?? []).map((c) => ({ value: c.name, label: c.customer_name }));
-	const suppliers = (ctx?.suppliers ?? []).map((s) => ({ value: s.name, label: s.supplier_name }));
 	const items = (ctx?.items ?? []).map((i) => ({
 		value: i.name,
 		label: i.pharmacopoeia_grade ? `${i.item_name} · ${i.pharmacopoeia_grade}` : i.item_name,
@@ -222,24 +217,20 @@ export function NewSalesOrder() {
 						</div>
 					</div>
 
-					<div className="reqhead" style={{ borderTop: '1px solid var(--hairline)', gridTemplateColumns: '1.5fr 80px 64px 100px 1.2fr 100px 34px' }}>
+					<div className="reqhead" style={{ borderTop: '1px solid var(--hairline)', gridTemplateColumns: '2fr 110px 80px 130px 130px 34px' }}>
 						<span>Item</span>
 						<span>Qty</span>
 						<span>UOM</span>
 						<span>Rate</span>
-						<span title="Who you procure this line from — ships directly to the port and becomes the PO supplier">
-							Drop-ship supplier
-						</span>
 						<span style={{ textAlign: 'right' }}>Amount</span>
 						<span />
 					</div>
 					{rows.map((r, i) => (
-						<div className="reqrow" key={i} style={{ gridTemplateColumns: '1.5fr 80px 64px 100px 1.2fr 100px 34px' }}>
+						<div className="reqrow" key={i} style={{ gridTemplateColumns: '2fr 110px 80px 130px 130px 34px' }}>
 							<SelectInput value={r.item_code} onChange={(v) => void onPickItem(i, v)} options={items} allowEmpty />
 							<TextInput type="number" value={r.qty} onChange={(v) => setRow(i, { qty: v })} />
 							<span className="dim" style={{ alignSelf: 'center' }}>{r.uom || '—'}</span>
 							<TextInput type="number" value={r.rate} onChange={(v) => setRow(i, { rate: v })} />
-							<SelectInput value={r.supplier} onChange={(v) => setRow(i, { supplier: v })} options={suppliers} allowEmpty />
 							<span className="num" style={{ textAlign: 'right' }}>
 								{fmtMoney((Number(r.qty) || 0) * (Number(r.rate) || 0), currency || undefined)}
 							</span>
@@ -291,12 +282,12 @@ export function NewSalesOrder() {
 						/>
 					</Card>
 					<Card>
-						<CHead icon="truck" title="Drop ship" />
+						<CHead icon="truck" title="What happens next" />
 						<div className="empty" style={{ padding: '18px 20px', alignItems: 'flex-start', textAlign: 'left' }}>
 							<div className="t2">
-								Every line ships directly from its supplier to the port — goods never touch your
-								premises. The supplier on each row becomes the purchase-order supplier in the next
-								step.
+								Suppliers are decided after the deal is booked. Once negotiations conclude, you'll
+								create purchase orders from this sales order — picking the supplier per line — and
+								each PO line stays connected to the exact deal line it fulfils.
 							</div>
 						</div>
 					</Card>
