@@ -109,6 +109,7 @@ export const API = {
 	newPoContext: 'exportflow.api.get_new_po_context',
 	termsText: 'exportflow.api.get_terms_text',
 	createPoDraft: 'exportflow.api.create_purchase_order_draft',
+	previewPo: 'exportflow.api.preview_purchase_order',
 } as const;
 
 export interface NewPOContext {
@@ -117,7 +118,36 @@ export interface NewPOContext {
 	suppliers: { name: string; supplier_name: string; default_merchant_export_scheme: 0 | 1 }[];
 	items: { name: string; item_name: string; stock_uom: string }[];
 	terms_templates: string[];
+	taxes_templates: { name: string; is_default: 0 | 1 }[];
+	accounts: { name: string; account_name: string }[];
 	sales_orders: { name: string; customer_name: string }[];
+	uoms: string[];
+	countries: string[];
+}
+
+export interface POTaxRow {
+	description: string;
+	rate: number;
+	tax_amount: number;
+	total: number;
+}
+
+export interface POTotals {
+	net_total: number;
+	total_taxes_and_charges: number;
+	grand_total: number;
+	taxes: POTaxRow[];
+}
+
+/** Frappe print endpoints, generic. */
+export function printPreviewUrl(doctype: string, name: string, format: string): string {
+	const params = new URLSearchParams({ doctype, name, format, no_letterhead: '1', _lang: 'en' });
+	return `/printview?${params.toString()}`;
+}
+
+export function printPdfUrl(doctype: string, name: string, format: string): string {
+	const params = new URLSearchParams({ doctype, name, format, no_letterhead: '1' });
+	return `/api/method/frappe.utils.print_format.download_pdf?${params.toString()}`;
 }
 
 // ---- Phase 3: procurement & logistics shapes (exportflow.api) ----
@@ -174,6 +204,7 @@ export interface PODetailData {
 		tc_name: string | null;
 		terms: string | null;
 	};
+	totals: POTotals;
 	items: {
 		name: string;
 		item_code: string;

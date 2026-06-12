@@ -3,7 +3,7 @@ import { useFrappeGetCall, useFrappePostCall } from 'frappe-react-sdk';
 import { Link, useNavigate } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
 import { MasterModal } from '@/components/MasterModal';
-import { Field, SelectInput, TextArea, TextInput } from '@/components/form';
+import { Field, SearchSelect, TextArea, TextInput } from '@/components/form';
 import { Card, CHead, Facts } from '@/components/ui';
 import { API, parseServerError, type ItemInfo, type NewSOContext } from '@/lib/api';
 import { fmtMoney } from '@/lib/format';
@@ -187,12 +187,14 @@ export function NewSalesOrder() {
 					<CHead icon="file-text" title="Deal" count={ctx ? ctx.company : undefined} />
 					<div className="formgrid">
 						<Field label="Customer" required>
-							<div style={{ display: 'flex', gap: 8 }}>
-								<SelectInput value={customer} onChange={setCustomer} options={customers} allowEmpty />
-								<button type="button" className="addbtn" title="New customer" onClick={() => setQuickCreate('customer')}>
-									<Icon name="plus" size={15} />
-								</button>
-							</div>
+							<SearchSelect
+								value={customer}
+								onChange={setCustomer}
+								options={customers}
+								placeholder="Search customers…"
+								onCreate={() => setQuickCreate('customer')}
+								createLabel="New customer"
+							/>
 						</Field>
 						<Field label="Order date">
 							<TextInput type="date" value={orderDate} onChange={setOrderDate} />
@@ -201,7 +203,7 @@ export function NewSalesOrder() {
 							<TextInput type="date" value={deliveryDate} onChange={setDeliveryDate} />
 						</Field>
 						<Field label="Currency" required>
-							<SelectInput value={currency} onChange={setCurrency} options={(ctx?.currencies ?? []).map((c) => ({ value: c }))} allowEmpty />
+							<SearchSelect value={currency} onChange={setCurrency} options={(ctx?.currencies ?? []).map((c) => ({ value: c }))} placeholder="Search currencies…" />
 						</Field>
 						<Field
 							label="Exchange rate"
@@ -225,7 +227,7 @@ export function NewSalesOrder() {
 							/>
 						</Field>
 						<Field label="Incoterm">
-							<SelectInput value={incoterm} onChange={setIncoterm} options={(ctx?.incoterms ?? []).map((i) => ({ value: i }))} allowEmpty />
+							<SearchSelect value={incoterm} onChange={setIncoterm} options={(ctx?.incoterms ?? []).map((i) => ({ value: i }))} placeholder="Search incoterms…" />
 						</Field>
 						<Field label="Named port / place" hint="Pick a port or type any place">
 							<TextInput value={namedPlace} onChange={setNamedPlace} listId="ef-ports" placeholder="e.g. Jebel Ali" />
@@ -254,7 +256,7 @@ export function NewSalesOrder() {
 					</div>
 					{rows.map((r, i) => (
 						<div className="reqrow" key={i} style={{ gridTemplateColumns: '2fr 110px 80px 130px 130px 34px' }}>
-							<SelectInput value={r.item_code} onChange={(v) => void onPickItem(i, v)} options={items} allowEmpty />
+							<SearchSelect value={r.item_code} onChange={(v) => void onPickItem(i, v)} options={items} placeholder="Search items…" onCreate={() => setQuickCreate('item')} createLabel="New item master" />
 							<TextInput type="number" value={r.qty} onChange={(v) => setRow(i, { qty: v })} />
 							<span className="dim" style={{ alignSelf: 'center' }}>{r.uom || '—'}</span>
 							<TextInput type="number" value={r.rate} onChange={(v) => setRow(i, { rate: v })} />

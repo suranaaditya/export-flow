@@ -1,16 +1,23 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFrappeGetCall, useFrappePostCall } from 'frappe-react-sdk';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
-import { CheckInput, Field, SelectInput, TextArea, TextInput } from '@/components/form';
+import { MasterModal } from '@/components/MasterModal';
+import { CheckInput, Field, SearchSelect, TextArea, TextInput } from '@/components/form';
 import { Card, CHead, EmptyMsg, Facts } from '@/components/ui';
 import {
 	API,
 	parseServerError,
 	type NewPOContext,
+	type POTotals,
 	type SOProcurement,
 } from '@/lib/api';
 import { fmtMoney } from '@/lib/format';
+import { GRADE_OPTIONS, MASTERS, PORT_MODES, type OptionSource } from '@/lib/masters';
+
+const SUPPLIER_DEF = MASTERS.find((m) => m.doctype === 'Supplier')!;
+const ITEM_DEF = MASTERS.find((m) => m.doctype === 'Item')!;
+const TC_DEF = MASTERS.find((m) => m.doctype === 'Terms and Conditions')!;
 
 /** A PO line — SO-linked rows carry the deal references, free rows don't. */
 interface PORow {
@@ -24,7 +31,14 @@ interface PORow {
 	max_qty: number | null;
 }
 
+interface ChargeRow {
+	description: string;
+	account_head: string;
+	amount: string;
+}
+
 const GRID = '1.8fr 1fr 90px 70px 120px 120px 34px';
+const CHARGE_GRID = '1.6fr 1.6fr 130px 34px';
 
 function todayISO(): string {
 	const d = new Date();
@@ -44,9 +58,22 @@ export function NewPurchaseOrder() {
 	const [requiredBy, setRequiredBy] = useState('');
 	const [tcName, setTcName] = useState('');
 	const [terms, setTerms] = useState('');
+	const [taxesTemplate, setTaxesTemplate] = useState('');
+	const [taxDefaulted, setTaxDefaulted] = useState(false);
+	const [charges, setCharges] = useState<ChargeRow[]>([]);
 	const [rows, setRows] = useState<PORow[]>([]);
 	const [soPick, setSoPick] = useState(searchParams.get('so') ?? '');
 	const [err, setErr] = useState<string | null>(null);
+	const [quickCreate, setQuickCreate] = useState<'supplier' | 'item' | 'terms' | null>(null);
+	const [preview, setPreview] = useState<POTotals | null>(null);
+
+	// default the taxes template once the context arrives
+	useEffect(() => {
+		if (!ctx || taxDefaulted) return;
+		const def = ctx.taxes_templates.find((t) => t.is_default);
+		if (def) setTaxesTemplate(def.name);
+		setTaxDefaulted(true);
+	}, [ctx, taxDefaulted]);
 
 	// lines of the picked SO, to pull into the order
 	const soLines = useFrappeGetCall<{ message: SOProcurement }>(
@@ -58,9 +85,64 @@ export function NewPurchaseOrder() {
 	const { call: fetchItemInfo } = useFrappePostCall<{ message: { stock_uom: string; item_name: string } }>(
 		API.itemInfo,
 	);
+	const { call: previewPo } = useFrappePostCall<{ message: POTotals }>(API.previewPo);
 	const { call: createPo, loading: saving } = useFrappePostCall<{
 		message: { name: string; docstatus: number };
 	}>(API.createPoDraft);
+
+	function buildPayload(submit: boolean) {
+		return {
+			supplier,
+			transaction_date: orderDate,
+			schedule_date: requiredBy || null,
+			merchant_export_scheme: mes ? 1 : 0,
+			taxes_template: taxesTemplate || null,
+			extra_charges: charges
+				.filter((c) => c.account_head && Number(c.amount) > 0)
+				.map((c) => ({
+					description: c.description || c.account_head,
+					account_head: c.account_head,
+					amount: Number(c.amount),
+				})),
+			tc_name: tcName || null,
+			terms,
+			submit: submit ? 1 : 0,
+			items: rows.map((r) => ({
+				item_code: r.item_code,
+				qty: Number(r.qty),
+				rate: Number(r.rate),
+				sales_order: r.sales_order,
+				so_detail: r.so_detail,
+			})),
+		};
+	}
+
+	// live tax preview through the real ERPNext engine, debounced
+	const previewKey = JSON.stringify({
+		supplier,
+		taxesTemplate,
+		charges,
+		rows: rows.map((r) => [r.item_code, r.qty, r.rate]),
+	});
+	const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+	useEffect(() => {
+		if (previewTimer.current) clearTimeout(previewTimer.current);
+		const complete =
+			supplier && rows.length > 0 && rows.every((r) => Number(r.qty) > 0 && Number(r.rate) > 0);
+		if (!complete) {
+			setPreview(null);
+			return;
+		}
+		previewTimer.current = setTimeout(() => {
+			previewPo({ podata: buildPayload(false) })
+				.then((res) => setPreview(res.message))
+				.catch(() => setPreview(null));
+		}, 600);
+		return () => {
+			if (previewTimer.current) clearTimeout(previewTimer.current);
+		};
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [previewKey]);
 
 	function onSupplier(v: string) {
 		setSupplier(v);
@@ -105,17 +187,19 @@ export function NewPurchaseOrder() {
 	async function addFreeRow(itemCode: string) {
 		if (!itemCode) return;
 		const listed = ctx?.items.find((i) => i.name === itemCode);
-		const row: PORow = {
-			item_code: itemCode,
-			item_name: listed?.item_name ?? itemCode,
-			qty: '',
-			uom: listed?.stock_uom ?? '',
-			rate: '',
-			sales_order: null,
-			so_detail: null,
-			max_qty: null,
-		};
-		setRows((rs) => [...rs, row]);
+		setRows((rs) => [
+			...rs,
+			{
+				item_code: itemCode,
+				item_name: listed?.item_name ?? itemCode,
+				qty: '',
+				uom: listed?.stock_uom ?? '',
+				rate: '',
+				sales_order: null,
+				so_detail: null,
+				max_qty: null,
+			},
+		]);
 		if (!listed) {
 			try {
 				const info = (await fetchItemInfo({ item_code: itemCode })).message;
@@ -132,8 +216,10 @@ export function NewPurchaseOrder() {
 
 	const setRow = (i: number, patch: Partial<PORow>) =>
 		setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+	const setCharge = (i: number, patch: Partial<ChargeRow>) =>
+		setCharges((cs) => cs.map((c, idx) => (idx === i ? { ...c, ...patch } : c)));
 
-	const total = useMemo(
+	const subtotal = useMemo(
 		() => rows.reduce((sum, r) => sum + (Number(r.qty) || 0) * (Number(r.rate) || 0), 0),
 		[rows],
 	);
@@ -148,26 +234,13 @@ export function NewPurchaseOrder() {
 				return setErr(`Row ${i + 1}: only ${r.max_qty} remains unordered on ${r.sales_order}.`);
 			if (!r.rate || Number(r.rate) <= 0) return setErr(`Row ${i + 1}: buying rate is required.`);
 		}
+		for (const [i, c] of charges.entries()) {
+			if ((c.amount && Number(c.amount) > 0) !== !!c.account_head)
+				return setErr(`Charge ${i + 1}: needs both an account and an amount.`);
+		}
 		setErr(null);
 		try {
-			const result = await createPo({
-				podata: {
-					supplier,
-					transaction_date: orderDate,
-					schedule_date: requiredBy || null,
-					merchant_export_scheme: mes ? 1 : 0,
-					tc_name: tcName || null,
-					terms,
-					submit: submit ? 1 : 0,
-					items: rows.map((r) => ({
-						item_code: r.item_code,
-						qty: Number(r.qty),
-						rate: Number(r.rate),
-						sales_order: r.sales_order,
-						so_detail: r.so_detail,
-					})),
-				},
-			});
+			const result = await createPo({ podata: buildPayload(submit) });
 			navigate('/purchases/' + result.message.name);
 		} catch (e) {
 			setErr(parseServerError(e));
@@ -192,12 +265,27 @@ export function NewPurchaseOrder() {
 		);
 	}
 
-	const suppliers = (ctx?.suppliers ?? []).map((s) => ({ value: s.name, label: s.supplier_name }));
+	const masterOptions: Record<OptionSource, string[]> = {
+		currencies: [],
+		incoterms: [],
+		uoms: ctx?.uoms ?? [],
+		countries: ctx?.countries ?? [],
+		grades: GRADE_OPTIONS,
+		portModes: PORT_MODES,
+	};
+
+	const supplierOptions = (ctx?.suppliers ?? []).map((s) => ({ value: s.name, label: s.supplier_name }));
 	const soOptions = (ctx?.sales_orders ?? []).map((s) => ({
 		value: s.name,
-		label: `${s.name} · ${s.customer_name}`,
+		label: s.name,
+		sub: s.customer_name,
 	}));
-	const freeItems = (ctx?.items ?? []).map((i) => ({ value: i.name, label: i.item_name }));
+	const freeItems = (ctx?.items ?? []).map((i) => ({ value: i.name, label: i.item_name, sub: i.stock_uom }));
+	const accountOptions = (ctx?.accounts ?? []).map((a) => ({ value: a.name, label: a.account_name }));
+	const taxTemplateOptions = (ctx?.taxes_templates ?? []).map((t) => ({ value: t.name }));
+	const termsOptions = (ctx?.terms_templates ?? []).map((t) => ({ value: t }));
+
+	const totals = preview;
 
 	return (
 		<main className="tight">
@@ -215,14 +303,16 @@ export function NewPurchaseOrder() {
 					<CHead icon="cube" title="Purchase order" count={ctx?.company} />
 					<div className="formgrid">
 						<Field label="Supplier" required>
-							<SelectInput value={supplier} onChange={onSupplier} options={suppliers} allowEmpty />
+							<SearchSelect
+								value={supplier}
+								onChange={onSupplier}
+								options={supplierOptions}
+								onCreate={() => setQuickCreate('supplier')}
+								createLabel="New supplier"
+							/>
 						</Field>
 						<div style={{ paddingTop: 22 }}>
-							<CheckInput
-								checked={mes}
-								onChange={setMes}
-								label="Merchant export scheme (0.1% GST)"
-							/>
+							<CheckInput checked={mes} onChange={setMes} label="Merchant export scheme (0.1% GST)" />
 						</div>
 						<Field label="Order date">
 							<TextInput type="date" value={orderDate} onChange={setOrderDate} />
@@ -230,21 +320,9 @@ export function NewPurchaseOrder() {
 						<Field label="Required by" hint="Defaults to 15 days out">
 							<TextInput type="date" value={requiredBy} onChange={setRequiredBy} />
 						</Field>
-						<Field label="Terms template" hint="Manage templates in Settings">
-							<SelectInput
-								value={tcName}
-								onChange={(v) => void onTemplate(v)}
-								options={(ctx?.terms_templates ?? []).map((t) => ({ value: t }))}
-								allowEmpty
-							/>
-						</Field>
-						<div className="span2">
-							<Field label="Terms & conditions">
-								<TextArea value={terms} onChange={setTerms} rows={4} placeholder="Payment, delivery, quality and documentation conditions…" />
-							</Field>
-						</div>
 					</div>
 
+					{/* ---- items ---- */}
 					<div className="reqhead" style={{ borderTop: '1px solid var(--hairline)', gridTemplateColumns: GRID }}>
 						<span>Item</span>
 						<span>For SO</span>
@@ -255,10 +333,7 @@ export function NewPurchaseOrder() {
 						<span />
 					</div>
 					{rows.length === 0 && (
-						<EmptyMsg
-							title="No items yet"
-							text="Pull lines from a sales order below, or add a free item."
-						/>
+						<EmptyMsg title="No items yet" text="Pull lines from a sales order below, or add a free item." />
 					)}
 					{rows.map((r, i) => (
 						<div className="reqrow" key={`${r.item_code}-${r.so_detail ?? i}`} style={{ gridTemplateColumns: GRID }}>
@@ -295,22 +370,17 @@ export function NewPurchaseOrder() {
 						</div>
 					))}
 
-					<div style={{ padding: '12px 18px', borderTop: '1px solid var(--hairline)', display: 'grid', gap: 10 }}>
+					<div style={{ padding: '12px 18px', display: 'grid', gap: 10 }}>
 						<div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
 							<div className="field" style={{ minWidth: 260, flex: 1 }}>
 								<span className="flabel">Pull lines from a sales order</span>
-								<SelectInput value={soPick} onChange={setSoPick} options={soOptions} allowEmpty />
+								<SearchSelect value={soPick} onChange={setSoPick} options={soOptions} placeholder="Search sales orders…" />
 							</div>
 							{soPick &&
 								(pickableLines.length > 0 ? (
 									<div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
 										{pickableLines.map((l) => (
-											<button
-												type="button"
-												key={l.so_detail}
-												className="btn"
-												onClick={() => addSoLine(l.so_detail)}
-											>
+											<button type="button" key={l.so_detail} className="btn" onClick={() => addSoLine(l.so_detail)}>
 												<Icon name="plus" size={14} /> {l.item_name} · {l.remaining} {l.uom ?? ''}
 											</button>
 										))}
@@ -321,9 +391,86 @@ export function NewPurchaseOrder() {
 									</span>
 								))}
 						</div>
-						<div className="field" style={{ maxWidth: 320 }}>
+						<div className="field" style={{ maxWidth: 340 }}>
 							<span className="flabel">Add a free item (no SO link)</span>
-							<SelectInput value="" onChange={(v) => void addFreeRow(v)} options={freeItems} allowEmpty />
+							<SearchSelect
+								value=""
+								onChange={(v) => void addFreeRow(v)}
+								options={freeItems}
+								placeholder="Search items…"
+								onCreate={() => setQuickCreate('item')}
+								createLabel="New item master"
+							/>
+						</div>
+					</div>
+
+					{/* ---- taxes & charges (after items, per ERPNext) ---- */}
+					<div className="docgrp">Taxes &amp; charges</div>
+					<div className="formgrid" style={{ paddingBottom: 4 }}>
+						<Field label="Taxes template" hint="GST autofills from the item/HSN tax setup">
+							<SearchSelect
+								value={taxesTemplate}
+								onChange={setTaxesTemplate}
+								options={taxTemplateOptions}
+								placeholder="Search tax templates…"
+							/>
+						</Field>
+					</div>
+					{charges.length > 0 && (
+						<div className="reqhead" style={{ gridTemplateColumns: CHARGE_GRID }}>
+							<span>Charge</span>
+							<span>Expense account</span>
+							<span>Amount</span>
+							<span />
+						</div>
+					)}
+					{charges.map((c, i) => (
+						<div className="reqrow" key={i} style={{ gridTemplateColumns: CHARGE_GRID }}>
+							<TextInput value={c.description} onChange={(v) => setCharge(i, { description: v })} placeholder="e.g. Cartage to CFS" />
+							<SearchSelect
+								value={c.account_head}
+								onChange={(v) => setCharge(i, { account_head: v })}
+								options={accountOptions}
+								placeholder="Search accounts…"
+							/>
+							<TextInput type="number" value={c.amount} onChange={(v) => setCharge(i, { amount: v })} />
+							<button
+								type="button"
+								className="xbtn"
+								aria-label="Remove charge"
+								onClick={() => setCharges((cs) => cs.filter((_, idx) => idx !== i))}
+							>
+								<Icon name="close" size={14} />
+							</button>
+						</div>
+					))}
+					<div style={{ padding: '8px 18px 12px' }}>
+						<button
+							type="button"
+							className="btn"
+							onClick={() => setCharges((cs) => [...cs, { description: '', account_head: '', amount: '' }])}
+						>
+							<Icon name="plus" size={15} /> Add charge (cartage, freight…)
+						</button>
+					</div>
+
+					{/* ---- terms (after items & taxes, per ERPNext) ---- */}
+					<div className="docgrp">Terms &amp; conditions</div>
+					<div className="formgrid">
+						<Field label="Terms template" hint="Manage templates in Settings">
+							<SearchSelect
+								value={tcName}
+								onChange={(v) => void onTemplate(v)}
+								options={termsOptions}
+								placeholder="Search templates…"
+								onCreate={() => setQuickCreate('terms')}
+								createLabel="New terms template"
+							/>
+						</Field>
+						<div className="span2">
+							<Field label="Terms text">
+								<TextArea value={terms} onChange={setTerms} rows={4} placeholder="Payment, delivery, quality and documentation conditions…" />
+							</Field>
 						</div>
 					</div>
 
@@ -331,7 +478,7 @@ export function NewPurchaseOrder() {
 						{err && <span className="ferr">{err}</span>}
 						<span className="spacer" />
 						<span className="num" style={{ fontSize: 15 }}>
-							{fmtMoney(total, currency)}
+							{fmtMoney(totals?.grand_total ?? subtotal, currency)}
 						</span>
 						<button type="button" className="btn" disabled={saving} onClick={() => void onSave(false)}>
 							Save draft
@@ -344,15 +491,25 @@ export function NewPurchaseOrder() {
 				</Card>
 
 				<div className="stack">
-					<Card>
-						<CHead icon="banknote" title="Summary" />
+					<Card accent>
+						<CHead icon="banknote" title="Totals" count={totals ? 'computed' : undefined} />
 						<Facts
 							rows={[
-								{ k: 'Lines', v: String(rows.length), data: true },
-								{ k: 'Of which for SOs', v: String(rows.filter((r) => r.sales_order).length), data: true },
-								{ k: 'Order value', v: fmtMoney(total, currency), data: true },
+								{ k: 'Net total', v: fmtMoney(totals?.net_total ?? subtotal, currency), data: true },
+								...(totals?.taxes ?? []).map((tax) => ({
+									k: tax.rate ? `${tax.description} @ ${tax.rate}%` : tax.description,
+									v: fmtMoney(tax.tax_amount, currency),
+									data: true,
+								})),
+								{ k: 'Grand total', v: fmtMoney(totals?.grand_total ?? subtotal, currency), data: true },
 							]}
 						/>
+						{!totals && (
+							<div className="c2" style={{ padding: '10px 18px 14px' }}>
+								Taxes compute automatically once the supplier, items and rates are filled — using
+								the same engine as the ledger.
+							</div>
+						)}
 					</Card>
 					<Card>
 						<CHead icon="truck" title="Drop ship" />
@@ -366,6 +523,23 @@ export function NewPurchaseOrder() {
 					</Card>
 				</div>
 			</div>
+
+			{quickCreate !== null && (
+				<MasterModal
+					def={quickCreate === 'supplier' ? SUPPLIER_DEF : quickCreate === 'item' ? ITEM_DEF : TC_DEF}
+					options={masterOptions}
+					record={null}
+					onClose={() => setQuickCreate(null)}
+					onSaved={(name) => {
+						const which = quickCreate;
+						setQuickCreate(null);
+						void ctxResult.mutate();
+						if (which === 'supplier') onSupplier(name);
+						else if (which === 'item') void addFreeRow(name);
+						else void onTemplate(name);
+					}}
+				/>
+			)}
 
 			<footer>
 				<b>ExportFlow</b> · DUX Digitech

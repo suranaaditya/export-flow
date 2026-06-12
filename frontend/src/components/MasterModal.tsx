@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useFrappeCreateDoc, useFrappePostCall, useFrappeUpdateDoc } from 'frappe-react-sdk';
-import { CheckInput, Field, SelectInput, TextArea, TextInput } from '@/components/form';
+import { CheckInput, Field, SearchSelect, TextArea, TextInput } from '@/components/form';
 import { Modal } from '@/components/ui';
 import { parseServerError } from '@/lib/api';
 import type { MasterDef, OptionSource } from '@/lib/masters';
@@ -101,12 +101,11 @@ export function MasterModal({
 					if (f.type === 'select') {
 						return (
 							<Field key={f.key} label={f.label} hint={f.hint} required={f.required}>
-								<SelectInput
+								<SearchSelect
 									value={String(values[f.key] ?? '')}
 									disabled={disabled}
 									onChange={(v) => set(f.key, v)}
 									options={(f.options ? options[f.options] : []).map((o) => ({ value: o }))}
-									allowEmpty={!f.required}
 								/>
 							</Field>
 						);

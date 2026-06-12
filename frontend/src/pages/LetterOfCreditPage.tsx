@@ -9,7 +9,7 @@ import {
 } from 'frappe-react-sdk';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
-import { CheckInput, Field, SelectInput, TextArea, TextInput } from '@/components/form';
+import { CheckInput, Field, SearchSelect, SelectInput, TextArea, TextInput } from '@/components/form';
 import { Card, CHead, Facts, Tag } from '@/components/ui';
 import {
 	API,
@@ -427,11 +427,11 @@ export function LetterOfCreditPage() {
 					</div>
 					{reqs.map((r, i) => (
 						<div className="reqrow" key={i}>
-							<SelectInput
+							<SearchSelect
 								value={r.document_type}
 								onChange={(v) => setReq(i, 'document_type', v)}
 								options={docTypeOptions}
-								allowEmpty
+								placeholder="Document type…"
 							/>
 							<TextInput value={r.description} onChange={(v) => setReq(i, 'description', v)} placeholder="As worded in the LC" />
 							<TextInput type="number" value={r.originals} onChange={(v) => setReq(i, 'originals', v)} />

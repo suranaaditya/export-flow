@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useFrappeGetCall, useFrappeGetDocList, useFrappePostCall } from 'frappe-react-sdk';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
-import { SelectInput, TextInput } from '@/components/form';
+import { SearchSelect, TextInput } from '@/components/form';
 import { Card, CHead, EmptyMsg, Facts, LRow, Modal, Tag } from '@/components/ui';
 import {
 	API,
@@ -451,15 +451,14 @@ export function SalesOrderDetail() {
 									value={s.qty}
 									onChange={(v) => setLineSel(l.so_detail, { qty: v })}
 								/>
-								<SelectInput
+								<SearchSelect
 									value={s.supplier}
 									onChange={(v) => setLineSel(l.so_detail, { supplier: v })}
 									options={(suppliersResult.data ?? []).map((sup) => ({
 										value: sup.name,
 										label: sup.supplier_name,
 									}))}
-									allowEmpty
-								/>
+																	/>
 								<TextInput
 									type="number"
 									value={s.rate}

@@ -11,6 +11,8 @@ import {
 	urgencyLabel,
 	urgencyTone,
 	type PODetailData,
+	printPdfUrl,
+	printPreviewUrl,
 } from '@/lib/api';
 import { daysUntil, fmtDate, fmtDateLong, fmtMoney } from '@/lib/format';
 
@@ -131,6 +133,12 @@ export function PurchaseOrderDetail() {
 					</Tag>
 				</span>
 				<span className="spacer" />
+				<a className="btn" href={printPreviewUrl('Purchase Order', id, 'ExportFlow Purchase Order')} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
+					<Icon name="file-text" size={15} /> Print
+				</a>
+				<a className="btn" href={printPdfUrl('Purchase Order', id, 'ExportFlow Purchase Order')} style={{ textDecoration: 'none' }}>
+					<Icon name="download" size={15} /> PDF
+				</a>
 				{po.docstatus === 0 && (
 					<button className="btn primary" disabled={submitting} onClick={() => void onSubmitOrder()}>
 						<Icon name="check" size={15} /> {submitting ? 'Submitting…' : 'Submit order'}
@@ -195,6 +203,21 @@ export function PurchaseOrderDetail() {
 								))}
 							</tbody>
 						</table>
+					</Card>
+
+					<Card>
+						<CHead icon="banknote" title="Taxes & totals" count={detail.totals.taxes.length ? `${detail.totals.taxes.length} heads` : undefined} />
+						<Facts
+							rows={[
+								{ k: 'Net total', v: fmtMoney(detail.totals.net_total, po.currency), data: true },
+								...detail.totals.taxes.map((tax) => ({
+									k: tax.rate ? `${tax.description} @ ${tax.rate}%` : tax.description,
+									v: fmtMoney(tax.tax_amount, po.currency),
+									data: true,
+								})),
+								{ k: 'Grand total', v: fmtMoney(detail.totals.grand_total, po.currency), data: true },
+							]}
+						/>
 					</Card>
 
 					<Card>

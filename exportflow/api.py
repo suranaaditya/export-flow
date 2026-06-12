@@ -561,6 +561,20 @@ def get_new_po_context() -> dict:
 			order_by="name asc",
 			limit_page_length=100,
 		),
+		"taxes_templates": frappe.get_all(
+			"Purchase Taxes and Charges Template",
+			filters={"company": company, "disabled": 0},
+			fields=["name", "is_default"],
+			order_by="is_default desc, name asc",
+			limit_page_length=100,
+		),
+		"accounts": frappe.get_all(
+			"Account",
+			filters={"company": company, "is_group": 0, "root_type": "Expense"},
+			fields=["name", "account_name"],
+			order_by="account_name asc",
+			limit_page_length=500,
+		),
 		"sales_orders": frappe.get_all(
 			"Sales Order",
 			filters={"docstatus": 1, "status": ["!=", "Closed"]},
@@ -568,6 +582,11 @@ def get_new_po_context() -> dict:
 			order_by="transaction_date desc",
 			limit_page_length=100,
 		),
+		# option sources for the quick-create modals
+		"uoms": frappe.get_all(
+			"UOM", filters={"enabled": 1}, pluck="name", order_by="name asc", limit_page_length=300
+		),
+		"countries": frappe.get_all("Country", pluck="name", order_by="name asc", limit_page_length=300),
 	}
 
 
@@ -577,15 +596,10 @@ def get_terms_text(template: str) -> str:
 	return frappe.db.get_value("Terms and Conditions", template, "terms") or ""
 
 
-@frappe.whitelist()
-def create_purchase_order_draft(podata) -> dict:
-	"""Standalone PO form: full header (dates, terms, scheme) plus a mix of
-	SO-linked lines (drop-ship, validated against remaining qty) and free
-	lines. Buying happens in the company currency."""
-	frappe.has_permission("Purchase Order", "create", throw=True)
-	if isinstance(podata, str):
-		podata = json.loads(podata)
-
+def _build_po_doc(podata, validate_remaining: bool = True):
+	"""Construct the in-memory PO the standalone form describes: header,
+	mixed SO-linked/free rows, taxes template rows, and extra charge heads.
+	Shared by the live tax preview and the actual create."""
 	items = podata.get("items") or []
 	if not items:
 		frappe.throw(_("Add at least one item"))
@@ -595,12 +609,12 @@ def create_purchase_order_draft(podata) -> dict:
 	supplier = podata["supplier"]
 	schedule_date = podata.get("schedule_date") or frappe.utils.add_days(frappe.utils.nowdate(), 15)
 
-	# validate SO-linked rows against remaining quantity (locked)
 	linked_sos = sorted({row.get("sales_order") for row in items if row.get("sales_order")})
 	for so_name in linked_sos:
-		frappe.db.sql(
-			"SELECT name FROM `tabSales Order Item` WHERE parent = %s FOR UPDATE", (so_name,)
-		)
+		if validate_remaining:
+			frappe.db.sql(
+				"SELECT name FROM `tabSales Order Item` WHERE parent = %s FOR UPDATE", (so_name,)
+			)
 		if frappe.db.get_value("Sales Order", so_name, "docstatus") != 1:
 			frappe.throw(_("Sales Order {0} must be submitted first").format(so_name))
 
@@ -630,14 +644,15 @@ def create_purchase_order_draft(podata) -> dict:
 				frappe.throw(_("Row {0}: line reference does not belong to {1}").format(idx, row.get("sales_order")))
 			if so_row.item_code != row["item_code"]:
 				frappe.throw(_("Row {0}: item does not match the sales order line").format(idx))
-			ordered = flt(so_row.ordered_qty) / (flt(so_row.conversion_factor) or 1.0)
-			remaining = flt(so_row.qty) - ordered - _draft_po_qty(row["so_detail"])
-			if flt(row["qty"]) > remaining + 1e-6:
-				frappe.throw(
-					_("Row {0}: only {1} remains unordered on {2}").format(
-						idx, flt(remaining, 3), row["sales_order"]
+			if validate_remaining:
+				ordered = flt(so_row.ordered_qty) / (flt(so_row.conversion_factor) or 1.0)
+				remaining = flt(so_row.qty) - ordered - _draft_po_qty(row["so_detail"])
+				if flt(row["qty"]) > remaining + 1e-6:
+					frappe.throw(
+						_("Row {0}: only {1} remains unordered on {2}").format(
+							idx, flt(remaining, 3), row["sales_order"]
+						)
 					)
-				)
 			po_row.update(
 				{
 					"sales_order": row["sales_order"],
@@ -647,8 +662,40 @@ def create_purchase_order_draft(podata) -> dict:
 			)
 		po_rows.append(po_row)
 
+	# taxes: template rows first, then freeform charge heads (cartage etc.)
+	taxes = []
+	taxes_template = podata.get("taxes_template")
+	if taxes_template:
+		from erpnext.controllers.accounts_controller import get_taxes_and_charges
+
+		for tax in get_taxes_and_charges("Purchase Taxes and Charges Template", taxes_template) or []:
+			taxes.append(tax)
+	template_accounts = {t.get("account_head") for t in taxes}
+	for charge in podata.get("extra_charges") or []:
+		if not (charge.get("account_head") and flt(charge.get("amount"))):
+			continue
+		if charge["account_head"] in template_accounts:
+			# the engine maps actual amounts item-wise by account head — a
+			# percentage row sharing the account would silently compute zero
+			frappe.throw(
+				_("Charge '{0}': pick an account that is not already used by the taxes template").format(
+					charge.get("description") or charge["account_head"]
+				)
+			)
+		taxes.append(
+			{
+				# purchase taxes need the category/add-deduct pair as well
+				"category": "Total",
+				"add_deduct_tax": "Add",
+				"charge_type": "Actual",
+				"account_head": charge["account_head"],
+				"description": charge.get("description") or charge["account_head"],
+				"tax_amount": flt(charge["amount"]),
+			}
+		)
+
 	company = frappe.db.get_single_value("Global Defaults", "default_company")
-	po = frappe.get_doc(
+	return frappe.get_doc(
 		{
 			"doctype": "Purchase Order",
 			"supplier": supplier,
@@ -658,11 +705,62 @@ def create_purchase_order_draft(podata) -> dict:
 			"currency": frappe.db.get_value("Company", company, "default_currency"),
 			"conversion_rate": 1,
 			"merchant_export_scheme": 1 if podata.get("merchant_export_scheme") else 0,
+			"taxes_and_charges": taxes_template or None,
+			"taxes": taxes,
 			"tc_name": podata.get("tc_name") or None,
 			"terms": podata.get("terms"),
 			"items": po_rows,
 		}
 	)
+
+
+def _po_totals(po) -> dict:
+	return {
+		"net_total": flt(po.net_total),
+		"total_taxes_and_charges": flt(po.total_taxes_and_charges),
+		"grand_total": flt(po.grand_total),
+		"taxes": [
+			{
+				"description": tax.description,
+				"rate": flt(tax.rate),
+				"tax_amount": flt(tax.base_tax_amount_after_discount_amount or tax.tax_amount),
+				"total": flt(tax.base_total or tax.total),
+			}
+			for tax in po.taxes
+		],
+	}
+
+
+@frappe.whitelist()
+def preview_purchase_order(podata) -> dict:
+	"""Compute taxes/totals for the form WITHOUT saving — runs the same
+	ERPNext + india_compliance validation pipeline a real save would, so
+	item/HSN GST autofills exactly like the desk."""
+	frappe.has_permission("Purchase Order", "create", throw=True)
+	if isinstance(podata, str):
+		podata = json.loads(podata)
+
+	po = _build_po_doc(podata, validate_remaining=False)
+	try:
+		po.run_method("validate")
+	except Exception:
+		# a preview must not die on incomplete data — fall back to the math
+		po.run_method("set_missing_values")
+		po.run_method("calculate_taxes_and_totals")
+	return _po_totals(po)
+
+
+@frappe.whitelist()
+def create_purchase_order_draft(podata) -> dict:
+	"""Standalone PO form: full header (dates, taxes, terms, scheme) plus a
+	mix of SO-linked lines (drop-ship, validated against remaining qty) and
+	free lines. Buying happens in the company currency."""
+	frappe.has_permission("Purchase Order", "create", throw=True)
+	if isinstance(podata, str):
+		podata = json.loads(podata)
+
+	po = _build_po_doc(podata, validate_remaining=True)
+	supplier = po.supplier
 	po.insert()
 
 	# stamp the negotiated supplier on the linked SO rows (drop-ship)
@@ -776,6 +874,7 @@ def get_po_detail(name: str) -> dict:
 			"tc_name": po.tc_name,
 			"terms": po.terms,
 		},
+		"totals": _po_totals(po),
 		"items": items,
 		"shipments": shipments,
 	}

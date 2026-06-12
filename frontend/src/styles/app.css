@@ -331,6 +331,24 @@ select.inp { appearance: none; -webkit-appearance: none; background-image: linea
 .xbtn { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--hairline); background: var(--surface-1); color: var(--fg-3); display: grid; place-items: center; cursor: pointer; transition: all .18s var(--ease) }
 .xbtn:hover { color: var(--err); border-color: var(--err) }
 
+/* searchable link picker */
+.swrap { position: relative; min-width: 0 }
+.swrap .sclear {
+	position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+	border: 0; background: none; color: var(--fg-3); font-size: 15px; cursor: pointer; line-height: 1;
+}
+.swrap .sclear:hover { color: var(--err) }
+.sdrop {
+	position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 70;
+	background: var(--surface-1); border: 1px solid var(--hairline); border-radius: 12px;
+	box-shadow: var(--shadow-pop), var(--inset-hi); max-height: 280px; overflow: auto;
+}
+.sdrop .opt { padding: 9px 13px; font-size: 13px; color: var(--fg-1); cursor: pointer; transition: background .18s var(--ease) }
+.sdrop .opt:hover { background: var(--row-hover) }
+.sdrop .opt .sub { font-size: 11.5px; color: var(--fg-3) }
+.sdrop .opt.mut { color: var(--fg-3); cursor: default }
+.sdrop .opt.new { color: var(--iris); font-weight: 500; border-top: 1px solid var(--hairline) }
+
 /* modal */
 .overlay {
 	position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 20px;

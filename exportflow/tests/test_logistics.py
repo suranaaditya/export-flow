@@ -11,6 +11,7 @@ from exportflow.api import (
 	create_purchase_order,
 	create_purchase_order_draft,
 	create_shipment,
+	preview_purchase_order,
 	get_shippable_lines,
 	get_so_procurement,
 	set_shipment_milestone,
@@ -288,31 +289,74 @@ class TestLogistics(IntegrationTestCase):
 			}
 		).insert(ignore_permissions=True)
 
-		result = create_purchase_order_draft(
+		# distinct accounts: the engine maps actual amounts by account head, so
+		# a charge sharing the levy's account would zero the percentage row
+		expense_accounts = frappe.get_all(
+			"Account",
+			filters={"company": self.company, "is_group": 0, "root_type": "Expense"},
+			pluck="name",
+			limit=2,
+		)
+		expense_account, cartage_account = expense_accounts[0], expense_accounts[1]
+		template = frappe.get_doc(
 			{
-				"supplier": supplier_one,
-				"schedule_date": add_days(nowdate(), 20),
-				"merchant_export_scheme": 1,
-				"tc_name": tc.name,
-				"terms": tc.terms,
-				"items": [
+				"doctype": "Purchase Taxes and Charges Template",
+				"title": f"_Test EF Taxes {sfx}",
+				"company": self.company,
+				"taxes": [
 					{
-						"item_code": so.items[0].item_code,
-						"qty": 70,
-						"rate": 9,
-						"sales_order": so.name,
-						"so_detail": so.items[0].name,
-					},
-					{"item_code": free_item, "qty": 5, "rate": 100},
+						"category": "Total",
+						"add_deduct_tax": "Add",
+						"charge_type": "On Net Total",
+						"account_head": expense_account,
+						"description": "Test levy 10%",
+						"rate": 10,
+					}
 				],
 			}
+		).insert(ignore_permissions=True)
+
+		podata = {
+			"supplier": supplier_one,
+			"schedule_date": add_days(nowdate(), 20),
+			"merchant_export_scheme": 1,
+			"tc_name": tc.name,
+			"terms": tc.terms,
+			"taxes_template": template.name,
+			"extra_charges": [
+				{"description": "Cartage to CFS", "account_head": cartage_account, "amount": 250}
+			],
+			"items": [
+				{
+					"item_code": so.items[0].item_code,
+					"qty": 70,
+					"rate": 9,
+					"sales_order": so.name,
+					"so_detail": so.items[0].name,
+				},
+				{"item_code": free_item, "qty": 5, "rate": 100},
+			],
+		}
+
+		# the live preview computes through the real engine without saving
+		preview = preview_purchase_order(podata)
+		self.assertEqual(flt(preview["net_total"]), 1130.0)  # 70×9 + 5×100
+		self.assertEqual(flt(preview["total_taxes_and_charges"]), 363.0)  # 113 levy + 250 cartage
+		self.assertEqual(flt(preview["grand_total"]), 1493.0)
+		self.assertFalse(
+			frappe.db.exists("Purchase Order", {"supplier": supplier_one, "docstatus": 0}),
+			"Preview must not persist anything",
 		)
+
+		result = create_purchase_order_draft(podata)
 		po = frappe.get_doc("Purchase Order", result["name"])
 		self.assertEqual(po.docstatus, 0)
 		self.assertEqual(po.tc_name, tc.name)
 		self.assertIn("COA per batch", po.terms)
 		self.assertTrue(po.merchant_export_scheme)
 		self.assertEqual(len(po.items), 2)
+		self.assertEqual(len(po.taxes), 2, "Template levy + cartage row")
+		self.assertEqual(flt(po.grand_total), 1493.0)
 
 		linked = next(r for r in po.items if r.sales_order_item)
 		free = next(r for r in po.items if not r.sales_order_item)

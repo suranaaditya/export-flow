@@ -54,6 +54,13 @@ GRANTS = {
 		"Export Accounts": [],
 		"Export Viewer": [],
 	},
+	"Purchase Taxes and Charges Template": {role: [] for role in EXPORT_ROLES},
+	"Account": {
+		"Export Admin": [],
+		"Export Operations": [],
+		"Export Accounts": [],
+		"Export Viewer": [],
+	},
 	"Terms and Conditions": {
 		"Export Admin": MASTER_PTYPES,
 		"Export Operations": MASTER_PTYPES,
@@ -72,6 +79,10 @@ GRANTS = {
 }
 
 
+# transactions the React app prints
+PRINTABLE = ("Purchase Order", "Sales Order")
+
+
 def setup_export_role_permissions():
 	for doctype, roles in GRANTS.items():
 		for role, extra_ptypes in roles.items():
@@ -81,6 +92,8 @@ def setup_export_role_permissions():
 			add_permission(doctype, role, permlevel=0)
 			for ptype in extra_ptypes:
 				update_permission_property(doctype, role, 0, ptype, 1, validate=False)
+			if doctype in PRINTABLE:
+				update_permission_property(doctype, role, 0, "print", 1, validate=False)
 	frappe.clear_cache()
 
 

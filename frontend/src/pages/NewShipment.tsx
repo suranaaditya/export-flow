@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useFrappeGetCall, useFrappeGetDocList, useFrappePostCall } from 'frappe-react-sdk';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
-import { Field, SelectInput, TextInput } from '@/components/form';
+import { Field, SearchSelect, SelectInput, TextInput } from '@/components/form';
 import { Card, CHead, EmptyMsg } from '@/components/ui';
 import { API, parseServerError, type ShippableLine } from '@/lib/api';
 
@@ -176,14 +176,14 @@ export function NewShipment() {
 					<CHead icon="ship" title="Shipment" />
 					<div className="formgrid">
 						<Field label="Customer" required>
-							<SelectInput
+							<SearchSelect
 								value={customer}
 								onChange={onCustomer}
 								options={(customers.data ?? []).map((c) => ({
 									value: c.name,
 									label: c.customer_name,
 								}))}
-								allowEmpty
+								placeholder="Search customers…"
 							/>
 						</Field>
 						<Field label="Mode">
@@ -194,26 +194,26 @@ export function NewShipment() {
 							/>
 						</Field>
 						<Field label="Incoterm">
-							<SelectInput
+							<SearchSelect
 								value={incoterm}
 								onChange={setIncoterm}
 								options={(incoterms.data ?? []).map((i) => ({ value: i.name }))}
-								allowEmpty
+								placeholder="Search incoterms…"
 							/>
 						</Field>
 						<Field label="CHA">
-							<SelectInput
+							<SearchSelect
 								value={cha}
 								onChange={setCha}
 								options={(chas.data ?? []).map((c) => ({ value: c.name }))}
-								allowEmpty
+								placeholder="Search CHAs…"
 							/>
 						</Field>
 						<Field label="Port of loading">
-							<SelectInput value={pol} onChange={setPol} options={portOptions} allowEmpty />
+							<SearchSelect value={pol} onChange={setPol} options={portOptions} placeholder="Search ports…" />
 						</Field>
 						<Field label="Port of discharge">
-							<SelectInput value={pod} onChange={setPod} options={portOptions} allowEmpty />
+							<SearchSelect value={pod} onChange={setPod} options={portOptions} placeholder="Search ports…" />
 						</Field>
 						<div className="span2">
 							<Field label="Final destination">
@@ -234,7 +234,7 @@ export function NewShipment() {
 							label="Letter of credit"
 							hint={customer ? 'LCs for this customer' : 'Pick the customer first'}
 						>
-							<SelectInput
+							<SearchSelect
 								value={lc}
 								onChange={setLc}
 								options={(lcs.data ?? []).map((r) => ({
@@ -242,7 +242,6 @@ export function NewShipment() {
 									label: r.lc_number || r.name,
 								}))}
 								disabled={!customer}
-								allowEmpty
 							/>
 						</Field>
 					</div>

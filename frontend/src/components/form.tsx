@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, ReactNode } from 'react';
 
 /**
@@ -84,6 +85,123 @@ export function SelectInput({
 				</option>
 			))}
 		</select>
+	);
+}
+
+export interface SearchOption {
+	value: string;
+	label?: string;
+	/** extra muted line under the label (e.g. city · country) */
+	sub?: string;
+}
+
+/** The standard link picker: searchable combobox with optional quick-create.
+ *  Type to filter, click to pick, × to clear. */
+export function SearchSelect({
+	value,
+	onChange,
+	options,
+	placeholder,
+	disabled,
+	onCreate,
+	createLabel,
+}: {
+	value: string;
+	onChange: (value: string) => void;
+	options: SearchOption[];
+	placeholder?: string;
+	disabled?: boolean;
+	onCreate?: () => void;
+	createLabel?: string;
+}) {
+	const [open, setOpen] = useState(false);
+	const [query, setQuery] = useState('');
+	const wrap = useRef<HTMLDivElement | null>(null);
+
+	useEffect(() => {
+		function onDocClick(e: MouseEvent) {
+			if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false);
+		}
+		document.addEventListener('mousedown', onDocClick);
+		return () => document.removeEventListener('mousedown', onDocClick);
+	}, []);
+
+	const selected = options.find((o) => o.value === value);
+	const q = query.trim().toLowerCase();
+	const filtered = (
+		q
+			? options.filter(
+					(o) =>
+						o.value.toLowerCase().includes(q) ||
+						(o.label ?? '').toLowerCase().includes(q) ||
+						(o.sub ?? '').toLowerCase().includes(q),
+				)
+			: options
+	).slice(0, 50);
+
+	return (
+		<div className="swrap" ref={wrap}>
+			<input
+				className="inp"
+				value={open ? query : (selected?.label ?? selected?.value ?? value ?? '')}
+				placeholder={placeholder ?? 'Search…'}
+				disabled={disabled}
+				onFocus={() => {
+					if (disabled) return;
+					setQuery('');
+					setOpen(true);
+				}}
+				onChange={(e) => {
+					setQuery(e.target.value);
+					if (!open) setOpen(true);
+				}}
+			/>
+			{value && !disabled && (
+				<button
+					type="button"
+					className="sclear"
+					aria-label="Clear"
+					onMouseDown={(e) => {
+						e.preventDefault();
+						onChange('');
+						setQuery('');
+					}}
+				>
+					×
+				</button>
+			)}
+			{open && !disabled && (
+				<div className="sdrop">
+					{filtered.length === 0 && <div className="opt mut">No matches</div>}
+					{filtered.map((o) => (
+						<div
+							className="opt"
+							key={o.value}
+							onMouseDown={(e) => {
+								e.preventDefault();
+								onChange(o.value);
+								setOpen(false);
+							}}
+						>
+							<div>{o.label ?? o.value}</div>
+							{o.sub && <div className="sub">{o.sub}</div>}
+						</div>
+					))}
+					{onCreate && (
+						<div
+							className="opt new"
+							onMouseDown={(e) => {
+								e.preventDefault();
+								setOpen(false);
+								onCreate();
+							}}
+						>
+							+ {createLabel ?? 'Create new'}
+						</div>
+					)}
+				</div>
+			)}
+		</div>
 	);
 }
 

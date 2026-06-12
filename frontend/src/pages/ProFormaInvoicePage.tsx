@@ -9,7 +9,7 @@ import {
 } from 'frappe-react-sdk';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
-import { Field, SelectInput, TextArea, TextInput } from '@/components/form';
+import { Field, SearchSelect, SelectInput, TextArea, TextInput } from '@/components/form';
 import { Card, CHead, Facts, Tag } from '@/components/ui';
 import {
 	API,
@@ -318,7 +318,7 @@ export function ProFormaInvoicePage() {
 							<TextInput type="date" value={pfiDate} onChange={setPfiDate} disabled={dis} />
 						</Field>
 						<Field label="Basis">
-							<SelectInput
+							<SearchSelect
 								value={basis}
 								onChange={setBasis}
 								options={[{ value: BASIS_PCT }, { value: BASIS_MANUAL }]}
