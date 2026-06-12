@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useFrappeGetCall } from 'frappe-react-sdk';
 import { useNavigate } from 'react-router-dom';
+import { Icon } from '@/components/Icon';
 import { TextInput } from '@/components/form';
 import { Card, CHead, EmptyMsg, Tag } from '@/components/ui';
 import { API, parseServerError, poTone, urgencyTone, type POListRow } from '@/lib/api';
@@ -58,6 +59,9 @@ export function Purchases() {
 				<div className="field" style={{ width: 280 }}>
 					<TextInput value={query} onChange={setQuery} placeholder="Search PO, supplier or SO" />
 				</div>
+				<button className="btn primary" onClick={() => navigate('/purchases/new')}>
+					<Icon name="plus" size={15} /> New purchase order
+				</button>
 			</div>
 
 			<Card accent>

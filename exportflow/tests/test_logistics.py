@@ -9,6 +9,7 @@ except ImportError:  # frappe < 16
 from exportflow.api import (
 	create_export_sales_order,
 	create_purchase_order,
+	create_purchase_order_draft,
 	create_shipment,
 	get_shippable_lines,
 	get_so_procurement,
@@ -271,6 +272,73 @@ class TestLogistics(IntegrationTestCase):
 
 		current = set_shipment_milestone(doc.name, rows[1].name, 0)
 		self.assertEqual(current, "Goods Dispatched")
+
+	def test_standalone_po_form(self):
+		"""The full PO form: header details + terms, SO-linked and free lines
+		mixed, drop-ship flags stamped, remaining enforced."""
+		so, _customer, supplier_one, _s2 = self.setup_deal(qty_a=100)
+		sfx = _suffix()
+		free_item = make_plain_item(f"_Test EF L Free Item {sfx}")
+		tc = frappe.get_doc(
+			{
+				"doctype": "Terms and Conditions",
+				"title": f"_Test EF Buying Terms {sfx}",
+				"buying": 1,
+				"terms": "Material must ship with COA per batch.",
+			}
+		).insert(ignore_permissions=True)
+
+		result = create_purchase_order_draft(
+			{
+				"supplier": supplier_one,
+				"schedule_date": add_days(nowdate(), 20),
+				"merchant_export_scheme": 1,
+				"tc_name": tc.name,
+				"terms": tc.terms,
+				"items": [
+					{
+						"item_code": so.items[0].item_code,
+						"qty": 70,
+						"rate": 9,
+						"sales_order": so.name,
+						"so_detail": so.items[0].name,
+					},
+					{"item_code": free_item, "qty": 5, "rate": 100},
+				],
+			}
+		)
+		po = frappe.get_doc("Purchase Order", result["name"])
+		self.assertEqual(po.docstatus, 0)
+		self.assertEqual(po.tc_name, tc.name)
+		self.assertIn("COA per batch", po.terms)
+		self.assertTrue(po.merchant_export_scheme)
+		self.assertEqual(len(po.items), 2)
+
+		linked = next(r for r in po.items if r.sales_order_item)
+		free = next(r for r in po.items if not r.sales_order_item)
+		self.assertEqual(linked.sales_order, so.name)
+		self.assertTrue(linked.delivered_by_supplier)
+		self.assertFalse(free.delivered_by_supplier)
+
+		so.reload()
+		self.assertEqual(so.items[0].supplier, supplier_one, "Drop-ship supplier stamped on the SO line")
+
+		# remaining enforcement counts the draft just created (70 of 100)
+		with self.assertRaises(frappe.ValidationError):
+			create_purchase_order_draft(
+				{
+					"supplier": supplier_one,
+					"items": [
+						{
+							"item_code": so.items[0].item_code,
+							"qty": 40,
+							"rate": 9,
+							"sales_order": so.name,
+							"so_detail": so.items[0].name,
+						}
+					],
+				}
+			)
 
 	def test_shipment_rejects_foreign_so_line(self):
 		so, customer, _s1, _s2 = self.setup_deal(qty_a=10)

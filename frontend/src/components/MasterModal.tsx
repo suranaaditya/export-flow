@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useFrappeCreateDoc, useFrappePostCall, useFrappeUpdateDoc } from 'frappe-react-sdk';
-import { CheckInput, Field, SelectInput, TextInput } from '@/components/form';
+import { CheckInput, Field, SelectInput, TextArea, TextInput } from '@/components/form';
 import { Modal } from '@/components/ui';
 import { parseServerError } from '@/lib/api';
 import type { MasterDef, OptionSource } from '@/lib/masters';
@@ -81,6 +81,20 @@ export function MasterModal({
 						return (
 							<div className="span2" key={f.key}>
 								<CheckInput checked={!!values[f.key]} disabled={disabled} onChange={(v) => set(f.key, v)} label={f.label} />
+							</div>
+						);
+					}
+					if (f.type === 'textarea') {
+						return (
+							<div className="span2" key={f.key}>
+								<Field label={f.label} hint={f.hint} required={f.required}>
+									<TextArea
+										value={String(values[f.key] ?? '')}
+										disabled={disabled}
+										rows={5}
+										onChange={(v) => set(f.key, v)}
+									/>
+								</Field>
 							</div>
 						);
 					}

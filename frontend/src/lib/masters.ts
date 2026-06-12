@@ -8,7 +8,7 @@ export interface MasterField {
 	key: string;
 	label: string;
 	required?: boolean;
-	type: 'text' | 'select' | 'check';
+	type: 'text' | 'select' | 'check' | 'textarea';
 	options?: OptionSource;
 	hint?: string;
 	mono?: boolean;
@@ -104,6 +104,24 @@ export const MASTERS: MasterDef[] = [
 		listFields: ['name', 'uom_name'],
 		columns: [{ key: 'uom_name', label: 'Unit' }],
 		fields: [{ key: 'uom_name', label: 'Unit name', type: 'text', required: true, createOnly: true }],
+	},
+	{
+		doctype: 'Terms and Conditions',
+		title: 'Terms & conditions',
+		singular: 'terms template',
+		icon: 'file-text',
+		listFields: ['name', 'buying', 'selling', 'disabled'],
+		columns: [
+			{ key: 'name', label: 'Template' },
+			{ key: 'buying', label: 'Buying', dim: true },
+			{ key: 'selling', label: 'Selling', dim: true },
+		],
+		fields: [
+			{ key: 'title', label: 'Template name', type: 'text', required: true, createOnly: true },
+			{ key: 'terms', label: 'Terms text', type: 'textarea' },
+			{ key: 'buying', label: 'Use for purchasing', type: 'check' },
+			{ key: 'selling', label: 'Use for selling', type: 'check' },
+		],
 	},
 	{
 		doctype: 'Port',

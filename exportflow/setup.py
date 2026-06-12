@@ -54,6 +54,12 @@ GRANTS = {
 		"Export Accounts": [],
 		"Export Viewer": [],
 	},
+	"Terms and Conditions": {
+		"Export Admin": MASTER_PTYPES,
+		"Export Operations": MASTER_PTYPES,
+		"Export Accounts": [],
+		"Export Viewer": [],
+	},
 	"Incoterm": {role: [] for role in EXPORT_ROLES},
 	"Currency": {role: [] for role in EXPORT_ROLES},
 	"Country": {role: [] for role in EXPORT_ROLES},

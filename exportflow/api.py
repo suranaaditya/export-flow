@@ -533,6 +533,160 @@ def create_purchase_order(sales_order: str, selections) -> dict:
 
 
 @frappe.whitelist()
+def get_new_po_context() -> dict:
+	"""Everything the standalone PO form needs in one round trip."""
+	frappe.has_permission("Purchase Order", "create", throw=True)
+	company = frappe.db.get_single_value("Global Defaults", "default_company")
+	return {
+		"company": company,
+		"company_currency": frappe.db.get_value("Company", company, "default_currency"),
+		"suppliers": frappe.get_all(
+			"Supplier",
+			filters={"disabled": 0},
+			fields=["name", "supplier_name", "default_merchant_export_scheme"],
+			order_by="modified desc",
+			limit_page_length=200,
+		),
+		"items": frappe.get_all(
+			"Item",
+			filters={"disabled": 0, "is_purchase_item": 1},
+			fields=["name", "item_name", "stock_uom"],
+			order_by="modified desc",
+			limit_page_length=500,
+		),
+		"terms_templates": frappe.get_all(
+			"Terms and Conditions",
+			filters={"disabled": 0, "buying": 1},
+			pluck="name",
+			order_by="name asc",
+			limit_page_length=100,
+		),
+		"sales_orders": frappe.get_all(
+			"Sales Order",
+			filters={"docstatus": 1, "status": ["!=", "Closed"]},
+			fields=["name", "customer_name"],
+			order_by="transaction_date desc",
+			limit_page_length=100,
+		),
+	}
+
+
+@frappe.whitelist()
+def get_terms_text(template: str) -> str:
+	frappe.has_permission("Terms and Conditions", "read", throw=True)
+	return frappe.db.get_value("Terms and Conditions", template, "terms") or ""
+
+
+@frappe.whitelist()
+def create_purchase_order_draft(podata) -> dict:
+	"""Standalone PO form: full header (dates, terms, scheme) plus a mix of
+	SO-linked lines (drop-ship, validated against remaining qty) and free
+	lines. Buying happens in the company currency."""
+	frappe.has_permission("Purchase Order", "create", throw=True)
+	if isinstance(podata, str):
+		podata = json.loads(podata)
+
+	items = podata.get("items") or []
+	if not items:
+		frappe.throw(_("Add at least one item"))
+	if not podata.get("supplier"):
+		frappe.throw(_("Supplier is required"))
+
+	supplier = podata["supplier"]
+	schedule_date = podata.get("schedule_date") or frappe.utils.add_days(frappe.utils.nowdate(), 15)
+
+	# validate SO-linked rows against remaining quantity (locked)
+	linked_sos = sorted({row.get("sales_order") for row in items if row.get("sales_order")})
+	for so_name in linked_sos:
+		frappe.db.sql(
+			"SELECT name FROM `tabSales Order Item` WHERE parent = %s FOR UPDATE", (so_name,)
+		)
+		if frappe.db.get_value("Sales Order", so_name, "docstatus") != 1:
+			frappe.throw(_("Sales Order {0} must be submitted first").format(so_name))
+
+	po_rows = []
+	for idx, row in enumerate(items, start=1):
+		if not row.get("item_code"):
+			frappe.throw(_("Row {0}: item is required").format(idx))
+		if flt(row.get("qty")) <= 0:
+			frappe.throw(_("Row {0}: quantity must be greater than zero").format(idx))
+		if flt(row.get("rate")) <= 0:
+			frappe.throw(_("Row {0}: rate is required").format(idx))
+
+		po_row = {
+			"item_code": row["item_code"],
+			"qty": flt(row["qty"]),
+			"rate": flt(row["rate"]),
+			"schedule_date": schedule_date,
+		}
+		if row.get("so_detail"):
+			so_row = frappe.db.get_value(
+				"Sales Order Item",
+				row["so_detail"],
+				["parent", "item_code", "qty", "ordered_qty", "conversion_factor"],
+				as_dict=True,
+			)
+			if not so_row or so_row.parent != row.get("sales_order"):
+				frappe.throw(_("Row {0}: line reference does not belong to {1}").format(idx, row.get("sales_order")))
+			if so_row.item_code != row["item_code"]:
+				frappe.throw(_("Row {0}: item does not match the sales order line").format(idx))
+			ordered = flt(so_row.ordered_qty) / (flt(so_row.conversion_factor) or 1.0)
+			remaining = flt(so_row.qty) - ordered - _draft_po_qty(row["so_detail"])
+			if flt(row["qty"]) > remaining + 1e-6:
+				frappe.throw(
+					_("Row {0}: only {1} remains unordered on {2}").format(
+						idx, flt(remaining, 3), row["sales_order"]
+					)
+				)
+			po_row.update(
+				{
+					"sales_order": row["sales_order"],
+					"sales_order_item": row["so_detail"],
+					"delivered_by_supplier": 1,
+				}
+			)
+		po_rows.append(po_row)
+
+	company = frappe.db.get_single_value("Global Defaults", "default_company")
+	po = frappe.get_doc(
+		{
+			"doctype": "Purchase Order",
+			"supplier": supplier,
+			"company": company,
+			"transaction_date": podata.get("transaction_date") or frappe.utils.nowdate(),
+			"schedule_date": schedule_date,
+			"currency": frappe.db.get_value("Company", company, "default_currency"),
+			"conversion_rate": 1,
+			"merchant_export_scheme": 1 if podata.get("merchant_export_scheme") else 0,
+			"tc_name": podata.get("tc_name") or None,
+			"terms": podata.get("terms"),
+			"items": po_rows,
+		}
+	)
+	po.insert()
+
+	# stamp the negotiated supplier on the linked SO rows (drop-ship)
+	for row in po.items:
+		if row.sales_order_item:
+			current = frappe.db.get_value(
+				"Sales Order Item", row.sales_order_item, ["supplier", "delivered_by_supplier"], as_dict=True
+			)
+			if current.supplier != supplier or not current.delivered_by_supplier:
+				frappe.db.set_value(
+					"Sales Order Item",
+					row.sales_order_item,
+					{"supplier": supplier, "delivered_by_supplier": 1},
+					update_modified=False,
+				)
+
+	if frappe.utils.cint(podata.get("submit")):
+		frappe.has_permission("Purchase Order", "submit", throw=True)
+		po.submit()
+
+	return {"name": po.name, "docstatus": po.docstatus}
+
+
+@frappe.whitelist()
 def submit_purchase_order(name: str) -> dict:
 	doc = frappe.get_doc("Purchase Order", name)
 	doc.check_permission("submit")
@@ -619,6 +773,8 @@ def get_po_detail(name: str) -> dict:
 			"supplier_invoice_no": po.supplier_invoice_no,
 			"supplier_invoice_date": po.supplier_invoice_date,
 			"gst_export_deadline": po.gst_export_deadline,
+			"tc_name": po.tc_name,
+			"terms": po.terms,
 		},
 		"items": items,
 		"shipments": shipments,

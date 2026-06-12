@@ -106,7 +106,19 @@ export const API = {
 	shipments: 'exportflow.api.get_shipments',
 	shipmentDetail: 'exportflow.api.get_shipment_detail',
 	setMilestone: 'exportflow.api.set_shipment_milestone',
+	newPoContext: 'exportflow.api.get_new_po_context',
+	termsText: 'exportflow.api.get_terms_text',
+	createPoDraft: 'exportflow.api.create_purchase_order_draft',
 } as const;
+
+export interface NewPOContext {
+	company: string;
+	company_currency: string;
+	suppliers: { name: string; supplier_name: string; default_merchant_export_scheme: 0 | 1 }[];
+	items: { name: string; item_name: string; stock_uom: string }[];
+	terms_templates: string[];
+	sales_orders: { name: string; customer_name: string }[];
+}
 
 // ---- Phase 3: procurement & logistics shapes (exportflow.api) ----
 
@@ -157,7 +169,11 @@ export interface POListRow {
 }
 
 export interface PODetailData {
-	po: Omit<POListRow, 'sales_orders'> & { schedule_date: string | null };
+	po: Omit<POListRow, 'sales_orders'> & {
+		schedule_date: string | null;
+		tc_name: string | null;
+		terms: string | null;
+	};
 	items: {
 		name: string;
 		item_code: string;
