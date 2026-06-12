@@ -6,7 +6,10 @@ import { ThemeProvider } from '@/lib/theme';
 import { Compliance } from '@/pages/Compliance';
 import { Dashboard } from '@/pages/Dashboard';
 import { Documents } from '@/pages/Documents';
+import { LetterOfCreditPage } from '@/pages/LetterOfCreditPage';
+import { ProFormaInvoicePage } from '@/pages/ProFormaInvoicePage';
 import { Purchases } from '@/pages/Purchases';
+import { SalesOrderDetail } from '@/pages/SalesOrderDetail';
 import { SalesOrders } from '@/pages/SalesOrders';
 import { Shipments } from '@/pages/Shipments';
 
@@ -39,6 +42,11 @@ export default function App() {
 							<Route element={<AppShell />}>
 								<Route index element={<Dashboard />} />
 								<Route path="sales-orders" element={<SalesOrders />} />
+								<Route path="sales-orders/:id" element={<SalesOrderDetail />} />
+								<Route path="pfi/new" element={<ProFormaInvoicePage />} />
+								<Route path="pfi/:name" element={<ProFormaInvoicePage />} />
+								<Route path="lc/new" element={<LetterOfCreditPage />} />
+								<Route path="lc/:name" element={<LetterOfCreditPage />} />
 								<Route path="purchases" element={<Purchases />} />
 								<Route path="shipments" element={<Shipments />} />
 								<Route path="documents" element={<Documents />} />

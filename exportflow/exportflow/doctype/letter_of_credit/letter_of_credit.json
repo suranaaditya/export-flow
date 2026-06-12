@@ -1,0 +1,321 @@
+{
+ "actions": [],
+ "autoname": "naming_series:",
+ "creation": "2026-06-11 18:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "sales_order",
+  "customer",
+  "customer_name",
+  "cb_lc_head",
+  "company",
+  "lc_number",
+  "status",
+  "section_banks",
+  "issuing_bank",
+  "advising_bank",
+  "cb_lc_banks",
+  "negotiating_bank",
+  "section_amount",
+  "amount",
+  "currency",
+  "cb_lc_amount",
+  "tolerance_percentage",
+  "section_dates",
+  "issue_date",
+  "expiry_date",
+  "latest_shipment_date",
+  "cb_lc_dates",
+  "place_of_expiry",
+  "presentation_period_days",
+  "alert_thresholds",
+  "section_flags",
+  "partial_shipments_allowed",
+  "cb_lc_flags",
+  "transhipment_allowed",
+  "section_requirements",
+  "document_requirements",
+  "section_notes",
+  "notes"
+ ],
+ "fields": [
+  {
+   "default": "LC-.YY.-.####",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "hidden": 1,
+   "label": "Series",
+   "no_copy": 1,
+   "options": "LC-.YY.-.####",
+   "print_hide": 1
+  },
+  {
+   "fieldname": "sales_order",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Sales Order",
+   "options": "Sales Order",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fetch_from": "sales_order.customer",
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Customer",
+   "options": "Customer",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "customer.customer_name",
+   "fieldname": "customer_name",
+   "fieldtype": "Data",
+   "label": "Customer Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "cb_lc_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fetch_from": "sales_order.company",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company",
+   "read_only": 1
+  },
+  {
+   "fieldname": "lc_number",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "LC Number",
+   "reqd": 1
+  },
+  {
+   "default": "Received",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "no_copy": 1,
+   "options": "Received\nActive\nDocuments Presented\nNegotiated/Paid\nClosed\nExpired"
+  },
+  {
+   "fieldname": "section_banks",
+   "fieldtype": "Section Break",
+   "label": "Banks"
+  },
+  {
+   "fieldname": "issuing_bank",
+   "fieldtype": "Data",
+   "label": "Issuing Bank"
+  },
+  {
+   "fieldname": "advising_bank",
+   "fieldtype": "Data",
+   "label": "Advising Bank"
+  },
+  {
+   "fieldname": "cb_lc_banks",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "negotiating_bank",
+   "fieldtype": "Data",
+   "label": "Negotiating Bank"
+  },
+  {
+   "fieldname": "section_amount",
+   "fieldtype": "Section Break",
+   "label": "Amount"
+  },
+  {
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Amount",
+   "options": "currency",
+   "reqd": 1
+  },
+  {
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "label": "Currency",
+   "options": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "cb_lc_amount",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "e.g. 10 for ±10%",
+   "fieldname": "tolerance_percentage",
+   "fieldtype": "Percent",
+   "label": "Tolerance %"
+  },
+  {
+   "fieldname": "section_dates",
+   "fieldtype": "Section Break",
+   "label": "Dates"
+  },
+  {
+   "fieldname": "issue_date",
+   "fieldtype": "Date",
+   "label": "Issue Date"
+  },
+  {
+   "fieldname": "expiry_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Expiry Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "latest_shipment_date",
+   "fieldtype": "Date",
+   "label": "Latest Shipment Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "cb_lc_dates",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "place_of_expiry",
+   "fieldtype": "Data",
+   "label": "Place of Expiry"
+  },
+  {
+   "default": "21",
+   "description": "Days after B/L date to present documents to the bank",
+   "fieldname": "presentation_period_days",
+   "fieldtype": "Int",
+   "label": "Presentation Period (days)"
+  },
+  {
+   "default": "15,7,3",
+   "description": "Comma-separated days-before thresholds for shipment/expiry alerts",
+   "fieldname": "alert_thresholds",
+   "fieldtype": "Data",
+   "label": "Alert Thresholds"
+  },
+  {
+   "fieldname": "section_flags",
+   "fieldtype": "Section Break",
+   "label": "Terms"
+  },
+  {
+   "default": "0",
+   "fieldname": "partial_shipments_allowed",
+   "fieldtype": "Check",
+   "label": "Partial Shipments Allowed"
+  },
+  {
+   "fieldname": "cb_lc_flags",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "transhipment_allowed",
+   "fieldtype": "Check",
+   "label": "Transhipment Allowed"
+  },
+  {
+   "fieldname": "section_requirements",
+   "fieldtype": "Section Break",
+   "label": "Documents Required by the LC"
+  },
+  {
+   "description": "Seeds the shipment's banking checklist when a shipment is linked to this LC",
+   "fieldname": "document_requirements",
+   "fieldtype": "Table",
+   "label": "Document Requirements",
+   "options": "LC Document Requirement"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_notes",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-06-11 18:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ExportFlow",
+ "name": "Letter of Credit",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Export Admin",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Export Accounts",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Export Operations"
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Export Viewer"
+  }
+ ],
+ "search_fields": "lc_number,customer_name,sales_order",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "lc_number",
+ "track_changes": 1
+}

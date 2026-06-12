@@ -1,0 +1,288 @@
+{
+ "actions": [],
+ "autoname": "naming_series:",
+ "creation": "2026-06-11 18:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "sales_order",
+  "customer",
+  "customer_name",
+  "cb_pfi_head",
+  "company",
+  "pfi_date",
+  "status",
+  "was_sent",
+  "section_amounts",
+  "basis",
+  "percentage",
+  "cb_pfi_amounts",
+  "currency",
+  "conversion_rate",
+  "amount",
+  "paid_amount",
+  "section_details",
+  "stage_description",
+  "expected_payment_method",
+  "cb_pfi_details",
+  "bank_account",
+  "section_items",
+  "items",
+  "section_terms",
+  "terms"
+ ],
+ "fields": [
+  {
+   "default": "PFI-.YY.-.####",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "hidden": 1,
+   "label": "Series",
+   "no_copy": 1,
+   "options": "PFI-.YY.-.####",
+   "print_hide": 1
+  },
+  {
+   "fieldname": "sales_order",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Sales Order",
+   "options": "Sales Order",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fetch_from": "sales_order.customer",
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Customer",
+   "options": "Customer",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "customer.customer_name",
+   "fieldname": "customer_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Customer Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "cb_pfi_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fetch_from": "sales_order.company",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company",
+   "read_only": 1
+  },
+  {
+   "default": "Today",
+   "fieldname": "pfi_date",
+   "fieldtype": "Date",
+   "label": "Date",
+   "reqd": 1
+  },
+  {
+   "default": "Draft",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "no_copy": 1,
+   "options": "Draft\nSent\nPartially Paid\nPaid\nCancelled",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_amounts",
+   "fieldtype": "Section Break",
+   "label": "Amount"
+  },
+  {
+   "default": "Percentage of SO",
+   "fieldname": "basis",
+   "fieldtype": "Select",
+   "label": "Basis",
+   "options": "Percentage of SO\nManual amount",
+   "reqd": 1
+  },
+  {
+   "depends_on": "eval:doc.basis=='Percentage of SO'",
+   "fieldname": "percentage",
+   "fieldtype": "Percent",
+   "label": "Percentage of SO Value",
+   "mandatory_depends_on": "eval:doc.basis=='Percentage of SO'"
+  },
+  {
+   "fieldname": "cb_pfi_amounts",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "label": "Currency",
+   "options": "Currency",
+   "read_only": 1
+  },
+  {
+   "description": "Deal currency to company currency",
+   "fieldname": "conversion_rate",
+   "fieldtype": "Float",
+   "label": "Exchange Rate",
+   "precision": "9"
+  },
+  {
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Amount",
+   "mandatory_depends_on": "eval:doc.basis=='Manual amount'",
+   "options": "currency",
+   "read_only_depends_on": "eval:doc.basis=='Percentage of SO'"
+  },
+  {
+   "fieldname": "paid_amount",
+   "fieldtype": "Currency",
+   "label": "Received Amount",
+   "no_copy": 1,
+   "options": "currency",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "was_sent",
+   "fieldtype": "Check",
+   "hidden": 1,
+   "label": "Was Sent",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_details",
+   "fieldtype": "Section Break",
+   "label": "Stage & Payment"
+  },
+  {
+   "description": "e.g. 30% advance, balance against B/L copy",
+   "fieldname": "stage_description",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Stage Description"
+  },
+  {
+   "fieldname": "expected_payment_method",
+   "fieldtype": "Select",
+   "label": "Expected Payment Method",
+   "options": "\nWire Transfer\nLetter of Credit"
+  },
+  {
+   "fieldname": "cb_pfi_details",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Company bank account whose details print on the PFI",
+   "fieldname": "bank_account",
+   "fieldtype": "Link",
+   "label": "Bank Account (for remittance)",
+   "options": "Bank Account"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_items",
+   "fieldtype": "Section Break",
+   "label": "Items Covered"
+  },
+  {
+   "description": "Leave empty to cover all Sales Order items",
+   "fieldname": "items",
+   "fieldtype": "Table",
+   "label": "Items",
+   "options": "Pro Forma Invoice Item"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_terms",
+   "fieldtype": "Section Break",
+   "label": "Terms"
+  },
+  {
+   "fieldname": "terms",
+   "fieldtype": "Small Text",
+   "label": "Notes / Terms"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-06-11 18:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ExportFlow",
+ "name": "Pro Forma Invoice",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Export Admin",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Export Accounts",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Export Operations"
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Export Viewer"
+  }
+ ],
+ "search_fields": "customer_name,sales_order,stage_description",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "customer_name",
+ "track_changes": 1
+}

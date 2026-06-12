@@ -1,0 +1,153 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "field:document_type_name",
+ "creation": "2026-06-11 18:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "document_type_name",
+  "category",
+  "origin",
+  "cb_dt",
+  "responsible_party",
+  "attaches_to",
+  "has_expiry",
+  "section_print",
+  "default_print_format",
+  "notes"
+ ],
+ "fields": [
+  {
+   "fieldname": "document_type_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Document Type Name",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "category",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Category",
+   "options": "Commercial\nRegulatory\nQuality\nLogistics\nBanking\nCompany",
+   "reqd": 1
+  },
+  {
+   "description": "Generated = produced by ExportFlow; Tracked = produced elsewhere and tracked here",
+   "fieldname": "origin",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Origin",
+   "options": "Generated\nTracked",
+   "reqd": 1
+  },
+  {
+   "fieldname": "cb_dt",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "responsible_party",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Responsible Party",
+   "options": "Us\nCHA\nSupplier\nShipping Line/Airline\nBank\nAuthority\nCustomer"
+  },
+  {
+   "fieldname": "attaches_to",
+   "fieldtype": "Select",
+   "label": "Attaches To",
+   "options": "Company\nSales Order\nPurchase Order\nShipment\nBatch"
+  },
+  {
+   "default": "0",
+   "fieldname": "has_expiry",
+   "fieldtype": "Check",
+   "label": "Has Expiry"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_print",
+   "fieldtype": "Section Break",
+   "label": "Generation"
+  },
+  {
+   "depends_on": "eval:doc.origin=='Generated'",
+   "fieldname": "default_print_format",
+   "fieldtype": "Link",
+   "label": "Default Print Format",
+   "options": "Print Format"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-06-11 18:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ExportFlow",
+ "name": "Document Type",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Export Admin",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Export Operations"
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Export Accounts"
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Export Viewer"
+  }
+ ],
+ "quick_entry": 1,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

@@ -1,0 +1,65 @@
+{
+ "actions": [],
+ "creation": "2026-06-11 18:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "document_type",
+  "description",
+  "originals",
+  "copies",
+  "notes"
+ ],
+ "fields": [
+  {
+   "columns": 3,
+   "fieldname": "document_type",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Document Type",
+   "options": "Document Type",
+   "reqd": 1
+  },
+  {
+   "columns": 4,
+   "description": "As worded in the LC",
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "in_list_view": 1,
+   "label": "Description (as worded in LC)"
+  },
+  {
+   "columns": 1,
+   "default": "1",
+   "fieldname": "originals",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Originals"
+  },
+  {
+   "columns": 1,
+   "fieldname": "copies",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Copies"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Data",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-06-11 18:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ExportFlow",
+ "name": "LC Document Requirement",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

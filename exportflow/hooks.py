@@ -7,6 +7,8 @@ app_license = "mit"
 
 required_apps = ["erpnext"]
 
+after_install = "exportflow.setup.after_install"
+
 # Apps screen entry — opens the React SPA
 add_to_apps_screen = [
 	{
@@ -30,6 +32,17 @@ doc_events = {
 		# arrives after PO submission, so recompute the deadline there too
 		"before_update_after_submit": "exportflow.overrides.purchase_order.validate",
 	},
+	"Payment Entry": {
+		"validate": "exportflow.overrides.payment_entry.validate",
+		"on_submit": "exportflow.overrides.payment_entry.on_submit",
+		"on_cancel": "exportflow.overrides.payment_entry.on_cancel",
+	},
+}
+
+scheduler_events = {
+	"daily": [
+		"exportflow.tasks.daily",
+	],
 }
 
 fixtures = [

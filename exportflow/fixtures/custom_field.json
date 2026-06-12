@@ -175,6 +175,19 @@
  },
  {
   "doctype": "Custom Field",
+  "name": "Payment Entry-pro_forma_invoice",
+  "dt": "Payment Entry",
+  "fieldname": "pro_forma_invoice",
+  "fieldtype": "Link",
+  "label": "Pro Forma Invoice",
+  "options": "Pro Forma Invoice",
+  "insert_after": "reference_date",
+  "depends_on": "eval:doc.payment_type=='Receive'",
+  "description": "The pro forma invoice this incoming payment settles — updates its status",
+  "module": "ExportFlow"
+ },
+ {
+  "doctype": "Custom Field",
   "name": "Purchase Order-gst_export_deadline",
   "dt": "Purchase Order",
   "fieldname": "gst_export_deadline",
