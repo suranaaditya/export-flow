@@ -13,6 +13,10 @@
   "responsible_party",
   "attaches_to",
   "has_expiry",
+  "section_blocking",
+  "is_blocking",
+  "blocked_milestone",
+  "min_unblock_status",
   "section_print",
   "default_print_format",
   "notes"
@@ -67,6 +71,35 @@
    "fieldname": "has_expiry",
    "fieldtype": "Check",
    "label": "Has Expiry"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_blocking",
+   "fieldtype": "Section Break",
+   "label": "Blocking"
+  },
+  {
+   "default": "0",
+   "description": "An unresolved instance of this document stops the shipment from completing a milestone",
+   "fieldname": "is_blocking",
+   "fieldtype": "Check",
+   "label": "Blocks a Milestone"
+  },
+  {
+   "default": "Let Export Order",
+   "depends_on": "is_blocking",
+   "fieldname": "blocked_milestone",
+   "fieldtype": "Data",
+   "label": "Blocked Milestone"
+  },
+  {
+   "default": "Received",
+   "depends_on": "is_blocking",
+   "description": "The document stops blocking once its status reaches this stage (Not Applicable always unblocks)",
+   "fieldname": "min_unblock_status",
+   "fieldtype": "Select",
+   "label": "Unblocks At Status",
+   "options": "Drafted\nSent/Filed\nReceived\nVerified"
   },
   {
    "collapsible": 1,

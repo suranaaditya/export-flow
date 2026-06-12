@@ -1,10 +1,18 @@
-import { useMemo, useState } from 'react';
-import { useFrappeGetCall, useFrappeGetDocList } from 'frappe-react-sdk';
+import { useEffect, useMemo, useState } from 'react';
+import {
+	useFrappeCreateDoc,
+	useFrappeDeleteDoc,
+	useFrappeGetCall,
+	useFrappeGetDoc,
+	useFrappeGetDocList,
+	useFrappeUpdateDoc,
+} from 'frappe-react-sdk';
+import { Icon } from '@/components/Icon';
 import { MasterModal } from '@/components/MasterModal';
-import { TextInput } from '@/components/form';
-import { Card, CHead, EmptyMsg } from '@/components/ui';
-import { API, type NewSOContext } from '@/lib/api';
-import { GRADE_OPTIONS, MASTERS, PORT_MODES, type MasterDef, type OptionSource } from '@/lib/masters';
+import { CheckInput, Field, SearchSelect, SelectInput, TextArea, TextInput } from '@/components/form';
+import { Card, CHead, EmptyMsg, Modal, Tag } from '@/components/ui';
+import { API, parseServerError, type ChecklistRuleRow, type NewSOContext } from '@/lib/api';
+import { MASTERS, STATIC_OPTIONS, type MasterDef, type OptionSource } from '@/lib/masters';
 
 type Row = Record<string, unknown> & { name: string };
 
@@ -116,6 +124,404 @@ function MasterPanel({
 	);
 }
 
+const CONDITION_FIELDS = [
+	'mode',
+	'incoterm',
+	'destination_country',
+	'customer',
+	'letter_of_credit',
+	'merchant_export_scheme',
+];
+
+function conditionsSummary(rule: ChecklistRuleRow): string {
+	if (!rule.conditions.length) return 'always';
+	return rule.conditions.map((c) => `${c.condition_field} = ${c.condition_value}`).join(' · ');
+}
+
+/** Checklist rules — the §5.3 engine's data. Conditions AND together; a rule
+ *  with none applies to every shipment. */
+function ChecklistRulesPanel({ canEdit }: { canEdit: boolean }) {
+	const { data, error, isLoading, mutate } = useFrappeGetCall<{ message: ChecklistRuleRow[] }>(
+		API.checklistRules,
+		undefined,
+	);
+	const docTypes = useFrappeGetDocList<{ name: string; category: string }>('Document Type', {
+		fields: ['name', 'category'],
+		orderBy: { field: 'name', order: 'asc' },
+		limit: 300,
+	});
+	const [modal, setModal] = useState<'new' | ChecklistRuleRow | null>(null);
+
+	const rules = data?.message ?? [];
+
+	return (
+		<Card>
+			<CHead
+				icon="sliders"
+				title="Checklist rules"
+				count={data ? rules.length : undefined}
+				action={
+					canEdit ? (
+						<a
+							href="#"
+							onClick={(e) => {
+								e.preventDefault();
+								setModal('new');
+							}}
+						>
+							New
+						</a>
+					) : undefined
+				}
+			/>
+			{isLoading ? (
+				<div className="sub" style={{ padding: '14px 18px' }}>
+					Loading…
+				</div>
+			) : error ? (
+				<div className="ferr" style={{ padding: '14px 18px' }}>{parseServerError(error)}</div>
+			) : rules.length === 0 ? (
+				<EmptyMsg
+					title="No checklist rules"
+					text="Rules decide which documents every shipment owes — they seed on install."
+				/>
+			) : (
+				<table className={canEdit ? 'clickable' : undefined}>
+					<thead>
+						<tr>
+							<th>Rule</th>
+							<th>Requires</th>
+							<th>When</th>
+							<th>State</th>
+						</tr>
+					</thead>
+					<tbody>
+						{rules.map((r) => (
+							<tr key={r.name} onClick={canEdit ? () => setModal(r) : undefined}>
+								<td className="c1">{r.rule_name}</td>
+								<td className="c2">{r.document_type}</td>
+								<td className="c2">{conditionsSummary(r)}</td>
+								<td>
+									<Tag tone={r.enabled ? 'ok' : 'err'}>{r.enabled ? 'Enabled' : 'Disabled'}</Tag>
+								</td>
+							</tr>
+						))}
+					</tbody>
+				</table>
+			)}
+			{modal !== null && (
+				<RuleModal
+					rule={modal === 'new' ? null : modal}
+					docTypes={docTypes.data ?? []}
+					onClose={() => setModal(null)}
+					onSaved={() => {
+						setModal(null);
+						mutate();
+					}}
+				/>
+			)}
+		</Card>
+	);
+}
+
+function RuleModal({
+	rule,
+	docTypes,
+	onClose,
+	onSaved,
+}: {
+	rule: ChecklistRuleRow | null;
+	docTypes: { name: string; category: string }[];
+	onClose: () => void;
+	onSaved: () => void;
+}) {
+	const isNew = rule === null;
+	const [ruleName, setRuleName] = useState(rule?.rule_name ?? '');
+	const [docType, setDocType] = useState(rule?.document_type ?? '');
+	const [enabled, setEnabled] = useState(rule ? !!rule.enabled : true);
+	const [notes, setNotes] = useState(rule?.notes ?? '');
+	const [conditions, setConditions] = useState(
+		rule?.conditions.map((c) => ({ ...c })) ?? [],
+	);
+	const [err, setErr] = useState<string | null>(null);
+
+	const { createDoc, loading: creating } = useFrappeCreateDoc();
+	const { updateDoc, loading: updating } = useFrappeUpdateDoc();
+	const { deleteDoc, loading: deleting } = useFrappeDeleteDoc();
+	const busy = creating || updating || deleting;
+
+	async function onSave() {
+		if (!ruleName.trim()) return setErr('Rule name is required.');
+		if (!docType) return setErr('Pick the document type this rule requires.');
+		if (conditions.some((c) => !c.condition_field || !c.condition_value.trim())) {
+			return setErr('Every condition needs a field and a value.');
+		}
+		setErr(null);
+		const payload = {
+			document_type: docType,
+			enabled: enabled ? 1 : 0,
+			notes: notes.trim(),
+			conditions,
+		};
+		try {
+			if (isNew) {
+				await createDoc('Document Checklist Rule', { rule_name: ruleName.trim(), ...payload });
+			} else {
+				await updateDoc('Document Checklist Rule', rule.name, payload);
+			}
+			onSaved();
+		} catch (e) {
+			setErr(parseServerError(e));
+		}
+	}
+
+	async function onDelete() {
+		if (!rule) return;
+		setErr(null);
+		try {
+			await deleteDoc('Document Checklist Rule', rule.name);
+			onSaved();
+		} catch (e) {
+			setErr(parseServerError(e));
+		}
+	}
+
+	return (
+		<Modal title={isNew ? 'New checklist rule' : rule.rule_name} icon="sliders" onClose={onClose}>
+			<div className="formgrid">
+				<Field label="Rule name" required>
+					<TextInput value={ruleName} disabled={!isNew} onChange={setRuleName} />
+				</Field>
+				<Field label="Requires document" required>
+					<SearchSelect
+						value={docType}
+						onChange={setDocType}
+						placeholder="Search document types…"
+						options={docTypes.map((t) => ({ value: t.name, sub: t.category }))}
+					/>
+				</Field>
+				<div className="span2">
+					<CheckInput checked={enabled} onChange={setEnabled} label="Enabled" />
+				</div>
+			</div>
+			<div className="reqhead" style={{ gridTemplateColumns: '1fr 1.4fr 34px' }}>
+				<span>Condition field</span>
+				<span>Value</span>
+				<span />
+			</div>
+			{conditions.length === 0 && (
+				<div className="fhint" style={{ padding: '0 18px 6px' }}>
+					No conditions — this rule applies to every shipment.
+				</div>
+			)}
+			{conditions.map((c, i) => (
+				<div className="reqrow" style={{ gridTemplateColumns: '1fr 1.4fr 34px' }} key={i}>
+					<SelectInput
+						value={c.condition_field}
+						onChange={(v) =>
+							setConditions((cs) => cs.map((row, j) => (j === i ? { ...row, condition_field: v } : row)))
+						}
+						options={CONDITION_FIELDS.map((f) => ({ value: f }))}
+						allowEmpty
+					/>
+					<TextInput
+						value={c.condition_value}
+						onChange={(v) =>
+							setConditions((cs) => cs.map((row, j) => (j === i ? { ...row, condition_value: v } : row)))
+						}
+						placeholder="e.g. CIF, CIP — or Yes"
+					/>
+					<button
+						type="button"
+						className="xbtn"
+						aria-label="Remove condition"
+						onClick={() => setConditions((cs) => cs.filter((_, j) => j !== i))}
+					>
+						<Icon name="close" size={13} />
+					</button>
+				</div>
+			))}
+			<div style={{ padding: '6px 18px 10px' }}>
+				<button
+					type="button"
+					className="btn"
+					style={{ padding: '5px 12px' }}
+					onClick={() =>
+						setConditions((cs) => [...cs, { condition_field: 'mode', condition_value: '' }])
+					}
+				>
+					<Icon name="plus" size={13} /> Add condition
+				</button>
+			</div>
+			<div className="formgrid" style={{ paddingTop: 0 }}>
+				<div className="span2">
+					<Field label="Notes">
+						<TextArea value={notes} onChange={setNotes} rows={2} />
+					</Field>
+				</div>
+			</div>
+			<div className="formfoot">
+				{err && <span className="ferr">{err}</span>}
+				{!isNew && (
+					<button type="button" className="btn" disabled={busy} onClick={() => void onDelete()}>
+						{deleting ? 'Deleting…' : 'Delete rule'}
+					</button>
+				)}
+				<span className="spacer" />
+				<button type="button" className="btn" onClick={onClose}>
+					Cancel
+				</button>
+				<button type="button" className="btn primary" disabled={busy} onClick={() => void onSave()}>
+					{busy ? 'Saving…' : isNew ? 'Create rule' : 'Save changes'}
+				</button>
+			</div>
+		</Modal>
+	);
+}
+
+interface ExporterProfile {
+	iec_number: string;
+	gstin: string;
+	exporter_address: string;
+	lut_number: string;
+	lut_valid_upto: string;
+	signatory_name: string;
+	signatory_designation: string;
+	scomet_text: string;
+}
+
+const EMPTY_PROFILE: ExporterProfile = {
+	iec_number: '',
+	gstin: '',
+	exporter_address: '',
+	lut_number: '',
+	lut_valid_upto: '',
+	signatory_name: '',
+	signatory_designation: '',
+	scomet_text: '',
+};
+
+/** Exporter identity printed on every §5.2 document (IEC, GSTIN, LUT…). */
+function ExporterProfilePanel({ canEdit }: { canEdit: boolean }) {
+	const { data, error, isLoading, mutate } = useFrappeGetDoc<Partial<ExporterProfile>>(
+		'ExportFlow Settings',
+		'ExportFlow Settings',
+	);
+	const { updateDoc, loading: saving } = useFrappeUpdateDoc();
+	const [form, setForm] = useState<ExporterProfile>(EMPTY_PROFILE);
+	const [seeded, setSeeded] = useState(false);
+	const [err, setErr] = useState<string | null>(null);
+	const [savedTick, setSavedTick] = useState(false);
+
+	// seed exactly once — background revalidation must never clobber edits
+	useEffect(() => {
+		if (!data || seeded) return;
+		setForm((f) => ({
+			...f,
+			...Object.fromEntries(
+				(Object.keys(EMPTY_PROFILE) as (keyof ExporterProfile)[]).map((k) => [k, data[k] ?? '']),
+			),
+		}));
+		setSeeded(true);
+	}, [data, seeded]);
+
+	const set = <K extends keyof ExporterProfile>(key: K, value: string) => {
+		setSavedTick(false);
+		setForm((f) => ({ ...f, [key]: value }));
+	};
+
+	async function onSave() {
+		setErr(null);
+		setSavedTick(false);
+		try {
+			await updateDoc('ExportFlow Settings', 'ExportFlow Settings', {
+				...form,
+				lut_valid_upto: form.lut_valid_upto || null,
+			});
+			setSavedTick(true);
+			mutate();
+		} catch (e) {
+			setErr(parseServerError(e));
+		}
+	}
+
+	return (
+		<Card>
+			<CHead icon="shield" title="Exporter profile" />
+			{isLoading ? (
+				<div className="sub" style={{ padding: '14px 18px' }}>
+					Loading…
+				</div>
+			) : error ? (
+				<div className="ferr" style={{ padding: '14px 18px' }}>{parseServerError(error)}</div>
+			) : (
+				<>
+					<div className="formgrid">
+						<Field label="IEC number">
+							<TextInput mono value={form.iec_number} onChange={(v) => set('iec_number', v)} />
+						</Field>
+						<Field label="GSTIN">
+							<TextInput mono value={form.gstin} onChange={(v) => set('gstin', v)} />
+						</Field>
+						<div className="span2">
+							<Field
+								label="Exporter address"
+								hint="Address block as printed on invoices and declarations"
+							>
+								<TextArea
+									value={form.exporter_address}
+									onChange={(v) => set('exporter_address', v)}
+									rows={3}
+								/>
+							</Field>
+						</div>
+						<Field
+							label="LUT ARN / number"
+							hint="When set, invoices carry the LUT-without-IGST declaration"
+						>
+							<TextInput mono value={form.lut_number} onChange={(v) => set('lut_number', v)} />
+						</Field>
+						<Field label="LUT valid upto">
+							<TextInput
+								type="date"
+								value={form.lut_valid_upto}
+								onChange={(v) => set('lut_valid_upto', v)}
+							/>
+						</Field>
+						<Field label="Signatory name">
+							<TextInput value={form.signatory_name} onChange={(v) => set('signatory_name', v)} />
+						</Field>
+						<Field label="Signatory designation">
+							<TextInput
+								value={form.signatory_designation}
+								onChange={(v) => set('signatory_designation', v)}
+							/>
+						</Field>
+						<div className="span2">
+							<Field label="SCOMET declaration override" hint="Leave blank for the standard wording">
+								<TextArea value={form.scomet_text} onChange={(v) => set('scomet_text', v)} rows={2} />
+							</Field>
+						</div>
+					</div>
+					<div className="formfoot">
+						{err && <span className="ferr">{err}</span>}
+						{savedTick && !err && <span className="fhint">Saved.</span>}
+						<span className="spacer" />
+						<button
+							type="button"
+							className="btn"
+							disabled={saving || !canEdit}
+							onClick={() => void onSave()}
+						>
+							{saving ? 'Saving…' : 'Save profile'}
+						</button>
+					</div>
+				</>
+			)}
+		</Card>
+	);
+}
+
 export function Settings() {
 	// the SO-context endpoint doubles as the masters option source; viewers
 	// without create rights still browse the lists below read-only
@@ -128,8 +534,7 @@ export function Settings() {
 		incoterms: ctx?.incoterms ?? [],
 		uoms: ctx?.uoms ?? [],
 		countries: ctx?.countries ?? [],
-		grades: GRADE_OPTIONS,
-		portModes: PORT_MODES,
+		...STATIC_OPTIONS,
 	};
 
 	return (
@@ -147,6 +552,8 @@ export function Settings() {
 				{MASTERS.map((def) => (
 					<MasterPanel key={def.doctype} def={def} options={options} canEdit={canEdit} />
 				))}
+				<ChecklistRulesPanel canEdit={canEdit} />
+				<ExporterProfilePanel canEdit={canEdit} />
 			</div>
 
 			<footer>

@@ -1,0 +1,43 @@
+{
+ "actions": [],
+ "creation": "2026-06-12 10:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "condition_field",
+  "condition_value"
+ ],
+ "fields": [
+  {
+   "columns": 4,
+   "fieldname": "condition_field",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Field",
+   "options": "mode\nincoterm\ndestination_country\ncustomer\nletter_of_credit\nmerchant_export_scheme",
+   "reqd": 1
+  },
+  {
+   "columns": 6,
+   "description": "Comma-separated values match any (e.g. CIF, CIP). Use Yes/No for letter_of_credit and merchant_export_scheme.",
+   "fieldname": "condition_value",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Value",
+   "reqd": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-06-12 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ExportFlow",
+ "name": "Document Checklist Condition",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

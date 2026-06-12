@@ -7,7 +7,7 @@ import { Field, SearchSelect, TextArea, TextInput } from '@/components/form';
 import { Card, CHead, Facts } from '@/components/ui';
 import { API, parseServerError, type ItemInfo, type NewSOContext } from '@/lib/api';
 import { fmtMoney } from '@/lib/format';
-import { GRADE_OPTIONS, MASTERS, PORT_MODES, type OptionSource } from '@/lib/masters';
+import { MASTERS, STATIC_OPTIONS, type OptionSource } from '@/lib/masters';
 
 const CUSTOMER_DEF = MASTERS.find((m) => m.doctype === 'Customer')!;
 const ITEM_DEF = MASTERS.find((m) => m.doctype === 'Item')!;
@@ -161,8 +161,7 @@ export function NewSalesOrder() {
 		incoterms: ctx?.incoterms ?? [],
 		uoms: ctx?.uoms ?? [],
 		countries: ctx?.countries ?? [],
-		grades: GRADE_OPTIONS,
-		portModes: PORT_MODES,
+		...STATIC_OPTIONS,
 	};
 
 	const customers = (ctx?.customers ?? []).map((c) => ({ value: c.name, label: c.customer_name }));

@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { useFrappeGetCall, useFrappePostCall, useFrappeUpdateDoc } from 'frappe-react-sdk';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { DocumentChecklist } from '@/components/DocumentChecklist';
 import { Icon } from '@/components/Icon';
 import { Card, CHead, EmptyMsg, Facts, LRow, Modal, Tag } from '@/components/ui';
 import { CheckInput, Field, TextArea, TextInput } from '@/components/form';
@@ -307,13 +308,7 @@ export function ShipmentDetail() {
 						</table>
 					</Card>
 
-					<Card>
-						<CHead icon="file-text" title="Document checklist" count="0 / 0" />
-						<EmptyMsg
-							title="The checklist engine arrives in Phase 4"
-							text="Commercial, regulatory, quality and banking documents will track here per shipment."
-						/>
-					</Card>
+					<DocumentChecklist shipment={id} />
 				</div>
 
 				<div className="stack">

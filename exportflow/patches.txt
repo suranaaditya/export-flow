@@ -10,3 +10,4 @@ exportflow.patches.v0_1.seed_ports_and_master_grants
 exportflow.patches.v0_1.grant_po_permissions
 exportflow.patches.v0_1.grant_tc_permissions
 exportflow.patches.v0_1.grant_tax_account_permissions
+exportflow.patches.v0_1.seed_document_catalog #3 repair auto-filled responsible party

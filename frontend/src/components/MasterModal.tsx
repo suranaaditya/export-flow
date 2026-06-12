@@ -1,5 +1,10 @@
-import { useState } from 'react';
-import { useFrappeCreateDoc, useFrappePostCall, useFrappeUpdateDoc } from 'frappe-react-sdk';
+import { useEffect, useState } from 'react';
+import {
+	useFrappeCreateDoc,
+	useFrappeGetDoc,
+	useFrappePostCall,
+	useFrappeUpdateDoc,
+} from 'frappe-react-sdk';
 import { CheckInput, Field, SearchSelect, TextArea, TextInput } from '@/components/form';
 import { Modal } from '@/components/ui';
 import { parseServerError } from '@/lib/api';
@@ -32,8 +37,21 @@ export function MasterModal({
 	onSaved: (name: string) => void;
 }) {
 	const isNew = record === null;
+	const recordName = record ? String(record.name) : null;
+	// the list row only carries listFields — saving from it would blank every
+	// other editable field, so editing always seeds from the full document
+	const fullDoc = useFrappeGetDoc<Record<string, unknown>>(
+		def.doctype,
+		recordName ?? '',
+		recordName ? undefined : null,
+	);
 	const [values, setValues] = useState<Values>(() => seed(def, record));
 	const [err, setErr] = useState<string | null>(null);
+	useEffect(() => {
+		if (fullDoc.data) setValues(seed(def, fullDoc.data));
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [fullDoc.data]);
+	const notReady = !isNew && !fullDoc.data;
 
 	const { call: createViaMethod, loading: creating } = useFrappePostCall<{
 		message: { name: string };
@@ -123,8 +141,13 @@ export function MasterModal({
 				<button type="button" className="btn" onClick={onClose}>
 					Cancel
 				</button>
-				<button type="button" className="btn primary" disabled={saving} onClick={() => void onSave()}>
-					{saving ? 'Saving…' : isNew ? `Create ${def.singular}` : 'Save changes'}
+				<button
+					type="button"
+					className="btn primary"
+					disabled={saving || notReady}
+					onClick={() => void onSave()}
+				>
+					{saving ? 'Saving…' : notReady ? 'Loading…' : isNew ? `Create ${def.singular}` : 'Save changes'}
 				</button>
 			</div>
 		</Modal>

@@ -34,12 +34,37 @@ doc_events = {
 		# shipments booked before procurement get their PO links backfilled
 		"on_submit": "exportflow.overrides.purchase_order.on_submit",
 		"on_cancel": "exportflow.overrides.purchase_order.on_cancel",
+		# invoice details land post-submit — the GST pack's due date follows
+		"on_update_after_submit": "exportflow.overrides.purchase_order.on_update_after_submit",
 	},
 	"Payment Entry": {
 		"validate": "exportflow.overrides.payment_entry.validate",
 		"on_submit": "exportflow.overrides.payment_entry.on_submit",
 		"on_cancel": "exportflow.overrides.payment_entry.on_cancel",
 	},
+	# the §5.3 checklist engine keeps Document Instances in sync
+	"Export Shipment": {
+		"on_update": "exportflow.checklist.on_shipment_update",
+		"on_trash": "exportflow.checklist.on_shipment_trash",
+	},
+	"Letter of Credit": {
+		"on_update": "exportflow.checklist.rebuild_for_lc",
+	},
+	"Customer": {
+		"on_update": "exportflow.checklist.rebuild_for_customer",
+	},
+	"Document Checklist Rule": {
+		"on_update": "exportflow.checklist.rebuild_for_rule_change",
+		# after_delete, not on_trash — the rebuild must see the rule gone
+		"after_delete": "exportflow.checklist.rebuild_for_rule_change",
+	},
+}
+
+# print-format context builders (Commercial Invoice / Packing List / SCOMET)
+jinja = {
+	"methods": [
+		"exportflow.printing.document_print_context",
+	],
 }
 
 scheduler_events = {

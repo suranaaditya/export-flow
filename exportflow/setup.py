@@ -116,6 +116,59 @@ def seed_ports():
 		).insert(ignore_permissions=True)
 
 
+def seed_document_types():
+	"""Spec §5.1 catalog. Existing records (possibly retuned by the client)
+	are left untouched."""
+	from exportflow.doc_catalog import DOCUMENT_TYPES
+
+	for name, category, origin, responsible, attaches_to, extras in DOCUMENT_TYPES:
+		if frappe.db.exists("Document Type", name):
+			continue
+		doc = frappe.get_doc(
+			{
+				"doctype": "Document Type",
+				"document_type_name": name,
+				"category": category,
+				"origin": origin,
+				"responsible_party": responsible,
+				"attaches_to": attaches_to,
+				**extras,
+			}
+		)
+		# print formats land in the same migrate — don't fail on ordering
+		if doc.get("default_print_format") and not frappe.db.exists(
+			"Print Format", doc.default_print_format
+		):
+			doc.default_print_format = None
+		doc.insert(ignore_permissions=True)
+
+
+def seed_checklist_rules():
+	"""Spec §5.3 base + conditional rules. Skips rules whose name exists and
+	rules whose document type is missing (deleted by the client)."""
+	from exportflow.doc_catalog import CHECKLIST_RULES
+
+	for rule_name, document_type, conditions in CHECKLIST_RULES:
+		if frappe.db.exists("Document Checklist Rule", rule_name):
+			continue
+		if not frappe.db.exists("Document Type", document_type):
+			continue
+		frappe.get_doc(
+			{
+				"doctype": "Document Checklist Rule",
+				"rule_name": rule_name,
+				"document_type": document_type,
+				"enabled": 1,
+				"conditions": [
+					{"condition_field": field, "condition_value": value}
+					for field, value in conditions
+				],
+			}
+		).insert(ignore_permissions=True)
+
+
 def after_install():
 	setup_export_role_permissions()
 	seed_ports()
+	seed_document_types()
+	seed_checklist_rules()

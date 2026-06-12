@@ -1,75 +1,64 @@
 {
  "actions": [],
  "allow_rename": 1,
- "autoname": "field:port_name",
+ "autoname": "field:rule_name",
  "creation": "2026-06-12 10:00:00.000000",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
-  "port_name",
-  "unlocode",
-  "mode",
-  "cb_port",
-  "city",
-  "country",
-  "ad_code",
-  "disabled"
+  "rule_name",
+  "document_type",
+  "cb_rule",
+  "enabled",
+  "section_conditions",
+  "conditions",
+  "notes"
  ],
  "fields": [
   {
-   "fieldname": "port_name",
+   "fieldname": "rule_name",
    "fieldtype": "Data",
    "in_list_view": 1,
-   "label": "Port Name",
+   "label": "Rule Name",
    "reqd": 1,
    "unique": 1
   },
   {
-   "description": "UN/LOCODE, e.g. INNSA",
-   "fieldname": "unlocode",
-   "fieldtype": "Data",
-   "in_list_view": 1,
-   "in_standard_filter": 1,
-   "label": "UN/LOCODE"
-  },
-  {
-   "default": "Sea",
-   "fieldname": "mode",
-   "fieldtype": "Select",
-   "in_list_view": 1,
-   "in_standard_filter": 1,
-   "label": "Mode",
-   "options": "Sea\nAir\nSea & Air"
-  },
-  {
-   "fieldname": "cb_port",
-   "fieldtype": "Column Break"
-  },
-  {
-   "fieldname": "city",
-   "fieldtype": "Data",
-   "in_list_view": 1,
-   "label": "City"
-  },
-  {
-   "fieldname": "country",
+   "fieldname": "document_type",
    "fieldtype": "Link",
    "in_list_view": 1,
    "in_standard_filter": 1,
-   "label": "Country",
-   "options": "Country"
+   "label": "Requires Document Type",
+   "options": "Document Type",
+   "reqd": 1
   },
   {
-   "description": "Authorised Dealer code registered with customs at this port (printed on export invoices)",
-   "fieldname": "ad_code",
-   "fieldtype": "Data",
-   "label": "AD Code"
+   "fieldname": "cb_rule",
+   "fieldtype": "Column Break"
   },
   {
-   "default": "0",
-   "fieldname": "disabled",
+   "default": "1",
+   "fieldname": "enabled",
    "fieldtype": "Check",
-   "label": "Disabled"
+   "in_list_view": 1,
+   "label": "Enabled"
+  },
+  {
+   "description": "All conditions must match (AND). A rule with no conditions applies to every shipment.",
+   "fieldname": "section_conditions",
+   "fieldtype": "Section Break",
+   "label": "Conditions"
+  },
+  {
+   "fieldname": "conditions",
+   "fieldtype": "Table",
+   "label": "Conditions",
+   "options": "Document Checklist Condition"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
   }
  ],
  "index_web_pages_for_search": 0,
@@ -77,7 +66,7 @@
  "modified": "2026-06-12 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "ExportFlow",
- "name": "Port",
+ "name": "Document Checklist Rule",
  "naming_rule": "By fieldname",
  "owner": "Administrator",
  "permissions": [
@@ -106,15 +95,12 @@
    "write": 1
   },
   {
-   "create": 1,
    "email": 1,
    "export": 1,
    "print": 1,
    "read": 1,
    "report": 1,
-   "role": "Export Operations",
-   "share": 1,
-   "write": 1
+   "role": "Export Operations"
   },
   {
    "email": 1,
@@ -133,7 +119,6 @@
    "role": "Export Viewer"
   }
  ],
- "quick_entry": 1,
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": [],

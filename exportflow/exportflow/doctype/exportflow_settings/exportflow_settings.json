@@ -1,0 +1,146 @@
+{
+ "actions": [],
+ "creation": "2026-06-12 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "section_exporter",
+  "iec_number",
+  "gstin",
+  "cb_efs_exporter",
+  "exporter_address",
+  "section_lut",
+  "lut_number",
+  "cb_efs_lut",
+  "lut_valid_upto",
+  "section_signatory",
+  "signatory_name",
+  "cb_efs_sig",
+  "signatory_designation",
+  "section_declarations",
+  "scomet_text"
+ ],
+ "fields": [
+  {
+   "description": "Printed on every export document (§5.2)",
+   "fieldname": "section_exporter",
+   "fieldtype": "Section Break",
+   "label": "Exporter Identity"
+  },
+  {
+   "fieldname": "iec_number",
+   "fieldtype": "Data",
+   "label": "IEC Number"
+  },
+  {
+   "fieldname": "gstin",
+   "fieldtype": "Data",
+   "label": "GSTIN"
+  },
+  {
+   "fieldname": "cb_efs_exporter",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Address block as it should appear on invoices and declarations",
+   "fieldname": "exporter_address",
+   "fieldtype": "Small Text",
+   "label": "Exporter Address"
+  },
+  {
+   "description": "When set, invoices carry the declaration \"Supply meant for export under LUT without payment of IGST\"",
+   "fieldname": "section_lut",
+   "fieldtype": "Section Break",
+   "label": "Letter of Undertaking"
+  },
+  {
+   "fieldname": "lut_number",
+   "fieldtype": "Data",
+   "label": "LUT ARN / Number"
+  },
+  {
+   "fieldname": "cb_efs_lut",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "lut_valid_upto",
+   "fieldtype": "Date",
+   "label": "LUT Valid Upto"
+  },
+  {
+   "fieldname": "section_signatory",
+   "fieldtype": "Section Break",
+   "label": "Authorised Signatory"
+  },
+  {
+   "fieldname": "signatory_name",
+   "fieldtype": "Data",
+   "label": "Name"
+  },
+  {
+   "fieldname": "cb_efs_sig",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "signatory_designation",
+   "fieldtype": "Data",
+   "label": "Designation"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_declarations",
+   "fieldtype": "Section Break",
+   "label": "Declaration Overrides"
+  },
+  {
+   "description": "Leave blank to use the standard SCOMET non-applicability wording",
+   "fieldname": "scomet_text",
+   "fieldtype": "Text",
+   "label": "SCOMET Declaration Text"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-06-12 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ExportFlow",
+ "name": "ExportFlow Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Export Admin",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "Export Operations"
+  },
+  {
+   "read": 1,
+   "role": "Export Accounts"
+  },
+  {
+   "read": 1,
+   "role": "Export Viewer"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

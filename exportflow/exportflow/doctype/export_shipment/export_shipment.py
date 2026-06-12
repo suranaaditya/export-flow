@@ -45,7 +45,19 @@ class ExportShipment(Document):
 		self.seed_milestones()
 		self.validate_items()
 		self.validate_lc()
+		self.validate_milestone_blockers()
 		self.set_current_milestone()
+
+	def validate_milestone_blockers(self):
+		"""The UI completes milestones via set_milestone, but a direct document
+		save (desk, REST) can flip the completed flag too — gate that path."""
+		before = self.get_doc_before_save()
+		if not before:
+			return
+		was_done = {m.name: m.completed for m in before.milestones}
+		for m in self.milestones:
+			if m.completed and not was_done.get(m.name):
+				self.assert_milestone_not_blocked(m.milestone)
 
 	def seed_milestones(self):
 		expected = milestones_for(self.mode)
@@ -177,6 +189,7 @@ class ExportShipment(Document):
 				return
 			if any(not m.completed for m in rows[:idx]):
 				frappe.throw(_("Complete earlier milestones first"))
+			self.assert_milestone_not_blocked(rows[idx].milestone)
 			rows[idx].completed = 1
 			rows[idx].actual_date = actual_date or frappe.utils.nowdate()
 			rows[idx].db_set(
@@ -193,6 +206,20 @@ class ExportShipment(Document):
 
 		self.set_current_milestone()
 		self.db_set("current_milestone", self.current_milestone, notify=True)
+
+	def assert_milestone_not_blocked(self, milestone: str):
+		"""§4.2/§5: an unresolved blocking Document Instance (default: ADC NOC,
+		Shipping Bill) prevents completing its configured milestone."""
+		from exportflow.checklist import milestone_blockers
+
+		blockers = milestone_blockers(self.name, milestone)
+		if blockers:
+			frappe.throw(
+				_("Cannot complete {0} — blocked by: {1}").format(
+					milestone,
+					", ".join(f"{b.document_type} ({b.status})" for b in blockers),
+				)
+			)
 
 	def export_completed_on(self):
 		"""Actual date of the export milestone (GST clock stop), if reached."""

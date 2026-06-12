@@ -110,6 +110,13 @@ export const API = {
 	termsText: 'exportflow.api.get_terms_text',
 	createPoDraft: 'exportflow.api.create_purchase_order_draft',
 	previewPo: 'exportflow.api.preview_purchase_order',
+	shipmentDocuments: 'exportflow.api.get_shipment_documents',
+	documentsWorkspace: 'exportflow.api.get_documents_workspace',
+	addDocInstance: 'exportflow.api.add_document_instance',
+	updateDocInstance: 'exportflow.api.update_document_instance',
+	attachDocFile: 'exportflow.api.attach_document_file',
+	generateDocument: 'exportflow.api.generate_document',
+	checklistRules: 'exportflow.api.get_checklist_rules',
 } as const;
 
 export interface NewPOContext {
@@ -321,6 +328,118 @@ export interface ShipmentDetailData {
 		issuing_bank: string | null;
 	} | null;
 	sales_orders: string[];
+}
+
+// ---- Phase 4: documents (exportflow.api) ----
+
+export type DocStatus =
+	| 'Pending'
+	| 'Drafted'
+	| 'Sent/Filed'
+	| 'Received'
+	| 'Verified'
+	| 'Not Applicable';
+
+export const DOC_STATUSES: DocStatus[] = [
+	'Pending',
+	'Drafted',
+	'Sent/Filed',
+	'Received',
+	'Verified',
+	'Not Applicable',
+];
+
+export type DocCategory =
+	| 'Commercial'
+	| 'Regulatory'
+	| 'Quality'
+	| 'Logistics'
+	| 'Banking'
+	| 'Company';
+
+export interface DocInstanceRow {
+	name: string;
+	document_type: string;
+	category: DocCategory | null;
+	origin: 'Generated' | 'Tracked' | null;
+	status: DocStatus;
+	responsible_party: string | null;
+	shipment: string | null;
+	customer: string | null;
+	sales_order: string | null;
+	purchase_order: string | null;
+	document_number: string | null;
+	document_date: string | null;
+	due_date: string | null;
+	originals: number | null;
+	copies: number | null;
+	description: string | null;
+	remarks: string | null;
+	file: string | null;
+	blocking: 0 | 1;
+	blocked_milestone: string | null;
+	min_unblock_status: string | null;
+	source: 'Manual' | 'Rule' | 'LC';
+	modified: string;
+}
+
+export interface DocTypeOption {
+	name: string;
+	category: DocCategory;
+	origin: 'Generated' | 'Tracked';
+	responsible_party: string | null;
+	default_print_format: string | null;
+}
+
+export interface ShipmentDocumentsData {
+	documents: DocInstanceRow[];
+	document_types: DocTypeOption[];
+}
+
+export interface ChecklistRuleRow {
+	name: string;
+	rule_name: string;
+	document_type: string;
+	enabled: 0 | 1;
+	notes: string | null;
+	conditions: { condition_field: string; condition_value: string }[];
+}
+
+const DOC_STATUS_INDEX: Record<string, number> = {
+	Pending: 0,
+	Drafted: 1,
+	'Sent/Filed': 2,
+	Received: 3,
+	Verified: 4,
+};
+
+/** A document counts as done once it left our desk (sent/filed or beyond). */
+export function docIsDone(d: Pick<DocInstanceRow, 'status'>): boolean {
+	return d.status === 'Not Applicable' || DOC_STATUS_INDEX[d.status] >= 2;
+}
+
+/** An unresolved blocker (mirrors the server's milestone gate). */
+export function docIsBlockingNow(d: DocInstanceRow): boolean {
+	if (!d.blocking || d.status === 'Not Applicable') return false;
+	return (
+		(DOC_STATUS_INDEX[d.status] ?? -1) < (DOC_STATUS_INDEX[d.min_unblock_status ?? 'Received'] ?? 3)
+	);
+}
+
+/** Checklist tick per the mockup: ok / pend / err / none. */
+export function docCkTone(d: DocInstanceRow): 'ok' | 'pend' | 'err' | 'none' {
+	if (docIsBlockingNow(d)) return 'err';
+	if (d.status === 'Not Applicable') return 'none';
+	if (docIsDone(d)) return 'ok';
+	if (d.status === 'Drafted') return 'pend';
+	return 'none';
+}
+
+/** Status chip tone for tables (workspace). */
+export function docTagTone(d: DocInstanceRow): 'ok' | 'pend' | 'err' {
+	if (docIsBlockingNow(d)) return 'err';
+	if (docIsDone(d)) return 'ok';
+	return 'pend';
 }
 
 /** ERPNext PO workflow status → chip tone. */

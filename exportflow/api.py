@@ -1140,6 +1140,236 @@ def set_shipment_milestone(shipment: str, row: str, completed=1, actual_date=Non
 	return doc.current_milestone
 
 
+# ---------------------------------------------------------------- documents (Phase 4)
+
+INSTANCE_EDITABLE_FIELDS = {
+	"status",
+	"document_number",
+	"document_date",
+	"due_date",
+	"responsible_party",
+	"remarks",
+	"description",
+	"originals",
+	"copies",
+}
+INSTANCE_DATE_FIELDS = {"document_date", "due_date"}
+INSTANCE_STATUSES = ("Pending", "Drafted", "Sent/Filed", "Received", "Verified", "Not Applicable")
+
+INSTANCE_LIST_FIELDS = [
+	"name",
+	"document_type",
+	"category",
+	"origin",
+	"status",
+	"responsible_party",
+	"shipment",
+	"customer",
+	"sales_order",
+	"purchase_order",
+	"document_number",
+	"document_date",
+	"due_date",
+	"originals",
+	"copies",
+	"description",
+	"remarks",
+	"file",
+	"blocking",
+	"blocked_milestone",
+	"min_unblock_status",
+	"source",
+	"modified",
+]
+
+
+@frappe.whitelist()
+def get_shipment_documents(shipment: str) -> dict:
+	"""The shipment checklist card: every instance plus the type catalog for
+	the manual-add picker."""
+	frappe.has_permission("Export Shipment", "read", doc=shipment, throw=True)
+	frappe.has_permission("Document Instance", "read", throw=True)
+	return {
+		"documents": frappe.get_all(
+			"Document Instance",
+			filters={"shipment": shipment},
+			fields=INSTANCE_LIST_FIELDS,
+			order_by="creation asc",
+			limit_page_length=300,
+		),
+		"document_types": frappe.get_all(
+			"Document Type",
+			fields=["name", "category", "origin", "responsible_party", "default_print_format"],
+			order_by="category asc, name asc",
+			limit_page_length=300,
+		),
+	}
+
+
+@frappe.whitelist()
+def get_documents_workspace() -> dict:
+	"""Documents workspace: recent instances across all shipments (the client
+	runs dozens of shipments, not thousands — 500 rows cover the horizon)."""
+	frappe.has_permission("Document Instance", "read", throw=True)
+	return {
+		"documents": frappe.get_list(
+			"Document Instance",
+			fields=INSTANCE_LIST_FIELDS,
+			order_by="modified desc",
+			limit_page_length=500,
+		),
+		"document_types": frappe.get_all(
+			"Document Type",
+			fields=["name", "category", "origin", "responsible_party", "default_print_format"],
+			order_by="category asc, name asc",
+			limit_page_length=300,
+		),
+	}
+
+
+@frappe.whitelist()
+def add_document_instance(shipment: str, document_type: str, remarks: str | None = None) -> dict:
+	"""Manual checklist row — never touched by the rule engine."""
+	frappe.has_permission("Document Instance", "create", throw=True)
+	frappe.has_permission("Export Shipment", "read", doc=shipment, throw=True)
+	customer = frappe.db.get_value("Export Shipment", shipment, "customer")
+	if not customer:
+		frappe.throw(_("Shipment {0} not found").format(shipment))
+	doc = frappe.get_doc(
+		{
+			"doctype": "Document Instance",
+			"document_type": document_type,
+			"shipment": shipment,
+			"customer": customer,
+			"status": "Pending",
+			"source": "Manual",
+			"remarks": remarks,
+		}
+	).insert()
+	return {"name": doc.name}
+
+
+@frappe.whitelist()
+def update_document_instance(name: str, values) -> dict:
+	"""Controlled field updates from the UI (status, numbers, dates, remarks).
+	Engine-owned fields (source, links, blocking config) stay server-side."""
+	if isinstance(values, str):
+		values = json.loads(values)
+	unknown = set(values) - INSTANCE_EDITABLE_FIELDS
+	if unknown:
+		frappe.throw(_("Cannot update field(s): {0}").format(", ".join(sorted(unknown))))
+	if "status" in values and values["status"] not in INSTANCE_STATUSES:
+		frappe.throw(_("Unknown status {0}").format(values["status"]))
+
+	doc = frappe.get_doc("Document Instance", name)
+	doc.check_permission("write")
+	if (
+		"due_date" in values
+		and doc.source != "Manual"
+		and str(values.get("due_date") or "") != str(doc.due_date or "")
+	):
+		frappe.throw(
+			_("The due date of {0} is tracked automatically (LC presentation / GST deadlines)").format(
+				doc.document_type
+			)
+		)
+	for field, value in values.items():
+		if field in INSTANCE_DATE_FIELDS and not value:
+			value = None
+		doc.set(field, value)
+	doc.save()
+	return {"name": doc.name, "status": doc.status}
+
+
+@frappe.whitelist()
+def attach_document_file(name: str, file_url: str) -> dict:
+	"""Stamp an uploaded file onto the instance. frappe's upload_file records
+	attached_to_field but never writes the Attach field itself — this endpoint
+	closes the loop after the client uploads."""
+	doc = frappe.get_doc("Document Instance", name)
+	doc.check_permission("write")
+	if not frappe.db.exists(
+		"File",
+		{"file_url": file_url, "attached_to_doctype": "Document Instance", "attached_to_name": name},
+	):
+		frappe.throw(_("That file is not attached to {0}").format(name))
+	doc.db_set({"file": file_url})
+	return {"file": file_url}
+
+
+@frappe.whitelist()
+def generate_document(name: str) -> dict:
+	"""§5.2: render the instance's print format to PDF, attach it, move
+	Pending → Drafted. Re-generating refreshes the file without resetting
+	progress that happened after drafting."""
+	doc = frappe.get_doc("Document Instance", name)
+	doc.check_permission("write")
+	dt = frappe.db.get_value(
+		"Document Type", doc.document_type, ["origin", "default_print_format"], as_dict=True
+	)
+	if not dt or dt.origin != "Generated":
+		frappe.throw(_("{0} is a tracked document — attach the received file instead").format(doc.document_type))
+	if not dt.default_print_format:
+		frappe.throw(_("No print format is configured for {0}").format(doc.document_type))
+	fmt_doctype = frappe.db.get_value("Print Format", dt.default_print_format, "doc_type")
+	if fmt_doctype != "Document Instance":
+		# e.g. the Pro Forma Invoice type's format targets the PFI doctype —
+		# that document is generated from its own screen, not the checklist
+		frappe.throw(
+			_("{0} is generated from its own screen, not from the checklist").format(doc.document_type)
+		)
+	if not doc.shipment:
+		frappe.throw(_("Only shipment documents can be generated here"))
+
+	stamps = {}
+	if not doc.document_number and doc.document_type == "Commercial Invoice":
+		from frappe.model.naming import make_autoname
+
+		stamps["document_number"] = make_autoname("EXP-INV-.YY.-.####")
+	if not doc.document_date:
+		stamps["document_date"] = frappe.utils.nowdate()
+	if stamps:
+		doc.db_set(stamps)
+
+	pdf = frappe.get_print(
+		"Document Instance", doc.name, print_format=dt.default_print_format, as_pdf=True, no_letterhead=1
+	)
+	from frappe.utils.file_manager import save_file
+
+	filename = f"{frappe.scrub(doc.document_type)}_{doc.name}.pdf"
+	file_doc = save_file(filename, pdf, "Document Instance", doc.name, is_private=1)
+
+	updates = {"file": file_doc.file_url}
+	if doc.status == "Pending":
+		updates["status"] = "Drafted"
+	doc.db_set(updates)
+	return {
+		"file_url": file_doc.file_url,
+		"status": doc.status,
+		"document_number": doc.document_number,
+	}
+
+
+@frappe.whitelist()
+def get_checklist_rules() -> list[dict]:
+	"""Rules with their conditions in one round trip (Settings screen)."""
+	frappe.has_permission("Document Checklist Rule", "read", throw=True)
+	rules = frappe.get_all(
+		"Document Checklist Rule",
+		fields=["name", "rule_name", "document_type", "enabled", "notes"],
+		order_by="name asc",
+		limit_page_length=500,
+	)
+	for rule in rules:
+		rule["conditions"] = frappe.get_all(
+			"Document Checklist Condition",
+			filters={"parent": rule.name, "parenttype": "Document Checklist Rule"},
+			fields=["condition_field", "condition_value"],
+			order_by="idx asc",
+		)
+	return rules
+
+
 @frappe.whitelist()
 def pfi_set_status(name: str, action: str):
 	"""Controlled status transitions from the UI: 'sent' or 'cancel'."""

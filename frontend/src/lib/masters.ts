@@ -2,7 +2,18 @@ import type { IconName } from '@/components/Icon';
 import { API } from '@/lib/api';
 
 /** Option sources resolved at render time from the masters context. */
-export type OptionSource = 'currencies' | 'incoterms' | 'uoms' | 'countries' | 'grades' | 'portModes';
+export type OptionSource =
+	| 'currencies'
+	| 'incoterms'
+	| 'uoms'
+	| 'countries'
+	| 'grades'
+	| 'portModes'
+	| 'docCategories'
+	| 'docOrigins'
+	| 'docParties'
+	| 'docAttaches'
+	| 'docUnblock';
 
 export interface MasterField {
 	key: string;
@@ -30,6 +41,26 @@ export interface MasterDef {
 
 export const GRADE_OPTIONS = ['IP', 'BP', 'USP', 'EP', 'JP', 'Ph. Int.', 'Other'];
 export const PORT_MODES = ['Sea', 'Air', 'Sea & Air'];
+export const DOC_CATEGORIES = ['Commercial', 'Regulatory', 'Quality', 'Logistics', 'Banking', 'Company'];
+export const DOC_ORIGINS = ['Generated', 'Tracked'];
+export const DOC_PARTIES = ['Us', 'CHA', 'Supplier', 'Shipping Line/Airline', 'Bank', 'Authority', 'Customer'];
+export const DOC_ATTACHES = ['Company', 'Sales Order', 'Purchase Order', 'Shipment', 'Batch'];
+export const DOC_UNBLOCK = ['Drafted', 'Sent/Filed', 'Received', 'Verified'];
+
+/** Option sources that never come from the server — spread into the
+ *  per-screen Record<OptionSource, string[]> maps. */
+export const STATIC_OPTIONS: Pick<
+	Record<OptionSource, string[]>,
+	'grades' | 'portModes' | 'docCategories' | 'docOrigins' | 'docParties' | 'docAttaches' | 'docUnblock'
+> = {
+	grades: GRADE_OPTIONS,
+	portModes: PORT_MODES,
+	docCategories: DOC_CATEGORIES,
+	docOrigins: DOC_ORIGINS,
+	docParties: DOC_PARTIES,
+	docAttaches: DOC_ATTACHES,
+	docUnblock: DOC_UNBLOCK,
+};
 
 export const MASTERS: MasterDef[] = [
 	{
@@ -142,6 +173,53 @@ export const MASTERS: MasterDef[] = [
 			{ key: 'mode', label: 'Mode', type: 'select', options: 'portModes' },
 			{ key: 'city', label: 'City', type: 'text' },
 			{ key: 'country', label: 'Country', type: 'select', options: 'countries' },
+			{
+				key: 'ad_code',
+				label: 'AD code',
+				type: 'text',
+				mono: true,
+				hint: 'Authorised Dealer code registered at this port — printed on export invoices',
+			},
+		],
+	},
+	{
+		doctype: 'Document Type',
+		title: 'Document types',
+		singular: 'document type',
+		icon: 'file-text-alt',
+		listFields: ['name', 'category', 'origin', 'responsible_party', 'is_blocking'],
+		columns: [
+			{ key: 'name', label: 'Document' },
+			{ key: 'category', label: 'Category', dim: true },
+			{ key: 'origin', label: 'Origin', dim: true },
+			{ key: 'responsible_party', label: 'Responsible', dim: true },
+			{ key: 'is_blocking', label: 'Blocking', dim: true },
+		],
+		fields: [
+			{ key: 'document_type_name', label: 'Name', type: 'text', required: true, createOnly: true },
+			{ key: 'category', label: 'Category', type: 'select', options: 'docCategories', required: true },
+			{ key: 'origin', label: 'Origin', type: 'select', options: 'docOrigins', required: true },
+			{ key: 'responsible_party', label: 'Responsible party', type: 'select', options: 'docParties' },
+			{ key: 'attaches_to', label: 'Attaches to', type: 'select', options: 'docAttaches' },
+			{ key: 'has_expiry', label: 'Has expiry', type: 'check' },
+			{
+				key: 'is_blocking',
+				label: 'An unresolved instance blocks a shipment milestone',
+				type: 'check',
+			},
+			{
+				key: 'blocked_milestone',
+				label: 'Blocked milestone',
+				type: 'text',
+				hint: 'e.g. Let Export Order',
+			},
+			{
+				key: 'min_unblock_status',
+				label: 'Unblocks at status',
+				type: 'select',
+				options: 'docUnblock',
+			},
+			{ key: 'notes', label: 'Notes', type: 'textarea' },
 		],
 	},
 ];

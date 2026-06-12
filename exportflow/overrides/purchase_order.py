@@ -27,10 +27,44 @@ def validate(doc, method=None):
 
 def on_submit(doc, method=None):
 	backfill_shipment_links(doc)
+	_rebuild_linked_checklists(doc)
+
+
+def on_update_after_submit(doc, method=None):
+	"""Supplier invoice details arrive AFTER submission (that is the designed
+	flow) — when they land, the GST clock moves, and the shipment's compliance
+	pack must pick up its due date (or appear/retire if the scheme flag flips)."""
+	if doc.has_value_changed("gst_export_deadline") or doc.has_value_changed(
+		"merchant_export_scheme"
+	):
+		_rebuild_linked_checklists(doc)
 
 
 def on_cancel(doc, method=None):
+	# collect before the links are cleared, rebuild after — the lapsed
+	# 0.1% compliance packs must see the PO gone
+	shipments = _linked_shipments(doc)
 	clear_shipment_links(doc)
+	from exportflow.checklist import rebuild_for_shipments
+
+	rebuild_for_shipments(shipments)
+
+
+def _linked_shipments(doc) -> list[str]:
+	return frappe.get_all(
+		"Export Shipment Item",
+		filters={"purchase_order": doc.name},
+		pluck="parent",
+		distinct=True,
+	)
+
+
+def _rebuild_linked_checklists(doc):
+	"""A scheme PO arriving (or leaving) changes the shipment's document
+	requirements (§5.3: 0.1% PO → GST Supplier Compliance Pack)."""
+	from exportflow.checklist import rebuild_for_shipments
+
+	rebuild_for_shipments(_linked_shipments(doc))
 
 
 def backfill_shipment_links(doc):

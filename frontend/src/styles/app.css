@@ -264,6 +264,9 @@ td .mode svg { color: var(--fg-3) }
 .row .when.warn { color: var(--pending) } .row .when.bad { color: var(--err) } .row .when.mut { color: var(--fg-3) }
 
 /* ============ Doc checklist ============ */
+/* contextual action link — usable inside checklist rows and table cells */
+.act { font-size: 12.5px; font-weight: 500; color: var(--iris); text-decoration: none; cursor: pointer }
+.act:hover { text-decoration: underline }
 .docrows { display: flex; flex-direction: column }
 .docgrp { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--fg-3); padding: 11px 18px 7px; border-bottom: 1px solid var(--hairline); background: var(--th-bg) }
 .drow { display: flex; align-items: center; gap: 12px; padding: 10px 18px; border-bottom: 1px solid var(--hairline); transition: background .18s var(--ease), transform .25s var(--spring) }

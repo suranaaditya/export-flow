@@ -13,7 +13,7 @@ import {
 	type SOProcurement,
 } from '@/lib/api';
 import { fmtMoney } from '@/lib/format';
-import { GRADE_OPTIONS, MASTERS, PORT_MODES, type OptionSource } from '@/lib/masters';
+import { MASTERS, STATIC_OPTIONS, type OptionSource } from '@/lib/masters';
 
 const SUPPLIER_DEF = MASTERS.find((m) => m.doctype === 'Supplier')!;
 const ITEM_DEF = MASTERS.find((m) => m.doctype === 'Item')!;
@@ -270,8 +270,7 @@ export function NewPurchaseOrder() {
 		incoterms: [],
 		uoms: ctx?.uoms ?? [],
 		countries: ctx?.countries ?? [],
-		grades: GRADE_OPTIONS,
-		portModes: PORT_MODES,
+		...STATIC_OPTIONS,
 	};
 
 	const supplierOptions = (ctx?.suppliers ?? []).map((s) => ({ value: s.name, label: s.supplier_name }));

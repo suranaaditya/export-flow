@@ -1,0 +1,306 @@
+{
+ "actions": [],
+ "autoname": "naming_series:",
+ "creation": "2026-06-12 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "document_type",
+  "category",
+  "origin",
+  "cb_di_head",
+  "status",
+  "responsible_party",
+  "section_refs",
+  "shipment",
+  "customer",
+  "cb_di_refs",
+  "sales_order",
+  "purchase_order",
+  "section_detail",
+  "document_number",
+  "document_date",
+  "due_date",
+  "cb_di_detail",
+  "originals",
+  "copies",
+  "file",
+  "description",
+  "remarks",
+  "section_blocking",
+  "blocking",
+  "cb_di_blocking",
+  "blocked_milestone",
+  "min_unblock_status",
+  "section_meta",
+  "source",
+  "source_key"
+ ],
+ "fields": [
+  {
+   "default": "DOC-.YY.-.#####",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "hidden": 1,
+   "label": "Series",
+   "no_copy": 1,
+   "options": "DOC-.YY.-.#####",
+   "print_hide": 1
+  },
+  {
+   "fieldname": "document_type",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Document Type",
+   "options": "Document Type",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "category",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Category",
+   "options": "Commercial\nRegulatory\nQuality\nLogistics\nBanking\nCompany",
+   "read_only": 1
+  },
+  {
+   "fieldname": "origin",
+   "fieldtype": "Select",
+   "label": "Origin",
+   "options": "Generated\nTracked",
+   "read_only": 1
+  },
+  {
+   "fieldname": "cb_di_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Pending",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Pending\nDrafted\nSent/Filed\nReceived\nVerified\nNot Applicable",
+   "reqd": 1
+  },
+  {
+   "description": "Defaults from the Document Type",
+   "fieldname": "responsible_party",
+   "fieldtype": "Select",
+   "label": "Responsible Party",
+   "options": "\nUs\nCHA\nSupplier\nShipping Line/Airline\nBank\nAuthority\nCustomer"
+  },
+  {
+   "fieldname": "section_refs",
+   "fieldtype": "Section Break",
+   "label": "References"
+  },
+  {
+   "fieldname": "shipment",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Shipment",
+   "options": "Export Shipment",
+   "search_index": 1
+  },
+  {
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "label": "Customer",
+   "options": "Customer"
+  },
+  {
+   "fieldname": "cb_di_refs",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "sales_order",
+   "fieldtype": "Link",
+   "label": "Sales Order",
+   "options": "Sales Order"
+  },
+  {
+   "fieldname": "purchase_order",
+   "fieldtype": "Link",
+   "label": "Purchase Order",
+   "options": "Purchase Order"
+  },
+  {
+   "fieldname": "section_detail",
+   "fieldtype": "Section Break",
+   "label": "Document Details"
+  },
+  {
+   "fieldname": "document_number",
+   "fieldtype": "Data",
+   "label": "Document Number"
+  },
+  {
+   "fieldname": "document_date",
+   "fieldtype": "Date",
+   "label": "Document Date"
+  },
+  {
+   "fieldname": "due_date",
+   "fieldtype": "Date",
+   "label": "Due Date"
+  },
+  {
+   "fieldname": "cb_di_detail",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "originals",
+   "fieldtype": "Int",
+   "label": "Originals"
+  },
+  {
+   "fieldname": "copies",
+   "fieldtype": "Int",
+   "label": "Copies"
+  },
+  {
+   "fieldname": "file",
+   "fieldtype": "Attach",
+   "label": "File"
+  },
+  {
+   "description": "Requirement wording (e.g. as stated in the LC)",
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description"
+  },
+  {
+   "fieldname": "remarks",
+   "fieldtype": "Small Text",
+   "label": "Remarks"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_blocking",
+   "fieldtype": "Section Break",
+   "label": "Blocking"
+  },
+  {
+   "default": "0",
+   "fieldname": "blocking",
+   "fieldtype": "Check",
+   "label": "Blocks a Milestone"
+  },
+  {
+   "fieldname": "cb_di_blocking",
+   "fieldtype": "Column Break"
+  },
+  {
+   "depends_on": "blocking",
+   "fieldname": "blocked_milestone",
+   "fieldtype": "Data",
+   "label": "Blocked Milestone"
+  },
+  {
+   "default": "Received",
+   "depends_on": "blocking",
+   "fieldname": "min_unblock_status",
+   "fieldtype": "Select",
+   "label": "Unblocks At Status",
+   "options": "Drafted\nSent/Filed\nReceived\nVerified"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_meta",
+   "fieldtype": "Section Break",
+   "label": "Checklist Engine"
+  },
+  {
+   "default": "Manual",
+   "description": "Rule/LC rows are managed by the checklist engine; Manual rows are never auto-removed",
+   "fieldname": "source",
+   "fieldtype": "Select",
+   "label": "Source",
+   "options": "Manual\nRule\nLC",
+   "read_only": 1
+  },
+  {
+   "fieldname": "source_key",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Source Key",
+   "no_copy": 1,
+   "read_only": 1,
+   "search_index": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-06-12 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ExportFlow",
+ "name": "Document Instance",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Export Admin",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Export Operations",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Export Accounts"
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Export Viewer"
+  }
+ ],
+ "search_fields": "document_type,shipment,status,document_number",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "document_type",
+ "track_changes": 1
+}
