@@ -25,6 +25,46 @@ def validate(doc, method=None):
 	set_gst_export_deadline(doc)
 
 
+def on_submit(doc, method=None):
+	backfill_shipment_links(doc)
+
+
+def on_cancel(doc, method=None):
+	clear_shipment_links(doc)
+
+
+def backfill_shipment_links(doc):
+	"""Shipments may be booked before procurement exists — once the PO is
+	submitted, claim the shipment item rows that ship its SO lines so the
+	GST clock and PO↔shipment links work regardless of creation order."""
+	for row in doc.items:
+		if not row.sales_order_item:
+			continue
+		for esi in frappe.get_all(
+			"Export Shipment Item",
+			filters={"so_detail": row.sales_order_item, "purchase_order": ["is", "not set"]},
+			pluck="name",
+		):
+			frappe.db.set_value(
+				"Export Shipment Item",
+				esi,
+				{"purchase_order": doc.name, "po_detail": row.name},
+				update_modified=False,
+			)
+
+
+def clear_shipment_links(doc):
+	for esi in frappe.get_all(
+		"Export Shipment Item", filters={"purchase_order": doc.name}, pluck="name"
+	):
+		frappe.db.set_value(
+			"Export Shipment Item",
+			esi,
+			{"purchase_order": None, "po_detail": None},
+			update_modified=False,
+		)
+
+
 def set_gst_export_deadline(doc):
 	if doc.get("merchant_export_scheme") and doc.get("supplier_invoice_date"):
 		doc.gst_export_deadline = add_days(getdate(doc.supplier_invoice_date), GST_EXPORT_WINDOW_DAYS)

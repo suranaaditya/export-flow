@@ -9,7 +9,10 @@ import { Documents } from '@/pages/Documents';
 import { LetterOfCreditPage } from '@/pages/LetterOfCreditPage';
 import { NewSalesOrder } from '@/pages/NewSalesOrder';
 import { ProFormaInvoicePage } from '@/pages/ProFormaInvoicePage';
+import { NewShipment } from '@/pages/NewShipment';
+import { PurchaseOrderDetail } from '@/pages/PurchaseOrderDetail';
 import { Purchases } from '@/pages/Purchases';
+import { ShipmentDetail } from '@/pages/ShipmentDetail';
 import { SalesOrderDetail } from '@/pages/SalesOrderDetail';
 import { SalesOrders } from '@/pages/SalesOrders';
 import { Settings } from '@/pages/Settings';
@@ -51,7 +54,10 @@ export default function App() {
 								<Route path="lc/new" element={<LetterOfCreditPage />} />
 								<Route path="lc/:name" element={<LetterOfCreditPage />} />
 								<Route path="purchases" element={<Purchases />} />
+								<Route path="purchases/:id" element={<PurchaseOrderDetail />} />
 								<Route path="shipments" element={<Shipments />} />
+								<Route path="shipments/new" element={<NewShipment />} />
+								<Route path="shipments/:id" element={<ShipmentDetail />} />
 								<Route path="documents" element={<Documents />} />
 								<Route path="compliance" element={<Compliance />} />
 								<Route path="settings" element={<Settings />} />

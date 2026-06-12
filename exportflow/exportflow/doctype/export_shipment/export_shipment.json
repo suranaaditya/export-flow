@@ -1,0 +1,380 @@
+{
+ "actions": [],
+ "autoname": "naming_series:",
+ "creation": "2026-06-12 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "customer",
+  "customer_name",
+  "mode",
+  "cb_shp_head",
+  "current_milestone",
+  "incoterm",
+  "cha",
+  "section_route",
+  "port_of_loading",
+  "port_of_discharge",
+  "final_destination",
+  "cb_shp_route",
+  "etd",
+  "eta",
+  "section_sea",
+  "vessel",
+  "voyage",
+  "booking_number",
+  "cb_shp_sea",
+  "container_numbers",
+  "vgm_filed",
+  "section_customs",
+  "shipping_bill_number",
+  "shipping_bill_date",
+  "leo_date",
+  "cb_shp_customs",
+  "bl_number",
+  "bl_date",
+  "egm_number",
+  "egm_date",
+  "section_air",
+  "airline",
+  "flight_number",
+  "cb_shp_air",
+  "awb_number",
+  "awb_date",
+  "section_banking",
+  "letter_of_credit",
+  "section_items",
+  "items",
+  "section_milestones",
+  "milestones",
+  "section_notes",
+  "notes"
+ ],
+ "fields": [
+  {
+   "default": "SHP-.YY.-.####",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "hidden": 1,
+   "label": "Series",
+   "no_copy": 1,
+   "options": "SHP-.YY.-.####",
+   "print_hide": 1
+  },
+  {
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Customer",
+   "options": "Customer",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "customer.customer_name",
+   "fieldname": "customer_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Customer Name",
+   "read_only": 1
+  },
+  {
+   "default": "Sea",
+   "fieldname": "mode",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Mode",
+   "options": "Sea\nAir",
+   "reqd": 1
+  },
+  {
+   "fieldname": "cb_shp_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "current_milestone",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Current Milestone",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "incoterm",
+   "fieldtype": "Link",
+   "label": "Incoterm",
+   "options": "Incoterm"
+  },
+  {
+   "fieldname": "cha",
+   "fieldtype": "Link",
+   "label": "CHA",
+   "options": "CHA"
+  },
+  {
+   "fieldname": "section_route",
+   "fieldtype": "Section Break",
+   "label": "Route"
+  },
+  {
+   "fieldname": "port_of_loading",
+   "fieldtype": "Link",
+   "label": "Port of Loading",
+   "options": "Port"
+  },
+  {
+   "fieldname": "port_of_discharge",
+   "fieldtype": "Link",
+   "label": "Port of Discharge",
+   "options": "Port"
+  },
+  {
+   "fieldname": "final_destination",
+   "fieldtype": "Data",
+   "label": "Final Destination"
+  },
+  {
+   "fieldname": "cb_shp_route",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "etd",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "ETD"
+  },
+  {
+   "fieldname": "eta",
+   "fieldtype": "Date",
+   "label": "ETA"
+  },
+  {
+   "depends_on": "eval:doc.mode=='Sea'",
+   "fieldname": "section_sea",
+   "fieldtype": "Section Break",
+   "label": "Sea"
+  },
+  {
+   "fieldname": "vessel",
+   "fieldtype": "Data",
+   "label": "Vessel"
+  },
+  {
+   "fieldname": "voyage",
+   "fieldtype": "Data",
+   "label": "Voyage"
+  },
+  {
+   "fieldname": "booking_number",
+   "fieldtype": "Data",
+   "label": "Booking Number"
+  },
+  {
+   "fieldname": "cb_shp_sea",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "One per line",
+   "fieldname": "container_numbers",
+   "fieldtype": "Small Text",
+   "label": "Container Numbers"
+  },
+  {
+   "default": "0",
+   "fieldname": "vgm_filed",
+   "fieldtype": "Check",
+   "label": "VGM Filed"
+  },
+  {
+   "fieldname": "section_customs",
+   "fieldtype": "Section Break",
+   "label": "Customs & Transport Documents"
+  },
+  {
+   "fieldname": "shipping_bill_number",
+   "fieldtype": "Data",
+   "label": "Shipping Bill Number"
+  },
+  {
+   "fieldname": "shipping_bill_date",
+   "fieldtype": "Date",
+   "label": "Shipping Bill Date"
+  },
+  {
+   "fieldname": "leo_date",
+   "fieldtype": "Date",
+   "label": "LEO Date"
+  },
+  {
+   "fieldname": "cb_shp_customs",
+   "fieldtype": "Column Break"
+  },
+  {
+   "depends_on": "eval:doc.mode=='Sea'",
+   "fieldname": "bl_number",
+   "fieldtype": "Data",
+   "label": "B/L Number"
+  },
+  {
+   "depends_on": "eval:doc.mode=='Sea'",
+   "fieldname": "bl_date",
+   "fieldtype": "Date",
+   "label": "B/L Date"
+  },
+  {
+   "fieldname": "egm_number",
+   "fieldtype": "Data",
+   "label": "EGM Number"
+  },
+  {
+   "fieldname": "egm_date",
+   "fieldtype": "Date",
+   "label": "EGM Date"
+  },
+  {
+   "depends_on": "eval:doc.mode=='Air'",
+   "fieldname": "section_air",
+   "fieldtype": "Section Break",
+   "label": "Air"
+  },
+  {
+   "fieldname": "airline",
+   "fieldtype": "Data",
+   "label": "Airline"
+  },
+  {
+   "fieldname": "flight_number",
+   "fieldtype": "Data",
+   "label": "Flight"
+  },
+  {
+   "fieldname": "cb_shp_air",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "awb_number",
+   "fieldtype": "Data",
+   "label": "AWB Number"
+  },
+  {
+   "fieldname": "awb_date",
+   "fieldtype": "Date",
+   "label": "AWB Date"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_banking",
+   "fieldtype": "Section Break",
+   "label": "Banking"
+  },
+  {
+   "fieldname": "letter_of_credit",
+   "fieldtype": "Link",
+   "label": "Letter of Credit",
+   "options": "Letter of Credit"
+  },
+  {
+   "fieldname": "section_items",
+   "fieldtype": "Section Break",
+   "label": "Items"
+  },
+  {
+   "fieldname": "items",
+   "fieldtype": "Table",
+   "label": "Items",
+   "options": "Export Shipment Item",
+   "reqd": 1
+  },
+  {
+   "fieldname": "section_milestones",
+   "fieldtype": "Section Break",
+   "label": "Milestones"
+  },
+  {
+   "fieldname": "milestones",
+   "fieldtype": "Table",
+   "label": "Milestones",
+   "options": "Shipment Milestone"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_notes",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-06-12 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ExportFlow",
+ "name": "Export Shipment",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Export Admin",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Export Operations",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Export Accounts"
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Export Viewer"
+  }
+ ],
+ "search_fields": "customer_name,current_milestone",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "customer_name",
+ "track_changes": 1
+}

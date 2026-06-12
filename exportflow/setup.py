@@ -23,6 +23,12 @@ GRANTS = {
 		"Export Viewer": [],
 	},
 	"Bank Account": {role: [] for role in EXPORT_ROLES},
+	"Purchase Order": {
+		"Export Admin": TRANSACTION_PTYPES,
+		"Export Operations": TRANSACTION_PTYPES,
+		"Export Accounts": [],
+		"Export Viewer": [],
+	},
 	"Payment Entry": {
 		"Export Admin": TRANSACTION_PTYPES,
 		"Export Accounts": TRANSACTION_PTYPES,

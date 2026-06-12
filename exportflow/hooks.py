@@ -31,6 +31,9 @@ doc_events = {
 		# validate does not run on update-after-submit; the supplier invoice
 		# arrives after PO submission, so recompute the deadline there too
 		"before_update_after_submit": "exportflow.overrides.purchase_order.validate",
+		# shipments booked before procurement get their PO links backfilled
+		"on_submit": "exportflow.overrides.purchase_order.on_submit",
+		"on_cancel": "exportflow.overrides.purchase_order.on_cancel",
 	},
 	"Payment Entry": {
 		"validate": "exportflow.overrides.payment_entry.validate",

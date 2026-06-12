@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { useFrappeGetCall, useFrappePostCall } from 'frappe-react-sdk';
+import { useFrappeGetCall, useFrappeGetDocList, useFrappePostCall } from 'frappe-react-sdk';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
-import { Card, CHead, EmptyMsg, Facts, LRow, Tag } from '@/components/ui';
+import { SelectInput, TextInput } from '@/components/form';
+import { Card, CHead, EmptyMsg, Facts, LRow, Modal, Tag } from '@/components/ui';
 import {
 	API,
 	lcIsOpen,
@@ -11,6 +12,7 @@ import {
 	pfiTone,
 	soTone,
 	urgencyTone,
+	type SOProcurement,
 	type SOMoneySummary,
 } from '@/lib/api';
 import { daysUntil, fmtDate, fmtDateLong, fmtMoney } from '@/lib/format';
@@ -19,6 +21,16 @@ import { daysUntil, fmtDate, fmtDateLong, fmtMoney } from '@/lib/format';
 function dotJoin(parts: (string | null | undefined)[]): string {
 	return parts.filter(Boolean).join(' · ');
 }
+
+/** Per-line draft state in the create-PO modal, keyed by so_detail. */
+interface PoSelection {
+	checked: boolean;
+	qty: string;
+	supplier: string;
+	rate: string;
+}
+
+const PO_GRID = '40px 1.7fr 110px 1.1fr 110px';
 
 export function SalesOrderDetail() {
 	const { id = '' } = useParams<{ id: string }>();
@@ -31,6 +43,26 @@ export function SalesOrderDetail() {
 	const { call: submitSo, loading: submitting } = useFrappePostCall(API.submitSo);
 	const [actionErr, setActionErr] = useState<string | null>(null);
 
+	// procurement state per SO line + the POs already raised against each
+	const proc = useFrappeGetCall<{ message: SOProcurement }>(API.soProcurement, {
+		sales_order: id,
+	});
+	const { call: createPo, loading: creatingPo } = useFrappePostCall<{
+		message: { purchase_orders: { name: string; supplier: string }[] };
+	}>(API.createPo);
+	const suppliersResult = useFrappeGetDocList<{
+		name: string;
+		supplier_name: string;
+		disabled: 0 | 1;
+	}>('Supplier', {
+		fields: ['name', 'supplier_name'],
+		filters: [['disabled', '=', 0]],
+		limit: 200,
+	});
+	const [poOpen, setPoOpen] = useState(false);
+	const [poSel, setPoSel] = useState<Record<string, PoSelection>>({});
+	const [poErr, setPoErr] = useState<string | null>(null);
+
 	async function onSubmitOrder() {
 		setActionErr(null);
 		try {
@@ -38,6 +70,67 @@ export function SalesOrderDetail() {
 			mutate();
 		} catch (e) {
 			setActionErr(parseServerError(e));
+		}
+	}
+
+	const procLines = proc.data?.message.lines ?? [];
+	const companyCurrency = proc.data?.message.company_currency ?? '';
+	const openLines = procLines.filter((l) => l.remaining > 0);
+
+	function openPoModal() {
+		const seed: Record<string, PoSelection> = {};
+		for (const l of openLines) {
+			seed[l.so_detail] = { checked: true, qty: String(l.remaining), supplier: '', rate: '' };
+		}
+		setPoSel(seed);
+		setPoErr(null);
+		setPoOpen(true);
+	}
+
+	const setLineSel = (key: string, patch: Partial<PoSelection>) =>
+		setPoSel((s) => {
+			const cur = s[key];
+			return cur ? { ...s, [key]: { ...cur, ...patch } } : s;
+		});
+
+	const checkedLines = openLines.filter((l) => poSel[l.so_detail]?.checked);
+	const supplierCount = new Set(
+		checkedLines.map((l) => poSel[l.so_detail]?.supplier).filter(Boolean),
+	).size;
+
+	async function onCreatePo() {
+		if (checkedLines.length === 0) return setPoErr('Tick at least one line to order.');
+		for (const l of checkedLines) {
+			const s = poSel[l.so_detail];
+			if (!s) continue;
+			const qty = Number(s.qty);
+			if (!s.qty || qty <= 0) return setPoErr(`${l.item_name}: quantity is required.`);
+			if (qty > l.remaining)
+				return setPoErr(`${l.item_name}: only ${l.remaining} remains unordered.`);
+			if (!s.supplier) return setPoErr(`${l.item_name}: pick the supplier.`);
+			if (!s.rate || Number(s.rate) <= 0)
+				return setPoErr(`${l.item_name}: buying rate is required.`);
+		}
+		setPoErr(null);
+		try {
+			const result = await createPo({
+				sales_order: id,
+				selections: checkedLines.map((l) => {
+					const s = poSel[l.so_detail];
+					return {
+						so_detail: l.so_detail,
+						supplier: s?.supplier ?? '',
+						qty: Number(s?.qty),
+						rate: Number(s?.rate),
+					};
+				}),
+			});
+			setPoOpen(false);
+			void proc.mutate();
+			const made = result.message.purchase_orders;
+			if (made.length === 1) navigate('/purchases/' + made[0].name);
+		} catch (e) {
+			setPoErr(parseServerError(e));
 		}
 	}
 
@@ -69,8 +162,9 @@ export function SalesOrderDetail() {
 				<div style={{ marginTop: 22 }}>
 					<Card>
 						<div className="ferr" style={{ padding: '18px 20px' }}>
-							This sales order could not be loaded. It may not exist, or you may not have
-							permission to view it.
+							{error
+								? parseServerError(error)
+								: 'This sales order could not be loaded. It may not exist, or you may not have permission to view it.'}
 						</div>
 					</Card>
 				</div>
@@ -189,6 +283,95 @@ export function SalesOrderDetail() {
 							))
 						)}
 					</Card>
+
+					<Card>
+						<CHead
+							icon="cube"
+							title="Procurement"
+							count={proc.data ? `${procLines.length} lines` : undefined}
+							action={
+								so.docstatus === 1 && openLines.length > 0 ? (
+									<a
+										href="#"
+										onClick={(e) => {
+											e.preventDefault();
+											openPoModal();
+										}}
+									>
+										Create PO
+									</a>
+								) : undefined
+							}
+						/>
+						{proc.error ? (
+							<div className="ferr" style={{ padding: '14px 18px' }}>
+								{parseServerError(proc.error)}
+							</div>
+						) : !proc.data ? (
+							<div className="sub" style={{ padding: '14px 18px' }}>
+								Loading…
+							</div>
+						) : procLines.length === 0 ? (
+							<EmptyMsg title="No lines to procure" text="This order has no item lines yet." />
+						) : (
+							<table>
+								<thead>
+									<tr>
+										<th>Item</th>
+										<th>Ordered</th>
+										<th>Shipped</th>
+										<th>Suppliers / POs</th>
+									</tr>
+								</thead>
+								<tbody>
+									{procLines.map((l) => (
+										<tr key={l.so_detail}>
+											<td>
+												<div className="c1">{l.item_name}</div>
+												<div className="c2">{l.item_code}</div>
+											</td>
+											<td>
+												<span className="num">
+													{l.ordered_qty + l.draft_qty} / {l.qty}
+												</span>
+												{l.draft_qty > 0 && <div className="c2">draft {l.draft_qty}</div>}
+											</td>
+											<td>
+												<span className="dim">{l.shipped_qty}</span>
+												{l.in_transit_qty > 0 && <div className="c2">in transit {l.in_transit_qty}</div>}
+											</td>
+											<td>
+												{l.pos.length === 0 ? (
+													<span className="dim">not ordered</span>
+												) : (
+													<div
+														style={{
+															display: 'flex',
+															flexWrap: 'wrap',
+															alignItems: 'center',
+															gap: '4px 12px',
+														}}
+													>
+														{l.pos.map((po) => (
+															<span
+																key={po.name}
+																style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+															>
+																<Link className="id id-sm" to={'/purchases/' + po.name}>
+																	{po.name}
+																</Link>
+																{po.merchant_export_scheme === 1 && <Tag tone="pend">0.1%</Tag>}
+															</span>
+														))}
+													</div>
+												)}
+											</td>
+										</tr>
+									))}
+								</tbody>
+							</table>
+						)}
+					</Card>
 				</div>
 
 				<div className="stack">
@@ -234,6 +417,74 @@ export function SalesOrderDetail() {
 					</Card>
 				</div>
 			</div>
+
+			{poOpen && (
+				<Modal title="Create purchase order" icon="cube" onClose={() => setPoOpen(false)}>
+					<div className="reqhead" style={{ gridTemplateColumns: PO_GRID }}>
+						<span />
+						<span>Item</span>
+						<span>Qty</span>
+						<span>Supplier</span>
+						<span>Buying rate{companyCurrency ? ` (${companyCurrency})` : ''}</span>
+					</div>
+					{openLines.map((l) => {
+						const s = poSel[l.so_detail];
+						if (!s) return null;
+						return (
+							<div className="reqrow" key={l.so_detail} style={{ gridTemplateColumns: PO_GRID }}>
+								<input
+									type="checkbox"
+									checked={s.checked}
+									aria-label={`Order ${l.item_name}`}
+									onChange={(e) => setLineSel(l.so_detail, { checked: e.target.checked })}
+								/>
+								<span>
+									<span className="c1" style={{ display: 'block' }}>
+										{l.item_name}
+									</span>
+									<span className="c2" style={{ display: 'block' }}>
+										{[l.remaining, l.uom, 'remaining'].filter(Boolean).join(' ')}
+									</span>
+								</span>
+								<TextInput
+									type="number"
+									value={s.qty}
+									onChange={(v) => setLineSel(l.so_detail, { qty: v })}
+								/>
+								<SelectInput
+									value={s.supplier}
+									onChange={(v) => setLineSel(l.so_detail, { supplier: v })}
+									options={(suppliersResult.data ?? []).map((sup) => ({
+										value: sup.name,
+										label: sup.supplier_name,
+									}))}
+									allowEmpty
+								/>
+								<TextInput
+									type="number"
+									value={s.rate}
+									onChange={(v) => setLineSel(l.so_detail, { rate: v })}
+								/>
+							</div>
+						);
+					})}
+					<div className="formfoot">
+						{poErr && <span className="ferr">{poErr}</span>}
+						<span className="spacer" />
+						<button
+							type="button"
+							className="btn primary"
+							disabled={creatingPo}
+							onClick={() => void onCreatePo()}
+						>
+							<Icon name="plus" size={15} />
+							{creatingPo
+								? 'Creating…'
+								: `Create purchase order${supplierCount > 1 ? 's' : ''}`}
+						</button>
+					</div>
+				</Modal>
+			)}
 
 			<footer>
 				<b>ExportFlow</b> · DUX Digitech

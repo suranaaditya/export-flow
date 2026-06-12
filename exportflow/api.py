@@ -325,6 +325,566 @@ def submit_sales_order(name: str) -> dict:
 	return {"name": doc.name, "docstatus": doc.docstatus}
 
 
+def _draft_po_qty(so_detail: str) -> float:
+	"""Quantity already covered by DRAFT POs for an SO line (submitted POs are
+	reflected in the SO item's ordered_qty by ERPNext itself)."""
+	return flt(
+		frappe.db.sql(
+			"""SELECT COALESCE(SUM(poi.qty), 0)
+			   FROM `tabPurchase Order Item` poi
+			   JOIN `tabPurchase Order` po ON po.name = poi.parent
+			   WHERE poi.sales_order_item = %s AND po.docstatus = 0""",
+			(so_detail,),
+		)[0][0]
+	)
+
+
+def _shipped_qty(so_detail: str) -> float:
+	return flt(
+		frappe.db.sql(
+			"""SELECT COALESCE(SUM(qty), 0) FROM `tabExport Shipment Item`
+			   WHERE so_detail = %s""",
+			(so_detail,),
+		)[0][0]
+	)
+
+
+def _ordered_in_txn_uom(line) -> float:
+	"""ordered_qty is tracked in stock UOM — convert to the line's UOM."""
+	return flt(line.ordered_qty) / (flt(line.get("conversion_factor")) or 1.0)
+
+
+def _delivered_shipped_split(so_detail: str) -> tuple[float, float]:
+	"""(total shipped, of which still in transit) for an SO line — in-transit
+	means on a shipment whose Delivered milestone is not yet completed."""
+	row = frappe.db.sql(
+		"""SELECT COALESCE(SUM(esi.qty), 0) AS total,
+		          COALESCE(SUM(CASE WHEN sm.completed = 1 THEN 0 ELSE esi.qty END), 0) AS in_transit
+		   FROM `tabExport Shipment Item` esi
+		   LEFT JOIN `tabShipment Milestone` sm
+		          ON sm.parent = esi.parent AND sm.milestone = 'Delivered'
+		   WHERE esi.so_detail = %s""",
+		(so_detail,),
+		as_dict=True,
+	)[0]
+	return flt(row.total, 3), flt(row.in_transit, 3)
+
+
+@frappe.whitelist()
+def get_so_procurement(sales_order: str) -> dict:
+	"""Per-line procurement state for the SO screen: ordered (submitted),
+	draft-covered, remaining, shipped/in-transit, and the POs per line."""
+	frappe.has_permission("Sales Order", "read", doc=sales_order, throw=True)
+	frappe.has_permission("Purchase Order", "read", throw=True)
+
+	company = frappe.db.get_single_value("Global Defaults", "default_company")
+	lines = frappe.get_all(
+		"Sales Order Item",
+		filters={"parent": sales_order, "parenttype": "Sales Order"},
+		fields=[
+			"name as so_detail",
+			"item_code",
+			"item_name",
+			"qty",
+			"uom",
+			"rate",
+			"ordered_qty",
+			"conversion_factor",
+		],
+		order_by="idx asc",
+	)
+	for line in lines:
+		line["ordered_qty"] = flt(_ordered_in_txn_uom(line), 3)
+		line["draft_qty"] = flt(_draft_po_qty(line.so_detail), 3)
+		line["remaining"] = flt(
+			max(0.0, flt(line.qty) - line["ordered_qty"] - line["draft_qty"]), 3
+		)
+		shipped, in_transit = _delivered_shipped_split(line.so_detail)
+		line["shipped_qty"] = shipped
+		line["in_transit_qty"] = in_transit
+		line.pop("conversion_factor", None)
+		line["pos"] = frappe.db.sql(
+			"""SELECT po.name, po.supplier, po.docstatus, poi.qty, poi.rate,
+			          po.merchant_export_scheme, po.gst_export_deadline
+			   FROM `tabPurchase Order Item` poi
+			   JOIN `tabPurchase Order` po ON po.name = poi.parent
+			   WHERE poi.sales_order_item = %s AND po.docstatus < 2
+			   ORDER BY po.creation asc""",
+			(line.so_detail,),
+			as_dict=True,
+		)
+	return {"lines": lines, "company_currency": frappe.db.get_value("Company", company, "default_currency")}
+
+
+@frappe.whitelist()
+def create_purchase_order(sales_order: str, selections) -> dict:
+	"""Negotiated-procurement flow: the user picks supplier, qty and buying
+	rate per SO line. SO rows get supplier + delivered_by_supplier, then
+	ERPNext's drop-ship mapper creates one PO per supplier with row-level
+	SO links; our negotiated rates and quantities are applied on top.
+
+	The mapper keys its selections by item_code, so it is called once per
+	supplier and the result is asserted to cover every selection — the same
+	item routed to two suppliers would otherwise be silently collapsed."""
+	from erpnext.selling.doctype.sales_order.sales_order import make_purchase_order
+
+	frappe.has_permission("Purchase Order", "create", throw=True)
+	if isinstance(selections, str):
+		selections = json.loads(selections)
+	if not selections:
+		frappe.throw(_("Pick at least one line"))
+
+	# serialise competing orders against the same SO (remaining-qty TOCTOU)
+	frappe.db.sql(
+		"SELECT name FROM `tabSales Order Item` WHERE parent = %s FOR UPDATE", (sales_order,)
+	)
+
+	so = frappe.get_doc("Sales Order", sales_order)
+	if so.docstatus != 1:
+		frappe.throw(_("Sales Order {0} must be submitted first").format(sales_order))
+	so_rows = {row.name: row for row in so.items}
+
+	company_currency = frappe.db.get_value("Company", so.company, "default_currency")
+
+	by_detail: dict[str, dict] = {}
+	for sel in selections:
+		so_detail = sel.get("so_detail")
+		row = so_rows.get(so_detail)
+		if not row:
+			frappe.throw(_("Unknown sales order line {0}").format(so_detail))
+		if so_detail in by_detail:
+			frappe.throw(_("Line {0} picked twice").format(row.item_code))
+		ordered = flt(row.ordered_qty) / (flt(row.conversion_factor) or 1.0)
+		remaining = flt(row.qty) - ordered - _draft_po_qty(so_detail)
+		qty = flt(sel.get("qty")) or remaining
+		if qty <= 0:
+			frappe.throw(_("Line {0}: nothing left to order").format(row.item_code))
+		if qty > remaining + 1e-6:
+			frappe.throw(
+				_("Line {0}: only {1} remains unordered").format(row.item_code, flt(remaining, 3))
+			)
+		if flt(sel.get("rate")) <= 0:
+			frappe.throw(_("Line {0}: buying rate is required").format(row.item_code))
+		if not sel.get("supplier"):
+			frappe.throw(_("Line {0}: supplier is required").format(row.item_code))
+		by_detail[so_detail] = {
+			"supplier": sel["supplier"],
+			"qty": qty,
+			"rate": flt(sel["rate"]),
+			"item_code": row.item_code,
+		}
+
+	# flag the chosen rows as drop-ship with their negotiated supplier
+	for so_detail, sel in by_detail.items():
+		current = frappe.db.get_value(
+			"Sales Order Item", so_detail, ["supplier", "delivered_by_supplier"], as_dict=True
+		)
+		if current.supplier != sel["supplier"] or not current.delivered_by_supplier:
+			frappe.db.set_value(
+				"Sales Order Item",
+				so_detail,
+				{"supplier": sel["supplier"], "delivered_by_supplier": 1},
+				update_modified=False,
+			)
+
+	# one mapper call per supplier, with only that supplier's item codes
+	suppliers = sorted({sel["supplier"] for sel in by_detail.values()})
+	created = []
+	placed_details: set[str] = set()
+	for supplier in suppliers:
+		selected_items = [
+			{"item_code": sel["item_code"], "supplier": supplier}
+			for sel in by_detail.values()
+			if sel["supplier"] == supplier
+		]
+		pos = make_purchase_order(sales_order, selected_items=selected_items)
+		for po in pos:
+			# keep only the rows the user actually selected for THIS supplier
+			kept = []
+			for row in po.items:
+				sel = by_detail.get(row.sales_order_item)
+				if sel and sel["supplier"] == po.supplier:
+					row.qty = sel["qty"]
+					row.rate = sel["rate"]
+					kept.append(row)
+					placed_details.add(row.sales_order_item)
+			if not kept:
+				frappe.delete_doc("Purchase Order", po.name, force=True, ignore_permissions=True)
+				continue
+			po.items = kept
+			for idx, row in enumerate(po.items, start=1):
+				row.idx = idx
+			# procurement is negotiated in the company currency, regardless of
+			# the supplier's default currency
+			if po.currency != company_currency:
+				po.currency = company_currency
+				po.conversion_rate = 1
+			po.save()
+			created.append({"name": po.name, "supplier": po.supplier})
+
+	missing = set(by_detail.keys()) - placed_details
+	if missing:
+		# rolls back everything in this request, including the db_set flags
+		names = ", ".join(by_detail[d]["item_code"] for d in missing)
+		frappe.throw(_("Could not place these lines on a purchase order: {0}").format(names))
+	if not created:
+		frappe.throw(_("No purchase order could be created from the selection"))
+	return {"purchase_orders": created}
+
+
+@frappe.whitelist()
+def submit_purchase_order(name: str) -> dict:
+	doc = frappe.get_doc("Purchase Order", name)
+	doc.check_permission("submit")
+	if doc.docstatus != 0:
+		frappe.throw(_("Purchase Order {0} is not a draft").format(name))
+	doc.submit()
+	return {"name": doc.name, "docstatus": doc.docstatus}
+
+
+@frappe.whitelist()
+def get_purchase_orders() -> list[dict]:
+	"""Purchases list rows with SO references and the GST clock."""
+	frappe.has_permission("Purchase Order", "read", throw=True)
+	# get_list (unlike get_all) applies the caller's role/user permissions
+	pos = frappe.get_list(
+		"Purchase Order",
+		filters={"docstatus": ["<", 2]},
+		fields=[
+			"name",
+			"supplier",
+			"supplier_name",
+			"transaction_date",
+			"grand_total",
+			"currency",
+			"status",
+			"docstatus",
+			"merchant_export_scheme",
+			"supplier_invoice_no",
+			"supplier_invoice_date",
+			"gst_export_deadline",
+		],
+		order_by="transaction_date desc, creation desc",
+		limit_page_length=100,
+	)
+	for po in pos:
+		po["sales_orders"] = frappe.get_all(
+			"Purchase Order Item",
+			filters={"parent": po.name, "sales_order": ["is", "set"]},
+			pluck="sales_order",
+			distinct=True,
+		)
+	return pos
+
+
+@frappe.whitelist()
+def get_po_detail(name: str) -> dict:
+	frappe.has_permission("Purchase Order", "read", doc=name, throw=True)
+	po = frappe.get_doc("Purchase Order", name)
+	items = [
+		{
+			"name": row.name,
+			"item_code": row.item_code,
+			"item_name": row.item_name,
+			"qty": row.qty,
+			"uom": row.uom,
+			"rate": row.rate,
+			"amount": row.amount,
+			"sales_order": row.sales_order,
+			"sales_order_item": row.sales_order_item,
+			"delivered_by_supplier": row.delivered_by_supplier,
+		}
+		for row in po.items
+	]
+	shipments = frappe.db.sql(
+		"""SELECT DISTINCT esi.parent AS shipment, es.current_milestone, es.mode, es.etd
+		   FROM `tabExport Shipment Item` esi
+		   JOIN `tabExport Shipment` es ON es.name = esi.parent
+		   WHERE esi.purchase_order = %s""",
+		(name,),
+		as_dict=True,
+	)
+	return {
+		"po": {
+			"name": po.name,
+			"supplier": po.supplier,
+			"supplier_name": po.supplier_name,
+			"transaction_date": po.transaction_date,
+			"schedule_date": po.schedule_date,
+			"status": po.status,
+			"docstatus": po.docstatus,
+			"currency": po.currency,
+			"grand_total": po.grand_total,
+			"merchant_export_scheme": po.merchant_export_scheme,
+			"supplier_invoice_no": po.supplier_invoice_no,
+			"supplier_invoice_date": po.supplier_invoice_date,
+			"gst_export_deadline": po.gst_export_deadline,
+		},
+		"items": items,
+		"shipments": shipments,
+	}
+
+
+@frappe.whitelist()
+def get_shippable_lines(customer: str) -> list[dict]:
+	"""Submitted SO lines of this customer with unshipped quantity, plus the
+	PO sourcing each line (for auto-linking on the shipment)."""
+	frappe.has_permission("Sales Order", "read", throw=True)
+	frappe.has_permission("Export Shipment", "read", throw=True)
+
+	lines = frappe.db.sql(
+		"""SELECT soi.name AS so_detail, soi.parent AS sales_order, soi.item_code,
+		          soi.item_name, soi.qty, soi.uom
+		   FROM `tabSales Order Item` soi
+		   JOIN `tabSales Order` so ON so.name = soi.parent
+		   WHERE so.docstatus = 1 AND so.customer = %s AND so.status != 'Closed'
+		   ORDER BY so.transaction_date desc, soi.idx asc""",
+		(customer,),
+		as_dict=True,
+	)
+	out = []
+	for line in lines:
+		shipped = _shipped_qty(line.so_detail)
+		remaining = flt(flt(line.qty) - shipped, 3)
+		if remaining <= 1e-6:
+			continue
+		line["shipped_qty"] = flt(shipped, 3)
+		line["remaining"] = remaining
+
+		# one sub-row per sourcing PO line, so multi-sourced SO lines ship
+		# (and carry their GST clocks) against the right PO
+		po_rows = frappe.db.sql(
+			"""SELECT poi.name AS po_detail, poi.parent AS purchase_order, poi.qty AS po_qty,
+			          po.supplier
+			   FROM `tabPurchase Order Item` poi
+			   JOIN `tabPurchase Order` po ON po.name = poi.parent
+			   WHERE poi.sales_order_item = %s AND po.docstatus = 1
+			   ORDER BY po.creation asc""",
+			(line.so_detail,),
+			as_dict=True,
+		)
+		left = remaining
+		emitted = False
+		for po_row in po_rows:
+			if left <= 1e-6:
+				break
+			shipped_from_po = flt(
+				frappe.db.sql(
+					"SELECT COALESCE(SUM(qty), 0) FROM `tabExport Shipment Item` WHERE po_detail = %s",
+					(po_row.po_detail,),
+				)[0][0]
+			)
+			po_capacity = flt(min(flt(po_row.po_qty) - shipped_from_po, left), 3)
+			if po_capacity <= 1e-6:
+				continue
+			sub = dict(line)
+			sub["remaining"] = po_capacity
+			sub["purchase_order"] = po_row.purchase_order
+			sub["po_detail"] = po_row.po_detail
+			sub["supplier"] = po_row.supplier
+			out.append(sub)
+			left = flt(left - po_capacity, 3)
+			emitted = True
+		if left > 1e-6 or not emitted:
+			sub = dict(line)
+			sub["remaining"] = flt(left, 3)
+			sub["purchase_order"] = None
+			sub["po_detail"] = None
+			sub["supplier"] = None
+			out.append(sub)
+	return out
+
+
+@frappe.whitelist()
+def create_shipment(payload) -> dict:
+	frappe.has_permission("Export Shipment", "create", throw=True)
+	if isinstance(payload, str):
+		payload = json.loads(payload)
+
+	items = payload.get("items") or []
+	if not items:
+		frappe.throw(_("Pick at least one line to ship"))
+
+	doc = frappe.get_doc(
+		{
+			"doctype": "Export Shipment",
+			"customer": payload.get("customer"),
+			"mode": payload.get("mode") or "Sea",
+			"incoterm": payload.get("incoterm") or None,
+			"cha": payload.get("cha") or None,
+			"port_of_loading": payload.get("port_of_loading") or None,
+			"port_of_discharge": payload.get("port_of_discharge") or None,
+			"final_destination": payload.get("final_destination"),
+			"etd": payload.get("etd") or None,
+			"eta": payload.get("eta") or None,
+			"letter_of_credit": payload.get("letter_of_credit") or None,
+			"items": [
+				{
+					"item_code": row.get("item_code"),
+					"qty": flt(row.get("qty")),
+					"uom": row.get("uom"),
+					"batch_no": row.get("batch_no"),
+					"sales_order": row.get("sales_order"),
+					"so_detail": row.get("so_detail"),
+					"purchase_order": row.get("purchase_order") or None,
+					"po_detail": row.get("po_detail") or None,
+					"pack_description": row.get("pack_description"),
+				}
+				for row in items
+			],
+		}
+	)
+	doc.insert()
+	return {"name": doc.name}
+
+
+@frappe.whitelist()
+def get_shipments() -> list[dict]:
+	frappe.has_permission("Export Shipment", "read", throw=True)
+	rows = frappe.get_all(
+		"Export Shipment",
+		fields=["name", "customer", "customer_name", "mode", "current_milestone", "etd", "eta", "port_of_loading", "port_of_discharge"],
+		order_by="creation desc",
+		limit_page_length=100,
+	)
+	if rows:
+		counts = frappe.db.sql(
+			"""SELECT parent, COUNT(*) AS total, SUM(completed) AS done
+			   FROM `tabShipment Milestone`
+			   WHERE parent IN %s AND parenttype = 'Export Shipment'
+			   GROUP BY parent""",
+			(tuple(r.name for r in rows),),
+			as_dict=True,
+		)
+		by_parent = {c.parent: c for c in counts}
+		for row in rows:
+			c = by_parent.get(row.name)
+			row["milestones_total"] = c.total if c else 0
+			row["milestones_done"] = int(c.done or 0) if c else 0
+	return rows
+
+
+@frappe.whitelist()
+def get_shipment_detail(name: str) -> dict:
+	frappe.has_permission("Export Shipment", "read", doc=name, throw=True)
+	doc = frappe.get_doc("Export Shipment", name)
+
+	items = []
+	for row in doc.items:
+		so_qty = flt(frappe.db.get_value("Sales Order Item", row.so_detail, "qty"))
+		shipped_total = _shipped_qty(row.so_detail)
+		# fall back through the SO line when the shipment was booked before
+		# the PO existed (backfill normally fixes this on PO submit)
+		po_name = row.purchase_order
+		if not po_name:
+			po_name = frappe.db.get_value(
+				"Purchase Order Item",
+				{"sales_order_item": row.so_detail, "docstatus": 1},
+				"parent",
+			)
+		po = (
+			frappe.db.get_value(
+				"Purchase Order",
+				po_name,
+				["supplier_name", "merchant_export_scheme", "gst_export_deadline", "docstatus"],
+				as_dict=True,
+			)
+			if po_name
+			else None
+		)
+		items.append(
+			{
+				"name": row.name,
+				"item_code": row.item_code,
+				"item_name": row.item_name,
+				"batch_no": row.batch_no,
+				"qty": row.qty,
+				"uom": row.uom,
+				"pack_description": row.pack_description,
+				"sales_order": row.sales_order,
+				"so_detail": row.so_detail,
+				"so_qty": so_qty,
+				"so_shipped_total": shipped_total,
+				"purchase_order": po_name,
+				"po_cancelled": 1 if po and po.docstatus == 2 else 0,
+				"supplier": po.supplier_name if po else None,
+				"merchant_export_scheme": po.merchant_export_scheme if po else 0,
+				"gst_export_deadline": po.gst_export_deadline if po else None,
+			}
+		)
+
+	lc = None
+	if doc.letter_of_credit:
+		lc = frappe.db.get_value(
+			"Letter of Credit",
+			doc.letter_of_credit,
+			["name", "lc_number", "status", "expiry_date", "latest_shipment_date", "issuing_bank"],
+			as_dict=True,
+		)
+
+	export_done_on = doc.export_completed_on()
+
+	return {
+		"export_completed_on": str(export_done_on) if export_done_on else None,
+		"shipment": {
+			f: doc.get(f)
+			for f in (
+				"name",
+				"customer",
+				"customer_name",
+				"mode",
+				"current_milestone",
+				"incoterm",
+				"cha",
+				"port_of_loading",
+				"port_of_discharge",
+				"final_destination",
+				"etd",
+				"eta",
+				"vessel",
+				"voyage",
+				"booking_number",
+				"container_numbers",
+				"vgm_filed",
+				"shipping_bill_number",
+				"shipping_bill_date",
+				"leo_date",
+				"bl_number",
+				"bl_date",
+				"egm_number",
+				"egm_date",
+				"airline",
+				"flight_number",
+				"awb_number",
+				"awb_date",
+				"letter_of_credit",
+				"notes",
+			)
+		},
+		"milestones": [
+			{
+				"name": m.name,
+				"milestone": m.milestone,
+				"planned_date": m.planned_date,
+				"actual_date": m.actual_date,
+				"completed": m.completed,
+			}
+			for m in doc.milestones
+		],
+		"items": items,
+		"lc": lc,
+		"sales_orders": sorted({row.sales_order for row in doc.items}),
+	}
+
+
+@frappe.whitelist()
+def set_shipment_milestone(shipment: str, row: str, completed=1, actual_date=None) -> str:
+	doc = frappe.get_doc("Export Shipment", shipment)
+	doc.check_permission("write")
+	doc.set_milestone(row, bool(frappe.utils.cint(completed)), actual_date)
+	return doc.current_milestone
+
+
 @frappe.whitelist()
 def pfi_set_status(name: str, action: str):
 	"""Controlled status transitions from the UI: 'sent' or 'cancel'."""
