@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useFrappeGetDocList } from 'frappe-react-sdk';
 import { useNavigate } from 'react-router-dom';
+import { Icon } from '@/components/Icon';
 import { TextInput } from '@/components/form';
 import { Card, CHead, EmptyMsg, Tag } from '@/components/ui';
 import { soTone } from '@/lib/api';
@@ -60,10 +61,23 @@ export function SalesOrders() {
 				{isLoading ? 'Loading…' : <><b>{data?.length ?? 0}</b> orders</>}
 			</div>
 
-			<div style={{ display: 'flex', justifyContent: 'flex-end', margin: '22px 0 12px' }}>
+			<div
+				style={{
+					display: 'flex',
+					justifyContent: 'flex-end',
+					alignItems: 'center',
+					gap: 10,
+					margin: '22px 0 12px',
+				}}
+			>
 				<div className="field" style={{ width: 280 }}>
 					<TextInput value={query} onChange={setQuery} placeholder="Search SO or customer" />
 				</div>
+				{/* SOs are native ERPNext documents — created in the desk so the
+				    drop-ship flow, pricing and taxes all work as standard */}
+				<a className="btn primary" href="/app/sales-order/new" style={{ textDecoration: 'none' }}>
+					<Icon name="plus" size={15} /> New sales order
+				</a>
 			</div>
 
 			<Card accent>
@@ -78,7 +92,7 @@ export function SalesOrders() {
 						text={
 							query
 								? 'Try a different SO number or customer name.'
-								: 'New export deals will appear here as soon as they are booked.'
+								: 'Create the deal with "New sales order" (it opens the ERPNext form) — it appears here once the order is submitted.'
 						}
 					/>
 				) : (
