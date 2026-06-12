@@ -48,18 +48,34 @@ body::before { content: ""; position: fixed; inset: 0; background: var(--ambient
 .sfoot .usr { margin-left: auto }
 .content { flex: 1; min-width: 0 }
 
+/* collapsed rail — icons only, labels and brand text tucked away */
+.sidebar { transition: width .25s var(--ease) }
+.collapse-btn svg { transition: transform .25s var(--spring) }
+.sidebar.collapsed { width: 64px; padding: 18px 10px 16px }
+.sidebar.collapsed .brand { justify-content: center }
+.sidebar.collapsed .brand .btext { display: none }
+.sidebar.collapsed .snav a { justify-content: center; padding: 9px }
+.sidebar.collapsed .snav a .lbl { display: none }
+.sidebar.collapsed .sfoot { flex-direction: column; align-items: center; gap: 8px }
+.sidebar.collapsed .sfoot .usr { margin-left: 0 }
+.sidebar.collapsed .collapse-btn svg { transform: rotate(180deg) }
+
 @media (max-width: 1020px) {
 	.layout { flex-direction: column }
-	.sidebar {
+	.sidebar, .sidebar.collapsed {
 		width: 100%; height: auto; position: sticky;
 		flex-direction: row; align-items: center; gap: 12px; padding: 10px 16px;
 		border-right: 0; border-bottom: 1px solid var(--hairline);
 	}
 	.sidebar .brand { padding: 0 }
-	.snav { flex-direction: row; overflow-x: auto; gap: 2px }
-	.snav a { padding: 8px 10px }
+	.sidebar.collapsed .brand .btext { display: block }
+	.snav, .sidebar.collapsed .snav { flex-direction: row; overflow-x: auto; gap: 2px }
+	.snav a, .sidebar.collapsed .snav a { padding: 8px 10px }
 	.snav a .lbl { display: none }
-	.sfoot { border-top: 0; padding: 0; margin-left: auto }
+	.sfoot, .sidebar.collapsed .sfoot { flex-direction: row; border-top: 0; padding: 0; margin-left: auto }
+	.sidebar.collapsed .sfoot .usr { margin-left: auto }
+	/* the rail collapse is a desktop affordance */
+	.collapse-btn { display: none }
 }
 
 /* ============ Header (legacy mockup pattern — kept for reference) ============ */

@@ -102,6 +102,7 @@ export const API = {
 	poList: 'exportflow.api.get_purchase_orders',
 	poDetail: 'exportflow.api.get_po_detail',
 	shippableLines: 'exportflow.api.get_shippable_lines',
+	shipmentDefaults: 'exportflow.api.get_shipment_defaults',
 	createShipment: 'exportflow.api.create_shipment',
 	shipments: 'exportflow.api.get_shipments',
 	shipmentDetail: 'exportflow.api.get_shipment_detail',
@@ -117,7 +118,83 @@ export const API = {
 	attachDocFile: 'exportflow.api.attach_document_file',
 	generateDocument: 'exportflow.api.generate_document',
 	checklistRules: 'exportflow.api.get_checklist_rules',
+	dashboard: 'exportflow.api.get_dashboard',
+	compliancePermissions: 'exportflow.api.get_compliance_permissions',
 } as const;
+
+// ---- Phase 5: dashboard ----
+
+export interface DashShipmentRow {
+	name: string;
+	customer_name: string;
+	route: string | null;
+	mode: 'Sea' | 'Air';
+	current_milestone: string;
+	milestones_done: number;
+	milestones_total: number;
+	docs_done: number;
+	docs_total: number;
+	etd: string | null;
+	chip: string;
+	tone: 'ok' | 'pend' | 'err';
+}
+
+export interface DeadlineRow {
+	kind: 'lc' | 'gst' | 'compliance';
+	label: string;
+	/** ID rendered mono+cyan (LC number, PO name); null for compliance rows */
+	ref: string | null;
+	sub: string;
+	days: number;
+	route: string;
+}
+
+export interface DashDocRow {
+	document_type: string;
+	shipment: string | null;
+	status: string;
+	responsible_party: string | null;
+	days: number | null;
+	blocking: 0 | 1;
+}
+
+export interface DashPfiRow {
+	name: string;
+	customer: string;
+	stage_description: string | null;
+	balance: number;
+	currency: string;
+	pfi_date: string;
+}
+
+export interface DashboardData {
+	kpis: {
+		live_shipments?: number;
+		awaiting_leo?: number;
+		in_transit?: number;
+		docs_pending?: number;
+		docs_blocking?: number;
+		docs_with_cha?: number;
+		deadlines_14d?: number;
+		lc_at_risk?: number;
+		gst_at_risk?: number;
+		receivable?: { currency: string; amount: number }[];
+		open_pfis?: number;
+	};
+	shipments: DashShipmentRow[];
+	deadlines: DeadlineRow[];
+	documents: DashDocRow[];
+	pfis: DashPfiRow[];
+	/** per-block read permissions — hide card groups the role cannot see */
+	can: {
+		shipment: boolean;
+		doc: boolean;
+		lc: boolean;
+		po: boolean;
+		pfi: boolean;
+		compliance: boolean;
+	};
+}
 
 export interface NewPOContext {
 	company: string;

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useFrappeGetCall, useFrappeGetDocList, useFrappePostCall } from 'frappe-react-sdk';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
@@ -12,12 +12,23 @@ interface LineSel {
 	batch: string;
 }
 
+interface ShipmentDefaults {
+	customer: string;
+	customer_name: string;
+	incoterm: string | null;
+	named_place: string | null;
+	letter_of_credit: string | null;
+	lc_number: string | null;
+	so_details: string[];
+}
+
 const LINE_COLS = '40px 1.8fr 1fr 110px 80px 1fr';
 
 export function NewShipment() {
 	const navigate = useNavigate();
 	const [searchParams] = useSearchParams();
 
+	const [so, setSo] = useState('');
 	const [customer, setCustomer] = useState(searchParams.get('customer') ?? '');
 	const [mode, setModeRaw] = useState('Sea');
 	const setMode = (m: string) => {
@@ -39,12 +50,26 @@ export function NewShipment() {
 	const [lc, setLc] = useState('');
 	const [sel, setSel] = useState<Record<string, LineSel>>({});
 	const [err, setErr] = useState<string | null>(null);
+	// SO lines waiting to be ticked once the shippable list loads
+	const [pendingPreselect, setPendingPreselect] = useState<string[] | null>(null);
 
 	const customers = useFrappeGetDocList<{ name: string; customer_name: string }>('Customer', {
 		fields: ['name', 'customer_name'],
 		filters: [['disabled', '=', 0]],
 		limit: 200,
 	});
+	const salesOrders = useFrappeGetDocList<{ name: string; customer_name: string }>('Sales Order', {
+		fields: ['name', 'customer_name'],
+		filters: [
+			['docstatus', '=', 1],
+			['status', '!=', 'Closed'],
+		],
+		orderBy: { field: 'transaction_date', order: 'desc' },
+		limit: 100,
+	});
+	const { call: fetchDefaults, loading: loadingDefaults } = useFrappePostCall<{
+		message: ShipmentDefaults;
+	}>(API.shipmentDefaults);
 	const incoterms = useFrappeGetDocList<{ name: string }>('Incoterm', {
 		fields: ['name'],
 		limit: 100,
@@ -79,20 +104,88 @@ export function NewShipment() {
 		message: { name: string };
 	}>(API.createShipment);
 
+	// one SO line can ship from several POs — each sub-row gets its own key
+	const rowKey = (l: ShippableLine) => `${l.so_detail}::${l.po_detail ?? 'none'}`;
+
 	const selFor = (l: ShippableLine): LineSel =>
-		sel[l.so_detail] ?? { checked: false, qty: String(l.remaining), batch: '' };
+		sel[rowKey(l)] ?? { checked: false, qty: String(l.remaining), batch: '' };
 
 	const patchSel = (l: ShippableLine, patch: Partial<LineSel>) =>
 		setSel((s) => ({
 			...s,
-			[l.so_detail]: { ...(s[l.so_detail] ?? selFor(l)), ...patch },
+			[rowKey(l)]: { ...(s[rowKey(l)] ?? selFor(l)), ...patch },
 		}));
 
+	// in-flight defaults requests are invalidated by any newer pick
+	const defaultsReq = useRef(0);
+
 	function onCustomer(v: string) {
+		defaultsReq.current++;
 		setCustomer(v);
 		setSel({});
 		setLc('');
+		setSo('');
+		setPendingPreselect(null);
 	}
+
+	/** Picking the deal fills everything the SO already knows. */
+	async function onSalesOrder(v: string) {
+		const previous = so;
+		const token = ++defaultsReq.current;
+		setSo(v);
+		if (!v) return;
+		setErr(null);
+		try {
+			const result = await fetchDefaults({ sales_order: v });
+			if (token !== defaultsReq.current) return; // a newer pick won
+			const d = result.message;
+			setCustomer(d.customer);
+			setSel({});
+			setIncoterm(d.incoterm ?? '');
+			setFinalDestination(d.named_place ?? '');
+			setLc(d.letter_of_credit ?? '');
+			setPendingPreselect(d.so_details);
+		} catch (e) {
+			if (token !== defaultsReq.current) return;
+			// never display an SO whose prefill did not happen
+			setSo(previous);
+			setErr(parseServerError(e));
+		}
+	}
+
+	// the shippable list arrives async — tick the chosen SO's lines when it does
+	useEffect(() => {
+		if (!pendingPreselect || linesResult.isLoading) return;
+		if (lines.length) {
+			const wanted = new Set(pendingPreselect);
+			setSel((s) => {
+				const next = { ...s };
+				for (const l of lines) {
+					if (wanted.has(l.so_detail)) {
+						next[rowKey(l)] = {
+							checked: true,
+							qty: String(l.remaining),
+							batch: next[rowKey(l)]?.batch ?? '',
+						};
+					}
+				}
+				return next;
+			});
+		}
+		setPendingPreselect(null);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [lines, pendingPreselect, linesResult.isLoading]);
+
+	// deep link: /shipments/new?so=SO-xxxx (e.g. from the SO screen)
+	const soParamApplied = useRef(false);
+	useEffect(() => {
+		const fromParam = searchParams.get('so');
+		if (fromParam && !soParamApplied.current) {
+			soParamApplied.current = true;
+			void onSalesOrder(fromParam);
+		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, []);
 
 	async function onCreate() {
 		if (!customer) return setErr('Pick the customer.');
@@ -175,6 +268,20 @@ export function NewShipment() {
 				<Card accent>
 					<CHead icon="ship" title="Shipment" />
 					<div className="formgrid">
+						<Field
+							label="Sales order"
+							hint={loadingDefaults ? 'Filling from the deal…' : 'Prefills customer, incoterm, destination and LC'}
+						>
+							<SearchSelect
+								value={so}
+								onChange={(v) => void onSalesOrder(v)}
+								options={(salesOrders.data ?? []).map((s) => ({
+									value: s.name,
+									sub: s.customer_name,
+								}))}
+								placeholder="Start from a deal…"
+							/>
+						</Field>
 						<Field label="Customer" required>
 							<SearchSelect
 								value={customer}
@@ -281,7 +388,7 @@ export function NewShipment() {
 							return (
 								<div
 									className="reqrow"
-									key={l.so_detail}
+									key={rowKey(l)}
 									style={{ gridTemplateColumns: LINE_COLS }}
 								>
 									<label className="checkrow" style={{ justifyContent: 'center' }}>

@@ -2,7 +2,7 @@ import json
 
 import frappe
 from frappe import _
-from frappe.utils import flt
+from frappe.utils import cint, flt, getdate, nowdate
 
 
 @frappe.whitelist()
@@ -881,6 +881,47 @@ def get_po_detail(name: str) -> dict:
 
 
 @frappe.whitelist()
+def get_shipment_defaults(sales_order: str) -> dict:
+	"""Booking a shipment from the deal: the SO already carries the customer,
+	incoterm, named place and its letter of credit — prefill them instead of
+	asking the user to retype what the system knows."""
+	frappe.has_permission("Sales Order", "read", doc=sales_order, throw=True)
+	frappe.has_permission("Letter of Credit", "read", throw=True)
+	so = frappe.db.get_value(
+		"Sales Order",
+		sales_order,
+		["customer", "customer_name", "incoterm", "named_place", "docstatus"],
+		as_dict=True,
+	)
+	if not so:
+		frappe.throw(_("Sales Order {0} not found").format(sales_order))
+	if so.docstatus != 1:
+		frappe.throw(_("Sales Order {0} is not submitted").format(sales_order))
+
+	from exportflow.exportflow.doctype.letter_of_credit.letter_of_credit import OPEN_STATUSES
+
+	lc = frappe.get_all(
+		"Letter of Credit",
+		filters={"sales_order": sales_order, "status": ["in", OPEN_STATUSES]},
+		fields=["name", "lc_number"],
+		order_by="creation desc",
+		limit_page_length=1,
+	)
+	return {
+		"customer": so.customer,
+		"customer_name": so.customer_name,
+		"incoterm": so.incoterm,
+		"named_place": so.named_place,
+		"letter_of_credit": lc[0].name if lc else None,
+		"lc_number": lc[0].lc_number if lc else None,
+		# for preselecting this SO's lines in the picker
+		"so_details": frappe.get_all(
+			"Sales Order Item", filters={"parent": sales_order}, pluck="name"
+		),
+	}
+
+
+@frappe.whitelist()
 def get_shippable_lines(customer: str) -> list[dict]:
 	"""Submitted SO lines of this customer with unshipped quantity, plus the
 	PO sourcing each line (for auto-linking on the shipment)."""
@@ -1368,6 +1409,335 @@ def get_checklist_rules() -> list[dict]:
 			order_by="idx asc",
 		)
 	return rules
+
+
+# ---------------------------------------------------------------- dashboard (Phase 5)
+
+
+def _export_milestones() -> tuple[str, ...]:
+	from exportflow.exportflow.doctype.export_shipment.export_shipment import EXPORT_MILESTONE
+
+	return tuple(EXPORT_MILESTONE.values())
+
+
+def _doc_unresolved_blocker(row) -> bool:
+	from exportflow.exportflow.doctype.document_instance.document_instance import status_index
+
+	if not row.blocking or row.status == "Not Applicable":
+		return False
+	return status_index(row.status) < status_index(row.min_unblock_status or "Received")
+
+
+def _doc_done(row) -> bool:
+	from exportflow.exportflow.doctype.document_instance.document_instance import status_index
+
+	return row.status == "Not Applicable" or status_index(row.status) >= 2
+
+
+def _shipment_chip(shipment, milestones_done: int, milestones_total: int, has_blocker: bool):
+	"""Mockup status chips: Delivered / In transit / LEO awaited / Blocked /
+	current milestone."""
+	if milestones_total and milestones_done >= milestones_total:
+		return "Delivered", "ok"
+	if has_blocker and shipment.current_milestone == "Let Export Order":
+		return "Blocked", "err"
+	if shipment.current_milestone == "Let Export Order":
+		return "LEO awaited", "pend"
+	# past the export milestone = goods left the country
+	done_names = shipment.get("_done_names") or set()
+	if any(m in done_names for m in _export_milestones()):
+		return "In transit", "ok"
+	return shipment.current_milestone or "Planned", "pend"
+
+
+@frappe.whitelist()
+def get_compliance_permissions() -> dict:
+	"""The register hides mutation affordances from read-only roles."""
+	return {
+		"can_create": bool(frappe.has_permission("Compliance Record", "create")),
+		"can_write": bool(frappe.has_permission("Compliance Record", "write")),
+		"can_delete": bool(frappe.has_permission("Compliance Record", "delete")),
+	}
+
+
+@frappe.whitelist()
+def get_dashboard() -> dict:
+	"""Everything the dashboard renders, one round trip (spec §6). Each card
+	group is permission-gated independently so a narrower role still gets the
+	blocks it may see."""
+	today = getdate(nowdate())
+	out: dict = {"kpis": {}, "shipments": [], "deadlines": [], "documents": [], "pfis": []}
+
+	can = {
+		"shipment": frappe.has_permission("Export Shipment", "read"),
+		"doc": frappe.has_permission("Document Instance", "read"),
+		"lc": frappe.has_permission("Letter of Credit", "read"),
+		"po": frappe.has_permission("Purchase Order", "read"),
+		"pfi": frappe.has_permission("Pro Forma Invoice", "read"),
+		"compliance": frappe.has_permission("Compliance Record", "read"),
+	}
+
+	# ---- live shipments table -------------------------------------------
+	live_names: list[str] = []
+	if can["shipment"]:
+		shipments = frappe.get_all(
+			"Export Shipment",
+			filters={"current_milestone": ["!=", "Completed"]},
+			fields=[
+				"name",
+				"customer_name",
+				"mode",
+				"current_milestone",
+				"port_of_loading",
+				"port_of_discharge",
+				"etd",
+			],
+			order_by="etd asc, creation desc",
+			limit_page_length=8,
+		)
+		live_names = [s.name for s in shipments]
+		live_count = frappe.db.count("Export Shipment", {"current_milestone": ["!=", "Completed"]})
+
+		milestone_rows = (
+			frappe.db.sql(
+				"""SELECT parent, COUNT(*) AS total, SUM(completed) AS done,
+				          GROUP_CONCAT(CASE WHEN completed = 1 THEN milestone END) AS done_names
+				   FROM `tabShipment Milestone`
+				   WHERE parent IN %s AND parenttype = 'Export Shipment'
+				   GROUP BY parent""",
+				(tuple(live_names),),
+				as_dict=True,
+			)
+			if live_names
+			else []
+		)
+		miles = {m.parent: m for m in milestone_rows}
+
+		docs_by_shipment: dict[str, list] = {}
+		blockers_by_shipment: dict[str, int] = {}
+		if can["doc"] and live_names:
+			doc_rows = frappe.get_all(
+				"Document Instance",
+				filters={"shipment": ["in", live_names]},
+				fields=["shipment", "status", "blocking", "min_unblock_status"],
+				limit_page_length=0,
+			)
+			for row in doc_rows:
+				docs_by_shipment.setdefault(row.shipment, []).append(row)
+				if _doc_unresolved_blocker(row):
+					blockers_by_shipment[row.shipment] = blockers_by_shipment.get(row.shipment, 0) + 1
+
+		for s in shipments:
+			m = miles.get(s.name)
+			docs = docs_by_shipment.get(s.name, [])
+			s["_done_names"] = set((m.done_names or "").split(",")) if m else set()
+			chip, tone = _shipment_chip(
+				s, int(m.done or 0) if m else 0, m.total if m else 0, bool(blockers_by_shipment.get(s.name))
+			)
+			out["shipments"].append(
+				{
+					"name": s.name,
+					"customer_name": s.customer_name,
+					"route": " → ".join(p for p in (s.port_of_loading, s.port_of_discharge) if p) or None,
+					"mode": s.mode,
+					"current_milestone": s.current_milestone,
+					"milestones_done": int(m.done or 0) if m else 0,
+					"milestones_total": m.total if m else 0,
+					"docs_done": sum(1 for d in docs if _doc_done(d)),
+					"docs_total": len(docs),
+					"etd": s.etd,
+					"chip": chip,
+					"tone": tone,
+				}
+			)
+		out["kpis"]["live_shipments"] = live_count
+		out["kpis"]["awaiting_leo"] = frappe.db.count(
+			"Export Shipment", {"current_milestone": "Let Export Order"}
+		)
+		# goods past the export milestone on shipments that are not yet done
+		out["kpis"]["in_transit"] = cint(
+			frappe.db.sql(
+				"""SELECT COUNT(DISTINCT sm.parent)
+				   FROM `tabShipment Milestone` sm
+				   JOIN `tabExport Shipment` es ON es.name = sm.parent
+				   WHERE sm.parenttype = 'Export Shipment' AND sm.completed = 1
+				     AND sm.milestone IN %s AND es.current_milestone != 'Completed'""",
+				(_export_milestones(),),
+			)[0][0]
+		)
+
+	# ---- documents KPIs + pending feed ----------------------------------
+	if can["doc"]:
+		open_docs = frappe.get_all(
+			"Document Instance",
+			filters={"status": ["in", ("Pending", "Drafted")]},
+			fields=[
+				"name",
+				"document_type",
+				"shipment",
+				"status",
+				"due_date",
+				"blocking",
+				"min_unblock_status",
+				"responsible_party",
+			],
+			limit_page_length=0,
+		)
+		blocking_docs = [d for d in open_docs if _doc_unresolved_blocker(d)]
+		out["kpis"]["docs_pending"] = len(open_docs)
+		out["kpis"]["docs_blocking"] = len(blocking_docs)
+		out["kpis"]["docs_with_cha"] = sum(
+			1 for d in open_docs if d.responsible_party == "CHA"
+		)
+
+		def doc_sort_key(d):
+			days = (getdate(d.due_date) - today).days if d.due_date else 9999
+			return (0 if _doc_unresolved_blocker(d) else 1, days)
+
+		for d in sorted(open_docs, key=doc_sort_key)[:6]:
+			out["documents"].append(
+				{
+					"document_type": d.document_type,
+					"shipment": d.shipment,
+					"status": d.status,
+					"responsible_party": d.responsible_party,
+					"days": (getdate(d.due_date) - today).days if d.due_date else None,
+					"blocking": 1 if _doc_unresolved_blocker(d) else 0,
+				}
+			)
+
+	# ---- deadline feed: LC dates, GST clocks, compliance renewals -------
+	# rows are structured (label / ref / sub) so the UI can set IDs in mono+cyan
+	deadlines = []
+	at_risk_lcs: set[str] = set()
+	if can["lc"]:
+		from exportflow.exportflow.doctype.letter_of_credit.letter_of_credit import OPEN_STATUSES
+
+		for lc in frappe.get_all(
+			"Letter of Credit",
+			filters={"status": ["in", OPEN_STATUSES]},
+			fields=["name", "lc_number", "customer_name", "latest_shipment_date", "expiry_date"],
+			limit_page_length=0,
+		):
+			for label, date in (
+				("LC latest shipment", lc.latest_shipment_date),
+				("LC expiry", lc.expiry_date),
+			):
+				if not date:
+					continue
+				days = (getdate(date) - today).days
+				if days <= 30:
+					if days <= 14:
+						at_risk_lcs.add(lc.name)
+					deadlines.append(
+						{
+							"kind": "lc",
+							"label": label,
+							"ref": lc.lc_number,
+							"sub": lc.customer_name or "",
+							"days": days,
+							"route": f"/lc/{lc.name}",
+						}
+					)
+	if can["po"]:
+		from exportflow.tasks import _po_fully_exported
+
+		# bounded: only POs whose window closes within the feed horizon
+		for po in frappe.get_all(
+			"Purchase Order",
+			filters={
+				"docstatus": 1,
+				"merchant_export_scheme": 1,
+				"gst_export_deadline": ["<=", frappe.utils.add_days(today, 30)],
+			},
+			fields=["name", "supplier_name", "gst_export_deadline"],
+			limit_page_length=0,
+		):
+			if _po_fully_exported(po.name):
+				continue
+			days = (getdate(po.gst_export_deadline) - today).days
+			deadlines.append(
+				{
+					"kind": "gst",
+					"label": "90-day GST clock",
+					"ref": po.name,
+					"sub": f"{po.supplier_name} · export by {frappe.utils.formatdate(po.gst_export_deadline, 'dd MMM')}",
+					"days": days,
+					"route": f"/purchases/{po.name}",
+				}
+			)
+	if can["compliance"]:
+		for rec in frappe.get_all(
+			"Compliance Record",
+			filters={"status": "Active", "expiry_date": ["is", "set"]},
+			fields=["name", "compliance_type", "title", "expiry_date"],
+			limit_page_length=0,
+		):
+			days = (getdate(rec.expiry_date) - today).days
+			if days <= 60:
+				deadlines.append(
+					{
+						"kind": "compliance",
+						"label": f"{rec.compliance_type} renewal — {rec.title}",
+						"ref": None,
+						"sub": f"Compliance register · due {frappe.utils.formatdate(rec.expiry_date, 'dd MMM')}",
+						"days": days,
+						"route": "/compliance",
+					}
+				)
+	deadlines.sort(key=lambda d: d["days"])
+	out["deadlines"] = deadlines[:8]
+	if can["lc"] or can["po"] or can["compliance"]:
+		out["kpis"]["deadlines_14d"] = sum(1 for d in deadlines if d["days"] <= 14)
+		out["kpis"]["lc_at_risk"] = len(at_risk_lcs)
+		out["kpis"]["gst_at_risk"] = sum(
+			1 for d in deadlines if d["kind"] == "gst" and d["days"] <= 14
+		)
+
+	# ---- receivable / PFIs awaiting payment ------------------------------
+	if can["pfi"]:
+		open_pfis = frappe.get_all(
+			"Pro Forma Invoice",
+			filters={"status": ["in", ("Sent", "Partially Paid")]},
+			fields=[
+				"name",
+				"customer",
+				"customer_name",
+				"stage_description",
+				"amount",
+				"paid_amount",
+				"currency",
+				"pfi_date",
+			],
+			order_by="pfi_date asc",
+			limit_page_length=0,
+		)
+		by_currency: dict[str, float] = {}
+		for p in open_pfis:
+			balance = flt(p.amount) - flt(p.paid_amount)
+			if balance <= 0:
+				continue
+			by_currency[p.currency] = flt(by_currency.get(p.currency, 0) + balance, 2)
+		out["kpis"]["receivable"] = [
+			{"currency": cur, "amount": amt} for cur, amt in sorted(by_currency.items())
+		]
+		out["kpis"]["open_pfis"] = len(open_pfis)
+		out["pfis"] = [
+			{
+				"name": p.name,
+				"customer": p.customer_name or p.customer,
+				"stage_description": p.stage_description,
+				"balance": flt(flt(p.amount) - flt(p.paid_amount), 2),
+				"currency": p.currency,
+				"pfi_date": p.pfi_date,
+			}
+			for p in open_pfis[:5]
+		]
+
+	# the UI hides card groups the role cannot read — "no access" must not
+	# masquerade as "nothing pending"
+	out["can"] = can
+	return out
 
 
 @frappe.whitelist()

@@ -18,7 +18,9 @@
   "cb_efs_sig",
   "signatory_designation",
   "section_declarations",
-  "scomet_text"
+  "scomet_text",
+  "section_alerts",
+  "email_digest_enabled"
  ],
  "fields": [
   {
@@ -97,6 +99,18 @@
    "fieldname": "scomet_text",
    "fieldtype": "Text",
    "label": "SCOMET Declaration Text"
+  },
+  {
+   "fieldname": "section_alerts",
+   "fieldtype": "Section Break",
+   "label": "Alerts"
+  },
+  {
+   "default": "0",
+   "description": "One consolidated email per day to every export user (needs an outgoing email account)",
+   "fieldname": "email_digest_enabled",
+   "fieldtype": "Check",
+   "label": "Send Daily Email Digest"
   }
  ],
  "index_web_pages_for_search": 0,
