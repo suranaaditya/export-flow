@@ -7,6 +7,7 @@ import { Compliance } from '@/pages/Compliance';
 import { Dashboard } from '@/pages/Dashboard';
 import { Documents } from '@/pages/Documents';
 import { LetterOfCreditPage } from '@/pages/LetterOfCreditPage';
+import { NewSalesOrder } from '@/pages/NewSalesOrder';
 import { ProFormaInvoicePage } from '@/pages/ProFormaInvoicePage';
 import { Purchases } from '@/pages/Purchases';
 import { SalesOrderDetail } from '@/pages/SalesOrderDetail';
@@ -42,6 +43,7 @@ export default function App() {
 							<Route element={<AppShell />}>
 								<Route index element={<Dashboard />} />
 								<Route path="sales-orders" element={<SalesOrders />} />
+								<Route path="sales-orders/new" element={<NewSalesOrder />} />
 								<Route path="sales-orders/:id" element={<SalesOrderDetail />} />
 								<Route path="pfi/new" element={<ProFormaInvoicePage />} />
 								<Route path="pfi/:name" element={<ProFormaInvoicePage />} />

@@ -11,15 +11,45 @@ from frappe.permissions import add_permission, update_permission_property
 EXPORT_ROLES = ("Export Admin", "Export Operations", "Export Accounts", "Export Viewer")
 
 # doctype -> {role: [ptypes beyond read]}
+TRANSACTION_PTYPES = ["create", "write", "submit", "cancel", "amend"]
+MASTER_PTYPES = ["create", "write"]
+
 GRANTS = {
-	"Sales Order": {role: [] for role in EXPORT_ROLES},
+	# deals are entered inside ExportFlow — Operations and Admin own them
+	"Sales Order": {
+		"Export Admin": TRANSACTION_PTYPES,
+		"Export Operations": TRANSACTION_PTYPES,
+		"Export Accounts": [],
+		"Export Viewer": [],
+	},
 	"Bank Account": {role: [] for role in EXPORT_ROLES},
 	"Payment Entry": {
-		"Export Admin": ["create", "write", "submit", "cancel", "amend"],
-		"Export Accounts": ["create", "write", "submit", "cancel", "amend"],
+		"Export Admin": TRANSACTION_PTYPES,
+		"Export Accounts": TRANSACTION_PTYPES,
 		"Export Operations": [],
 		"Export Viewer": [],
 	},
+	# masters needed while entering a deal
+	"Customer": {
+		"Export Admin": MASTER_PTYPES,
+		"Export Operations": MASTER_PTYPES,
+		"Export Accounts": [],
+		"Export Viewer": [],
+	},
+	"Supplier": {
+		"Export Admin": MASTER_PTYPES,
+		"Export Operations": MASTER_PTYPES,
+		"Export Accounts": [],
+		"Export Viewer": [],
+	},
+	"Item": {
+		"Export Admin": MASTER_PTYPES,
+		"Export Operations": MASTER_PTYPES,
+		"Export Accounts": [],
+		"Export Viewer": [],
+	},
+	"Incoterm": {role: [] for role in EXPORT_ROLES},
+	"Currency": {role: [] for role in EXPORT_ROLES},
 }
 
 

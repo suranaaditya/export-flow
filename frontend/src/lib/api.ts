@@ -9,10 +9,33 @@ export interface SOHeader {
 	transaction_date: string;
 	delivery_date: string | null;
 	status: string;
+	docstatus: 0 | 1 | 2;
 	incoterm: string | null;
 	named_place: string | null;
 	payment_terms_narrative: string | null;
 	company: string;
+}
+
+export interface NewSOContext {
+	company: string;
+	company_currency: string;
+	customers: {
+		name: string;
+		customer_name: string;
+		default_currency: string | null;
+		default_incoterm: string | null;
+	}[];
+	suppliers: { name: string; supplier_name: string }[];
+	items: { name: string; item_name: string; stock_uom: string; pharmacopoeia_grade: string | null }[];
+	incoterms: string[];
+	currencies: string[];
+}
+
+export interface ItemInfo {
+	item_name: string;
+	stock_uom: string;
+	standard_rate: number | null;
+	default_supplier: string | null;
 }
 
 export interface PFIRow {
@@ -62,6 +85,11 @@ export const API = {
 	soMoneySummary: 'exportflow.api.get_so_money_summary',
 	soItems: 'exportflow.api.get_so_items',
 	pfiSetStatus: 'exportflow.api.pfi_set_status',
+	newSoContext: 'exportflow.api.get_new_so_context',
+	itemInfo: 'exportflow.api.get_item_info',
+	exchangeRate: 'exportflow.api.get_exchange_rate_to_company',
+	createSo: 'exportflow.api.create_export_sales_order',
+	submitSo: 'exportflow.api.submit_sales_order',
 } as const;
 
 /** Status → mockup chip tone (.tag.ok / .tag.pend / .tag.err). */

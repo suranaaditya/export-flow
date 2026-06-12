@@ -34,8 +34,8 @@ export function SalesOrders() {
 			'status',
 			'incoterm',
 		],
-		// money documents hang off submitted deals only
-		filters: [['docstatus', '=', 1]],
+		// drafts entered in ExportFlow show here too; cancelled orders do not
+		filters: [['docstatus', '<', 2]],
 		orderBy: { field: 'transaction_date', order: 'desc' },
 		limit: 50,
 	});
@@ -73,11 +73,9 @@ export function SalesOrders() {
 				<div className="field" style={{ width: 280 }}>
 					<TextInput value={query} onChange={setQuery} placeholder="Search SO or customer" />
 				</div>
-				{/* SOs are native ERPNext documents — created in the desk so the
-				    drop-ship flow, pricing and taxes all work as standard */}
-				<a className="btn primary" href="/app/sales-order/new" style={{ textDecoration: 'none' }}>
+				<button className="btn primary" onClick={() => navigate('/sales-orders/new')}>
 					<Icon name="plus" size={15} /> New sales order
-				</a>
+				</button>
 			</div>
 
 			<Card accent>
@@ -92,7 +90,7 @@ export function SalesOrders() {
 						text={
 							query
 								? 'Try a different SO number or customer name.'
-								: 'Create the deal with "New sales order" (it opens the ERPNext form) — it appears here once the order is submitted.'
+								: 'Book the first export deal with "New sales order".'
 						}
 					/>
 				) : (

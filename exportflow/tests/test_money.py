@@ -6,7 +6,12 @@ try:
 except ImportError:  # frappe < 16
 	from frappe.tests.utils import FrappeTestCase as IntegrationTestCase
 
-from exportflow.api import get_so_money_summary, pfi_set_status
+from exportflow.api import (
+	create_export_sales_order,
+	get_so_money_summary,
+	pfi_set_status,
+	submit_sales_order,
+)
 from exportflow.tasks import send_lc_alerts
 from exportflow.tests.test_dropship import (
 	_suffix,
@@ -265,6 +270,49 @@ class TestMoneyFlow(IntegrationTestCase):
 		self.assertEqual(len(mine), 1, "Overdue open LCs must keep alerting")
 		self.assertEqual(mine[0]["days_left"], -4)
 		self.assertIn("overdue by 4 days", mine[0]["subject"])
+
+	def test_create_export_sales_order_endpoint(self):
+		"""The in-app deal form builds a native drop-ship SO server-side."""
+		sfx = _suffix()
+		supplier = make_supplier(f"_Test EF Supplier Form {sfx}")
+		item = make_dropship_item(f"_Test EF Item Form {sfx}", supplier, self.company)
+		customer = make_customer(f"_Test EF Customer Form {sfx}")
+		company_currency = frappe.db.get_value("Company", self.company, "default_currency")
+		deal_currency = "EUR" if company_currency != "EUR" else "USD"
+
+		result = create_export_sales_order(
+			{
+				"customer": customer,
+				"delivery_date": add_days(nowdate(), 30),
+				"currency": deal_currency,
+				"conversion_rate": 83,
+				"named_place": "Jebel Ali",
+				"payment_terms_narrative": "30% advance",
+				"items": [{"item_code": item, "qty": 100, "rate": 12, "supplier": supplier}],
+			}
+		)
+		so = frappe.get_doc("Sales Order", result["name"])
+		self.assertEqual(so.docstatus, 0, "Saved as draft by default")
+		self.assertEqual(so.currency, deal_currency)
+		self.assertEqual(so.payment_terms_narrative, "30% advance")
+		self.assertTrue(all(r.delivered_by_supplier for r in so.items))
+		self.assertEqual(so.items[0].supplier, supplier)
+		self.assertEqual(flt(so.grand_total), 1200.0)
+
+		submitted = submit_sales_order(so.name)
+		self.assertEqual(submitted["docstatus"], 1)
+
+		# missing drop-ship supplier must be rejected up front
+		with self.assertRaises(frappe.ValidationError):
+			create_export_sales_order(
+				{
+					"customer": customer,
+					"delivery_date": add_days(nowdate(), 30),
+					"currency": deal_currency,
+					"conversion_rate": 83,
+					"items": [{"item_code": item, "qty": 5, "rate": 10}],
+				}
+			)
 
 	def test_lc_alerts_skip_closed(self):
 		so, _customer = make_money_so(self.company)

@@ -1,8 +1,18 @@
-import { useFrappeGetCall } from 'frappe-react-sdk';
+import { useState } from 'react';
+import { useFrappeGetCall, useFrappePostCall } from 'frappe-react-sdk';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
 import { Card, CHead, EmptyMsg, Facts, LRow, Tag } from '@/components/ui';
-import { API, lcIsOpen, lcTone, pfiTone, soTone, urgencyTone, type SOMoneySummary } from '@/lib/api';
+import {
+	API,
+	lcIsOpen,
+	lcTone,
+	parseServerError,
+	pfiTone,
+	soTone,
+	urgencyTone,
+	type SOMoneySummary,
+} from '@/lib/api';
 import { daysUntil, fmtDate, fmtDateLong, fmtMoney } from '@/lib/format';
 
 /** " · "-joined fragments, skipping empty/null parts. */
@@ -14,10 +24,22 @@ export function SalesOrderDetail() {
 	const { id = '' } = useParams<{ id: string }>();
 	const navigate = useNavigate();
 
-	const { data, error, isLoading } = useFrappeGetCall<{ message: SOMoneySummary }>(
+	const { data, error, isLoading, mutate } = useFrappeGetCall<{ message: SOMoneySummary }>(
 		API.soMoneySummary,
 		{ sales_order: id },
 	);
+	const { call: submitSo, loading: submitting } = useFrappePostCall(API.submitSo);
+	const [actionErr, setActionErr] = useState<string | null>(null);
+
+	async function onSubmitOrder() {
+		setActionErr(null);
+		try {
+			await submitSo({ name: id });
+			mutate();
+		} catch (e) {
+			setActionErr(parseServerError(e));
+		}
+	}
 
 	if (isLoading) {
 		return (
@@ -75,13 +97,26 @@ export function SalesOrderDetail() {
 					<Tag tone={soTone(so.status)}>{so.status}</Tag>
 				</span>
 				<span className="spacer" />
-				<button className="btn" onClick={() => navigate('/lc/new?so=' + id)}>
-					<Icon name="calendar" size={15} /> New letter of credit
-				</button>
-				<button className="btn primary" onClick={() => navigate('/pfi/new?so=' + id)}>
-					<Icon name="banknote" size={15} /> New pro forma
-				</button>
+				{so.docstatus === 0 ? (
+					<button className="btn primary" disabled={submitting} onClick={() => void onSubmitOrder()}>
+						<Icon name="check" size={15} /> {submitting ? 'Submitting…' : 'Submit order'}
+					</button>
+				) : (
+					<>
+						<button className="btn" onClick={() => navigate('/lc/new?so=' + id)}>
+							<Icon name="calendar" size={15} /> New letter of credit
+						</button>
+						<button className="btn primary" onClick={() => navigate('/pfi/new?so=' + id)}>
+							<Icon name="banknote" size={15} /> New pro forma
+						</button>
+					</>
+				)}
 			</div>
+			{actionErr && (
+				<div className="ferr" style={{ marginBottom: 10 }}>
+					{actionErr}
+				</div>
+			)}
 
 			<div className="metaline">
 				<span className="kv">
@@ -123,12 +158,16 @@ export function SalesOrderDetail() {
 							icon="file-text"
 							title="Pro forma invoices"
 							count={pfis.length}
-							action={<Link to={'/pfi/new?so=' + id}>New</Link>}
+							action={so.docstatus === 1 ? <Link to={'/pfi/new?so=' + id}>New</Link> : undefined}
 						/>
 						{pfis.length === 0 ? (
 							<EmptyMsg
 								title="No pro forma invoices yet"
-								text="Raise the first PFI against this order to start collecting payment."
+								text={
+									so.docstatus === 0
+										? 'Submit the order first — PFIs are raised against submitted deals.'
+										: 'Raise the first PFI against this order to start collecting payment.'
+								}
 							/>
 						) : (
 							pfis.map((p) => (
@@ -158,12 +197,16 @@ export function SalesOrderDetail() {
 							icon="calendar"
 							title="Letters of credit"
 							count={lcs.length}
-							action={<Link to={'/lc/new?so=' + id}>New</Link>}
+							action={so.docstatus === 1 ? <Link to={'/lc/new?so=' + id}>New</Link> : undefined}
 						/>
 						{lcs.length === 0 ? (
 							<EmptyMsg
 								title="No letters of credit"
-								text="Record an LC here when the buyer's bank issues one for this order."
+								text={
+									so.docstatus === 0
+										? 'Submit the order first — LCs are recorded against submitted deals.'
+										: 'Record an LC here when the buyer’s bank issues one for this order.'
+								}
 							/>
 						) : (
 							lcs.map((lc) => {
