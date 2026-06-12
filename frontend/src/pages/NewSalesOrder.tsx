@@ -74,13 +74,15 @@ export function NewSalesOrder() {
 		setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
 
 	async function onPickItem(i: number, itemCode: string) {
-		setRow(i, { item_code: itemCode });
+		// UOM comes straight from the already-loaded item list — no wait
+		const listed = ctx?.items.find((x) => x.name === itemCode);
+		setRow(i, { item_code: itemCode, uom: listed?.stock_uom ?? '' });
 		if (!itemCode) return;
 		try {
 			const info = (await fetchItemInfo({ item_code: itemCode })).message;
 			setRow(i, {
 				item_code: itemCode,
-				uom: info.stock_uom ?? '',
+				uom: info.stock_uom ?? listed?.stock_uom ?? '',
 				supplier: rows[i].supplier || info.default_supplier || '',
 				rate: rows[i].rate || (info.standard_rate ? String(info.standard_rate) : ''),
 			});
@@ -220,18 +222,22 @@ export function NewSalesOrder() {
 						</div>
 					</div>
 
-					<div className="reqhead" style={{ borderTop: '1px solid var(--hairline)', gridTemplateColumns: '1.6fr 90px 110px 1.2fr 110px 34px' }}>
+					<div className="reqhead" style={{ borderTop: '1px solid var(--hairline)', gridTemplateColumns: '1.5fr 80px 64px 100px 1.2fr 100px 34px' }}>
 						<span>Item</span>
 						<span>Qty</span>
+						<span>UOM</span>
 						<span>Rate</span>
-						<span>Drop-ship supplier</span>
+						<span title="Who you procure this line from — ships directly to the port and becomes the PO supplier">
+							Drop-ship supplier
+						</span>
 						<span style={{ textAlign: 'right' }}>Amount</span>
 						<span />
 					</div>
 					{rows.map((r, i) => (
-						<div className="reqrow" key={i} style={{ gridTemplateColumns: '1.6fr 90px 110px 1.2fr 110px 34px' }}>
+						<div className="reqrow" key={i} style={{ gridTemplateColumns: '1.5fr 80px 64px 100px 1.2fr 100px 34px' }}>
 							<SelectInput value={r.item_code} onChange={(v) => void onPickItem(i, v)} options={items} allowEmpty />
-							<TextInput type="number" value={r.qty} onChange={(v) => setRow(i, { qty: v })} placeholder={r.uom || 'Qty'} />
+							<TextInput type="number" value={r.qty} onChange={(v) => setRow(i, { qty: v })} />
+							<span className="dim" style={{ alignSelf: 'center' }}>{r.uom || '—'}</span>
 							<TextInput type="number" value={r.rate} onChange={(v) => setRow(i, { rate: v })} />
 							<SelectInput value={r.supplier} onChange={(v) => setRow(i, { supplier: v })} options={suppliers} allowEmpty />
 							<span className="num" style={{ textAlign: 'right' }}>
