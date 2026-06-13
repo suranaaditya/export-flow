@@ -110,7 +110,7 @@ export const MASTERS: MasterDef[] = [
 		title: 'CHAs & forwarders',
 		singular: 'CHA',
 		icon: 'shield',
-		listFields: ['name', 'contact_person', 'mobile_no', 'default_port', 'gstin'],
+		listFields: ['name', 'cha_name', 'contact_person', 'mobile_no', 'default_port', 'gstin'],
 		columns: [
 			{ key: 'cha_name', label: 'CHA / agent' },
 			{ key: 'contact_person', label: 'Contact', dim: true },
