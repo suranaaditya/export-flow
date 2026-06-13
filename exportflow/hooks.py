@@ -42,9 +42,13 @@ doc_events = {
 		"on_submit": "exportflow.overrides.payment_entry.on_submit",
 		"on_cancel": "exportflow.overrides.payment_entry.on_cancel",
 	},
-	# the §5.3 checklist engine keeps Document Instances in sync
+	# the §5.3 checklist engine keeps Document Instances in sync; a trade-type /
+	# MTT-commencement change also moves the realizations' FEMA clock
 	"Export Shipment": {
-		"on_update": "exportflow.checklist.on_shipment_update",
+		"on_update": [
+			"exportflow.checklist.on_shipment_update",
+			"exportflow.exportflow.doctype.export_realization.export_realization.resync_due_dates_for_shipment",
+		],
 		"on_trash": "exportflow.checklist.on_shipment_trash",
 	},
 	"Letter of Credit": {

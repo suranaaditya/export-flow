@@ -1,19 +1,26 @@
 import { useState, type ReactNode } from 'react';
-import { useFrappeGetCall, useFrappePostCall, useFrappeUpdateDoc } from 'frappe-react-sdk';
+import {
+	useFrappeGetCall,
+	useFrappeGetDocList,
+	useFrappePostCall,
+	useFrappeUpdateDoc,
+} from 'frappe-react-sdk';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { DocumentChecklist } from '@/components/DocumentChecklist';
 import { Icon } from '@/components/Icon';
 import { Card, CHead, EmptyMsg, Facts, LRow, Modal, Tag } from '@/components/ui';
-import { CheckInput, Field, TextArea, TextInput } from '@/components/form';
+import { CheckInput, Field, SearchSelect, SelectInput, TextArea, TextInput } from '@/components/form';
 import {
 	API,
 	incentiveTone,
+	isMerchanting,
 	lcIsOpen,
 	lcTone,
 	parseServerError,
 	realizationTone,
 	urgencyLabel,
 	urgencyTone,
+	type MTTBlock,
 	type ShipmentDetailData,
 	type ShipmentFinanceData,
 } from '@/lib/api';
@@ -78,6 +85,7 @@ export function ShipmentDetail() {
 
 	const { shipment, milestones, items, lc, sales_orders } = detail;
 	const isAir = shipment.mode === 'Air';
+	const merchanting = isMerchanting(shipment.trade_type);
 
 	const nextPending = milestones.find((m) => !m.completed);
 	const allDone = milestones.length > 0 && !nextPending;
@@ -141,8 +149,13 @@ export function ShipmentDetail() {
 			<div className="titlebar">
 				<h1>{shipment.name}</h1>
 				<span className="who">· {shipment.customer_name}</span>
-				<span style={{ marginTop: 9 }}>
+				<span style={{ marginTop: 9, display: 'inline-flex', gap: 6 }}>
 					<Tag tone={headTone}>{shipment.current_milestone}</Tag>
+					{merchanting && (
+						<Tag tone="pend">
+							<Icon name="globe" size={11} strokeWidth={2} /> Merchanting
+						</Tag>
+					)}
 				</span>
 				<span className="spacer" />
 				<button className="btn" onClick={() => setEditing(true)}>
@@ -358,7 +371,10 @@ export function ShipmentDetail() {
 						)}
 					</Card>
 
-					<ShipmentFinanceCard shipment={id} />
+					{merchanting && (
+						<MTTComplianceCard shipment={shipment} onSaved={() => mutate()} />
+					)}
+					<ShipmentFinanceCard shipment={id} merchanting={merchanting} />
 				</div>
 			</div>
 
@@ -383,7 +399,7 @@ export function ShipmentDetail() {
 
 /** Incentives + realization attached to this shipment (read-only summary;
  *  full editing lives on the Finance screen). */
-function ShipmentFinanceCard({ shipment }: { shipment: string }) {
+function ShipmentFinanceCard({ shipment, merchanting }: { shipment: string; merchanting: boolean }) {
 	const { data } = useFrappeGetCall<{ message: ShipmentFinanceData }>(API.shipmentFinance, {
 		shipment,
 	});
@@ -394,7 +410,7 @@ function ShipmentFinanceCard({ shipment }: { shipment: string }) {
 		<Card>
 			<CHead
 				icon="banknote"
-				title="Incentives & realization"
+				title={merchanting ? 'Bank realization' : 'Incentives & realization'}
 				action={
 					<Link to="/finance" style={{ fontSize: '12.5px', color: 'var(--iris)', textDecoration: 'none', fontWeight: 500 }}>
 						Open finance
@@ -466,6 +482,7 @@ function EditVoyageModal({
 	onSaved: () => void;
 }) {
 	const isAir = shipment.mode === 'Air';
+	const merchanting = isMerchanting(shipment.trade_type);
 	const { updateDoc, loading: saving } = useFrappeUpdateDoc();
 	const [err, setErr] = useState<string | null>(null);
 	// seeded once on mount; the modal unmounts on close, so background
@@ -502,11 +519,16 @@ function EditVoyageModal({
 			etd: orNull(form.etd),
 			eta: orNull(form.eta),
 			final_destination: form.final_destination,
-			shipping_bill_number: form.shipping_bill_number,
-			shipping_bill_date: orNull(form.shipping_bill_date),
-			leo_date: orNull(form.leo_date),
-			egm_number: form.egm_number,
-			egm_date: orNull(form.egm_date),
+			// India-customs artefacts do not exist for merchanting trades
+			...(merchanting
+				? {}
+				: {
+						shipping_bill_number: form.shipping_bill_number,
+						shipping_bill_date: orNull(form.shipping_bill_date),
+						leo_date: orNull(form.leo_date),
+						egm_number: form.egm_number,
+						egm_date: orNull(form.egm_date),
+					}),
 			...(isAir
 				? {
 						airline: form.airline,
@@ -579,20 +601,24 @@ function EditVoyageModal({
 						</div>
 					</>
 				)}
-				<Field label="Shipping bill number">
-					<TextInput
-						mono
-						value={form.shipping_bill_number}
-						onChange={(v) => set('shipping_bill_number', v)}
-					/>
-				</Field>
-				<Field label="Shipping bill date">
-					<TextInput
-						type="date"
-						value={form.shipping_bill_date}
-						onChange={(v) => set('shipping_bill_date', v)}
-					/>
-				</Field>
+				{!merchanting && (
+					<>
+						<Field label="Shipping bill number">
+							<TextInput
+								mono
+								value={form.shipping_bill_number}
+								onChange={(v) => set('shipping_bill_number', v)}
+							/>
+						</Field>
+						<Field label="Shipping bill date">
+							<TextInput
+								type="date"
+								value={form.shipping_bill_date}
+								onChange={(v) => set('shipping_bill_date', v)}
+							/>
+						</Field>
+					</>
+				)}
 				{!isAir && (
 					<>
 						<Field label="B/L number">
@@ -603,15 +629,19 @@ function EditVoyageModal({
 						</Field>
 					</>
 				)}
-				<Field label="LEO date">
-					<TextInput type="date" value={form.leo_date} onChange={(v) => set('leo_date', v)} />
-				</Field>
-				<Field label="EGM number">
-					<TextInput mono value={form.egm_number} onChange={(v) => set('egm_number', v)} />
-				</Field>
-				<Field label="EGM date">
-					<TextInput type="date" value={form.egm_date} onChange={(v) => set('egm_date', v)} />
-				</Field>
+				{!merchanting && (
+					<>
+						<Field label="LEO date">
+							<TextInput type="date" value={form.leo_date} onChange={(v) => set('leo_date', v)} />
+						</Field>
+						<Field label="EGM number">
+							<TextInput mono value={form.egm_number} onChange={(v) => set('egm_number', v)} />
+						</Field>
+						<Field label="EGM date">
+							<TextInput type="date" value={form.egm_date} onChange={(v) => set('egm_date', v)} />
+						</Field>
+					</>
+				)}
 				<Field label="ETD">
 					<TextInput type="date" value={form.etd} onChange={(v) => set('etd', v)} />
 				</Field>
@@ -620,6 +650,270 @@ function EditVoyageModal({
 				</Field>
 				<Field label="Final destination">
 					<TextInput value={form.final_destination} onChange={(v) => set('final_destination', v)} />
+				</Field>
+			</div>
+			<div className="formfoot">
+				{err && <span className="ferr">{err}</span>}
+				<span className="spacer" />
+				<button type="button" className="btn" onClick={onClose}>
+					Cancel
+				</button>
+				<button type="button" className="btn primary" disabled={saving} onClick={() => void onSave()}>
+					{saving ? 'Saving…' : 'Save changes'}
+				</button>
+			</div>
+		</Modal>
+	);
+}
+
+/** Deadline tone for an MTT clock: rose ≤7d, amber ≤15d, calm beyond. */
+const mttTone = (days: number | null): 'ok' | 'pend' | 'err' => urgencyTone(days) ?? 'ok';
+
+const MTT_PMS_OPTIONS = [{ value: '' }, { value: 'Open' }, { value: 'Closed' }, { value: 'Not Required' }];
+
+/** FEMA merchanting-trade compliance for a third-country shipment: the two
+ *  RBI clocks, same-AD-bank confirmation, net-FX profit and EDPMS/IDPMS. */
+function MTTComplianceCard({ shipment, onSaved }: { shipment: ShipmentDoc; onSaved: () => void }) {
+	const { data, mutate } = useFrappeGetCall<{ message: ShipmentFinanceData }>(API.shipmentFinance, {
+		shipment: shipment.name,
+	});
+	const mtt: MTTBlock | null = data?.message?.mtt ?? null;
+	const [editing, setEditing] = useState(false);
+
+	const rows: { k: string; v: ReactNode; data?: boolean }[] = [];
+	if (mtt) {
+		rows.push({
+			k: '9-month completion',
+			v: mtt.completed ? (
+				<span>
+					Completed <span className="data">{fmtDate(mtt.completion_date)}</span>
+				</span>
+			) : mtt.completion_due ? (
+				<span>
+					<span className="data">{fmtDate(mtt.completion_due)}</span>{' '}
+					{mtt.completion_days !== null && (
+						<Tag tone={mttTone(mtt.completion_days)}>{urgencyLabel(mtt.completion_days)}</Tag>
+					)}
+				</span>
+			) : (
+				'—'
+			),
+		});
+		rows.push({
+			k: '4-month forex outlay',
+			v: !mtt.outlay_open ? (
+				<Tag tone="ok">{mtt.import_payment_date ? 'Proceeds received' : 'Not started'}</Tag>
+			) : mtt.outlay_due ? (
+				<span>
+					<span className="data">{fmtDate(mtt.outlay_due)}</span>{' '}
+					{mtt.outlay_days !== null && (
+						<Tag tone={mttTone(mtt.outlay_days)}>{urgencyLabel(mtt.outlay_days)}</Tag>
+					)}
+				</span>
+			) : (
+				<span style={{ color: 'var(--fg-4)' }}>set import payment date</span>
+			),
+		});
+		rows.push({ k: 'AD bank (both legs)', v: mtt.ad_bank ?? '—' });
+		rows.push({
+			k: 'Same AD bank',
+			v: (
+				<Tag tone={mtt.same_ad_bank ? 'ok' : 'pend'}>
+					{mtt.same_ad_bank ? 'Confirmed' : 'Unconfirmed'}
+				</Tag>
+			),
+		});
+		rows.push({
+			k: 'Net FX profit',
+			v:
+				mtt.net_fx_profit_inr == null ? (
+					<span style={{ color: 'var(--fg-4)' }}>add import outlay</span>
+				) : (
+					<span>
+						<span className="num">{fmtMoney(mtt.net_fx_profit_inr, 'INR')}</span>{' '}
+						<Tag tone={mtt.net_fx_profit_inr < 0 ? 'err' : 'ok'}>
+							{mtt.net_fx_profit_inr < 0 ? 'FX loss' : 'net gain'}
+						</Tag>
+					</span>
+				),
+		});
+		if (mtt.import_value_inr != null)
+			rows.push({
+				k: 'Import outlay',
+				v: <span className="num">{fmtMoney(mtt.import_value_inr, 'INR')}</span>,
+				data: true,
+			});
+		if (shipment.mtt_import_supplier)
+			rows.push({ k: 'Import supplier', v: shipment.mtt_import_supplier });
+		rows.push({ k: 'EDPMS / IDPMS', v: `${mtt.edpms_status ?? '—'} / ${mtt.idpms_status ?? '—'}` });
+	}
+
+	return (
+		<Card>
+			<CHead
+				icon="globe"
+				title="Merchanting (MTT) compliance"
+				action={
+					<a
+						href="#"
+						onClick={(e) => {
+							e.preventDefault();
+							setEditing(true);
+						}}
+						style={{ fontSize: '12.5px', color: 'var(--iris)', textDecoration: 'none', fontWeight: 500 }}
+					>
+						Edit
+					</a>
+				}
+			/>
+			{!mtt ? (
+				<div className="sub" style={{ padding: '14px 18px', margin: 0 }}>
+					Loading…
+				</div>
+			) : (
+				<Facts rows={rows} />
+			)}
+			{editing && (
+				<MTTEditModal
+					shipment={shipment}
+					onClose={() => setEditing(false)}
+					onSaved={() => {
+						setEditing(false);
+						void mutate();
+						onSaved();
+					}}
+				/>
+			)}
+		</Card>
+	);
+}
+
+interface MTTForm {
+	mtt_ad_bank: string;
+	mtt_same_ad_bank: boolean;
+	mtt_import_supplier: string;
+	mtt_import_value_inr: string;
+	mtt_commencement_date: string;
+	mtt_import_payment_date: string;
+	mtt_completion_date: string;
+	mtt_idpms_status: string;
+	mtt_edpms_status: string;
+}
+
+function MTTEditModal({
+	shipment,
+	onClose,
+	onSaved,
+}: {
+	shipment: ShipmentDoc;
+	onClose: () => void;
+	onSaved: () => void;
+}) {
+	const { updateDoc, loading: saving } = useFrappeUpdateDoc();
+	const [err, setErr] = useState<string | null>(null);
+	const suppliers = useFrappeGetDocList<{ name: string; supplier_name: string }>('Supplier', {
+		fields: ['name', 'supplier_name'],
+		filters: [['disabled', '=', 0]],
+		limit: 200,
+	});
+	const [form, setForm] = useState<MTTForm>(() => ({
+		mtt_ad_bank: shipment.mtt_ad_bank ?? '',
+		mtt_same_ad_bank: !!shipment.mtt_same_ad_bank,
+		mtt_import_supplier: shipment.mtt_import_supplier ?? '',
+		mtt_import_value_inr:
+			shipment.mtt_import_value_inr != null ? String(shipment.mtt_import_value_inr) : '',
+		mtt_commencement_date: shipment.mtt_commencement_date ?? '',
+		mtt_import_payment_date: shipment.mtt_import_payment_date ?? '',
+		mtt_completion_date: shipment.mtt_completion_date ?? '',
+		mtt_idpms_status: shipment.mtt_idpms_status ?? '',
+		mtt_edpms_status: shipment.mtt_edpms_status ?? '',
+	}));
+	const set = <K extends keyof MTTForm>(k: K, v: MTTForm[K]) => setForm((f) => ({ ...f, [k]: v }));
+
+	async function onSave() {
+		setErr(null);
+		const orNull = (v: string) => v || null;
+		try {
+			await updateDoc('Export Shipment', shipment.name, {
+				mtt_ad_bank: form.mtt_ad_bank,
+				mtt_same_ad_bank: form.mtt_same_ad_bank ? 1 : 0,
+				mtt_import_supplier: orNull(form.mtt_import_supplier),
+				mtt_import_value_inr: form.mtt_import_value_inr ? Number(form.mtt_import_value_inr) : 0,
+				mtt_commencement_date: orNull(form.mtt_commencement_date),
+				mtt_import_payment_date: orNull(form.mtt_import_payment_date),
+				mtt_completion_date: orNull(form.mtt_completion_date),
+				mtt_idpms_status: orNull(form.mtt_idpms_status),
+				mtt_edpms_status: orNull(form.mtt_edpms_status),
+			});
+			onSaved();
+		} catch (e) {
+			setErr(parseServerError(e));
+		}
+	}
+
+	return (
+		<Modal title="MTT compliance" icon="globe" onClose={onClose}>
+			<div className="formgrid">
+				<Field label="AD bank (both legs)">
+					<TextInput value={form.mtt_ad_bank} onChange={(v) => set('mtt_ad_bank', v)} />
+				</Field>
+				<Field label="Import-leg supplier">
+					<SearchSelect
+						value={form.mtt_import_supplier}
+						onChange={(v) => set('mtt_import_supplier', v)}
+						options={(suppliers.data ?? []).map((s) => ({ value: s.name, label: s.supplier_name }))}
+						placeholder="Search suppliers…"
+					/>
+				</Field>
+				<div className="span2">
+					<CheckInput
+						checked={form.mtt_same_ad_bank}
+						onChange={(v) => set('mtt_same_ad_bank', v)}
+						label="Both legs routed through the same AD bank"
+					/>
+				</div>
+				<Field label="Trade commenced" hint="9-month completion clock starts here">
+					<TextInput
+						type="date"
+						value={form.mtt_commencement_date}
+						onChange={(v) => set('mtt_commencement_date', v)}
+					/>
+				</Field>
+				<Field label="Import leg paid on" hint="4-month forex-outlay clock">
+					<TextInput
+						type="date"
+						value={form.mtt_import_payment_date}
+						onChange={(v) => set('mtt_import_payment_date', v)}
+					/>
+				</Field>
+				<Field label="Trade completed on">
+					<TextInput
+						type="date"
+						value={form.mtt_completion_date}
+						onChange={(v) => set('mtt_completion_date', v)}
+					/>
+				</Field>
+				<Field label="Import outlay (INR)" hint="For the net-FX-profit check">
+					<TextInput
+						type="number"
+						mono
+						value={form.mtt_import_value_inr}
+						onChange={(v) => set('mtt_import_value_inr', v)}
+					/>
+				</Field>
+				<Field label="EDPMS (export) status">
+					<SelectInput
+						value={form.mtt_edpms_status}
+						onChange={(v) => set('mtt_edpms_status', v)}
+						options={MTT_PMS_OPTIONS}
+					/>
+				</Field>
+				<Field label="IDPMS (import) status">
+					<SelectInput
+						value={form.mtt_idpms_status}
+						onChange={(v) => set('mtt_idpms_status', v)}
+						options={MTT_PMS_OPTIONS}
+					/>
 				</Field>
 			</div>
 			<div className="formfoot">

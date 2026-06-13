@@ -5,7 +5,7 @@ import { Icon } from '@/components/Icon';
 import { MasterModal } from '@/components/MasterModal';
 import { Field, SearchSelect, SelectInput, TextInput } from '@/components/form';
 import { Card, CHead, EmptyMsg } from '@/components/ui';
-import { API, parseServerError, type ShippableLine } from '@/lib/api';
+import { API, TRADE_TYPES, isMerchanting, parseServerError, type ShippableLine } from '@/lib/api';
 import { MASTERS, STATIC_OPTIONS, type OptionSource } from '@/lib/masters';
 
 const CHA_DEF = MASTERS.find((m) => m.doctype === 'CHA')!;
@@ -34,6 +34,7 @@ export function NewShipment() {
 
 	const [so, setSo] = useState('');
 	const [customer, setCustomer] = useState(searchParams.get('customer') ?? '');
+	const [tradeType, setTradeType] = useState<string>('Export from India');
 	const [mode, setModeRaw] = useState('Sea');
 	const setMode = (m: string) => {
 		setModeRaw(m);
@@ -214,6 +215,7 @@ export function NewShipment() {
 				payload: {
 					customer,
 					mode,
+					trade_type: tradeType,
 					incoterm: incoterm || null,
 					cha: cha || null,
 					port_of_loading: pol || null,
@@ -310,6 +312,20 @@ export function NewShipment() {
 								value={mode}
 								onChange={setMode}
 								options={[{ value: 'Sea' }, { value: 'Air' }]}
+							/>
+						</Field>
+						<Field
+							label="Trade type"
+							hint={
+								isMerchanting(tradeType)
+									? 'Goods ship A→B without entering India — no shipping bill, eBRC or RoDTEP'
+									: 'Standard export from India'
+							}
+						>
+							<SelectInput
+								value={tradeType}
+								onChange={setTradeType}
+								options={TRADE_TYPES.map((t) => ({ value: t }))}
 							/>
 						</Field>
 						<Field label="Incoterm">

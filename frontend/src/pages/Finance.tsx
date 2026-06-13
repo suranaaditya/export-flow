@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useFrappeCreateDoc, useFrappeGetCall, useFrappeUpdateDoc } from 'frappe-react-sdk';
+import { useNavigate } from 'react-router-dom';
 import { Icon, type IconName } from '@/components/Icon';
 import { Field, SelectInput, TextArea, TextInput } from '@/components/form';
 import { Card, CHead, EmptyMsg, Modal, Tag } from '@/components/ui';
@@ -10,13 +11,26 @@ import {
 	incentiveTone,
 	realizationTone,
 	parseServerError,
+	urgencyLabel,
+	urgencyTone,
 	type FinanceWorkspaceData,
 	type IncentiveRow,
 	type IncentiveStatus,
+	type MTTTrade,
 	type RealizationRow,
 	type RealizationStatus,
 } from '@/lib/api';
 import { fmtDate, fmtMoney } from '@/lib/format';
+
+function mttRowStatus(t: MTTTrade): { tone: 'ok' | 'pend' | 'err'; label: string } {
+	if (!t.completed && t.completion_days != null && t.completion_days < 0)
+		return { tone: 'err', label: 'Completion overdue' };
+	if (t.outlay_open && t.outlay_days != null && t.outlay_days < 0)
+		return { tone: 'err', label: 'Outlay overdue' };
+	if (t.net_fx_profit_inr != null && t.net_fx_profit_inr < 0) return { tone: 'err', label: 'FX loss' };
+	if (t.completed) return { tone: 'ok', label: 'Completed' };
+	return { tone: 'pend', label: 'In progress' };
+}
 
 const inr = (v: number | null | undefined) => (v == null ? '—' : fmtMoney(v, 'INR'));
 
@@ -33,6 +47,7 @@ function Kpi({ icon, label, value, detail, tone }: { icon: IconName; label: stri
 }
 
 export function Finance() {
+	const navigate = useNavigate();
 	const { data, error, isLoading, mutate } = useFrappeGetCall<{ message: FinanceWorkspaceData }>(
 		API.financeWorkspace,
 		undefined,
@@ -42,6 +57,8 @@ export function Finance() {
 
 	const d = data?.message;
 	const kpis = d?.kpis ?? {};
+	const mttTrades = d?.mtt_trades ?? [];
+	const mttOverdue = (kpis.mtt_completion_overdue ?? 0) + (kpis.mtt_outlay_overdue ?? 0);
 	const canIncW = d?.can.incentive_write;
 	const canRelW = d?.can.realization_write;
 	const loading = isLoading || !d;
@@ -63,6 +80,15 @@ export function Finance() {
 				<Kpi icon="banknote" label="Proceeds realized" value={inr(kpis.realized)} detail={dash(`${kpis.open_count ?? 0} still open`)} />
 				<Kpi icon="warning" label="Overdue" value={loading ? '—' : String(kpis.overdue_count ?? 0)} detail="past FEMA window" tone={kpis.overdue_count ? 'bad' : undefined} />
 				<Kpi icon="file-text" label="Realizations" value={loading ? '—' : String(d?.realizations.length ?? 0)} detail="export invoices tracked" />
+				{!loading && (kpis.mtt_count ?? 0) > 0 && (
+					<Kpi
+						icon="globe"
+						label="Merchanting trades"
+						value={String(kpis.mtt_count ?? 0)}
+						detail={mttOverdue ? `${mttOverdue} clock${mttOverdue === 1 ? '' : 's'} overdue` : 'FEMA MTT compliance'}
+						tone={mttOverdue ? 'bad' : undefined}
+					/>
+				)}
 			</div>
 
 			{error ? (
@@ -134,6 +160,73 @@ export function Finance() {
 							</table>
 						)}
 					</Card>
+
+					{mttTrades.length > 0 && (
+						<Card accent>
+							<CHead icon="globe" title="Third-country / merchanting" count={`${mttTrades.length}`} />
+							<table className="clickable">
+								<thead>
+									<tr>
+										<th>Shipment</th>
+										<th>Customer</th>
+										<th>Completion due</th>
+										<th>Outlay due</th>
+										<th>Net FX (INR)</th>
+										<th>Status</th>
+									</tr>
+								</thead>
+								<tbody>
+									{mttTrades.map((t) => {
+										const st = mttRowStatus(t);
+										return (
+											<tr key={t.shipment} onClick={() => navigate(`/shipments/${t.shipment}`)}>
+												<td>
+													<span className="id id-sm">{t.shipment}</span>
+												</td>
+												<td className="c1">{t.customer_name ?? '—'}</td>
+												<td className="dim">
+													{t.completed ? (
+														<Tag tone="ok">done</Tag>
+													) : t.completion_due ? (
+														<>
+															{fmtDate(t.completion_due)}{' '}
+															{t.completion_days != null && (
+																<Tag tone={urgencyTone(t.completion_days) ?? 'ok'}>
+																	{urgencyLabel(t.completion_days)}
+																</Tag>
+															)}
+														</>
+													) : (
+														'—'
+													)}
+												</td>
+												<td className="dim">
+													{!t.outlay_open ? (
+														<span className="dim">—</span>
+													) : t.outlay_due ? (
+														<>
+															{fmtDate(t.outlay_due)}{' '}
+															{t.outlay_days != null && (
+																<Tag tone={urgencyTone(t.outlay_days) ?? 'ok'}>
+																	{urgencyLabel(t.outlay_days)}
+																</Tag>
+															)}
+														</>
+													) : (
+														'—'
+													)}
+												</td>
+												<td className="num">{t.net_fx_profit_inr == null ? '—' : inr(t.net_fx_profit_inr)}</td>
+												<td>
+													<Tag tone={st.tone}>{st.label}</Tag>
+												</td>
+											</tr>
+										);
+									})}
+								</tbody>
+							</table>
+						</Card>
+					)}
 				</div>
 			)}
 

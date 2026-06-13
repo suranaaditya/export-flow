@@ -19,9 +19,27 @@ class ExportIncentive(Document):
 			from exportflow.company import exportflow_company
 
 			self.company = exportflow_company()
+		self.reject_merchanting()
 		self.pull_shipment_basis()
 		self.compute_amount()
 		self.set_scrip_expiry()
+
+	def reject_merchanting(self):
+		"""Third-country / merchanting trades are explicitly ineligible for
+		RoDTEP and Duty Drawback (the goods never clear Indian customs). Guard
+		against linking an earning claim to one."""
+		if self.status in ("Not Applicable", "Cancelled") or not self.shipment:
+			return
+		from exportflow.mtt import is_merchanting
+
+		trade_type = frappe.db.get_value("Export Shipment", self.shipment, "trade_type")
+		if is_merchanting(trade_type):
+			frappe.throw(
+				_(
+					"{0} is a third-country / merchanting shipment — it is not eligible for "
+					"RoDTEP or Duty Drawback."
+				).format(self.shipment)
+			)
 
 	def pull_shipment_basis(self):
 		"""Default the shipping-bill identifiers from the linked shipment when

@@ -131,6 +131,7 @@ const CONDITION_FIELDS = [
 	'customer',
 	'letter_of_credit',
 	'merchant_export_scheme',
+	'trade_type',
 ];
 
 function conditionsSummary(rule: ChecklistRuleRow): string {
@@ -388,6 +389,8 @@ interface ExporterProfile {
 	signatory_name: string;
 	signatory_designation: string;
 	scomet_text: string;
+	mtt_completion_months: string;
+	mtt_outlay_months: string;
 }
 
 const EMPTY_PROFILE: ExporterProfile = {
@@ -399,6 +402,8 @@ const EMPTY_PROFILE: ExporterProfile = {
 	signatory_name: '',
 	signatory_designation: '',
 	scomet_text: '',
+	mtt_completion_months: '',
+	mtt_outlay_months: '',
 };
 
 /** Exporter identity printed on every §5.2 document (IEC, GSTIN, LUT…). */
@@ -437,6 +442,8 @@ function ExporterProfilePanel({ canEdit }: { canEdit: boolean }) {
 			await updateDoc('ExportFlow Settings', 'ExportFlow Settings', {
 				...form,
 				lut_valid_upto: form.lut_valid_upto || null,
+				mtt_completion_months: Number(form.mtt_completion_months) || 9,
+				mtt_outlay_months: Number(form.mtt_outlay_months) || 4,
 			});
 			setSavedTick(true);
 			mutate();
@@ -502,6 +509,27 @@ function ExporterProfilePanel({ canEdit }: { canEdit: boolean }) {
 								<TextArea value={form.scomet_text} onChange={(v) => set('scomet_text', v)} rows={2} />
 							</Field>
 						</div>
+						<Field
+							label="MTT completion window (months)"
+							hint="FEMA merchanting — default 9; FEM Regs 2026 may revise"
+						>
+							<TextInput
+								type="number"
+								mono
+								value={form.mtt_completion_months}
+								onChange={(v) => set('mtt_completion_months', v)}
+								placeholder="9"
+							/>
+						</Field>
+						<Field label="MTT forex-outlay window (months)" hint="Default 4">
+							<TextInput
+								type="number"
+								mono
+								value={form.mtt_outlay_months}
+								onChange={(v) => set('mtt_outlay_months', v)}
+								placeholder="4"
+							/>
+						</Field>
 					</div>
 					<div className="formfoot">
 						{err && <span className="ferr">{err}</span>}

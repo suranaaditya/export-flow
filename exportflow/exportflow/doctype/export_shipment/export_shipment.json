@@ -10,6 +10,7 @@
   "customer",
   "customer_name",
   "mode",
+  "trade_type",
   "cb_shp_head",
   "current_milestone",
   "incoterm",
@@ -45,6 +46,17 @@
   "awb_date",
   "section_banking",
   "letter_of_credit",
+  "section_mtt",
+  "mtt_ad_bank",
+  "mtt_same_ad_bank",
+  "mtt_import_supplier",
+  "mtt_import_value_inr",
+  "cb_mtt",
+  "mtt_commencement_date",
+  "mtt_import_payment_date",
+  "mtt_completion_date",
+  "mtt_idpms_status",
+  "mtt_edpms_status",
   "section_items",
   "items",
   "section_milestones",
@@ -95,6 +107,15 @@
    "label": "Mode",
    "options": "Sea\nAir",
    "reqd": 1
+  },
+  {
+   "default": "Export from India",
+   "description": "Merchanting trades (goods ship A→B without entering India) are outside GST and carry no shipping bill, EGM, eBRC or RoDTEP/Drawback — they track FEMA MTT compliance instead.",
+   "fieldname": "trade_type",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Trade Type",
+   "options": "Export from India\nThird-country / Merchanting"
   },
   {
    "fieldname": "cb_shp_head",
@@ -283,6 +304,72 @@
    "options": "Letter of Credit"
   },
   {
+   "depends_on": "eval:doc.trade_type=='Third-country / Merchanting'",
+   "fieldname": "section_mtt",
+   "fieldtype": "Section Break",
+   "label": "Merchanting (MTT) Compliance"
+  },
+  {
+   "description": "RBI FEMA MTT rule: both legs (import payment + export receipt) must route through the same AD bank.",
+   "fieldname": "mtt_ad_bank",
+   "fieldtype": "Data",
+   "label": "AD Bank (both legs)"
+  },
+  {
+   "default": "0",
+   "fieldname": "mtt_same_ad_bank",
+   "fieldtype": "Check",
+   "label": "Both legs through the same AD bank"
+  },
+  {
+   "description": "Overseas supplier the goods were bought from.",
+   "fieldname": "mtt_import_supplier",
+   "fieldtype": "Link",
+   "label": "Import-leg supplier",
+   "options": "Supplier"
+  },
+  {
+   "description": "Forex paid out for the buy leg, in INR — used for the net-FX-profit check.",
+   "fieldname": "mtt_import_value_inr",
+   "fieldtype": "Currency",
+   "label": "Import outlay (INR)",
+   "options": "Company:company:default_currency"
+  },
+  {
+   "fieldname": "cb_mtt",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Start of the trade — the 9-month completion clock runs from here (defaults to import payment, else ETD).",
+   "fieldname": "mtt_commencement_date",
+   "fieldtype": "Date",
+   "label": "Trade commenced"
+  },
+  {
+   "description": "Forex outlay date — the 4-month outlay clock runs from here until export proceeds are received.",
+   "fieldname": "mtt_import_payment_date",
+   "fieldtype": "Date",
+   "label": "Import leg paid on"
+  },
+  {
+   "description": "Both legs settled and proceeds received.",
+   "fieldname": "mtt_completion_date",
+   "fieldtype": "Date",
+   "label": "Trade completed on"
+  },
+  {
+   "fieldname": "mtt_idpms_status",
+   "fieldtype": "Select",
+   "label": "IDPMS (import) status",
+   "options": "\nOpen\nClosed\nNot Required"
+  },
+  {
+   "fieldname": "mtt_edpms_status",
+   "fieldtype": "Select",
+   "label": "EDPMS (export) status",
+   "options": "\nOpen\nClosed\nNot Required"
+  },
+  {
    "fieldname": "section_items",
    "fieldtype": "Section Break",
    "label": "Items"
@@ -319,7 +406,7 @@
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-06-12 12:00:00.000000",
+ "modified": "2026-06-13 14:00:00.000000",
  "modified_by": "Administrator",
  "module": "ExportFlow",
  "name": "Export Shipment",

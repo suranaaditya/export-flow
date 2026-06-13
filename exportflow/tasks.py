@@ -1,5 +1,7 @@
 import frappe
-from frappe.utils import flt, getdate, nowdate
+from frappe.utils import add_months, flt, getdate, nowdate
+
+from exportflow.mtt import MERCHANTING
 
 ALERT_ROLES = ("Export Admin", "Export Operations", "Export Accounts")
 
@@ -12,6 +14,9 @@ COMPLIANCE_ALERT_DAYS = {60, 30, 7}
 # bank realization (FEMA window) and RoDTEP scrip expiry
 REALIZATION_ALERT_DAYS = {30, 7}
 SCRIP_EXPIRY_ALERT_DAYS = {60, 30, 7}
+# FEMA merchanting 4-month forex-outlay clock (completion is tracked by the
+# realization due date, which is MTT-based for merchanting shipments)
+MTT_OUTLAY_ALERT_DAYS = {15, 7}
 
 
 def daily():
@@ -22,6 +27,7 @@ def daily():
 	alerts += send_compliance_alerts()
 	alerts += send_realization_alerts()
 	alerts += send_scrip_expiry_alerts()
+	alerts += send_mtt_outlay_alerts()
 	send_email_digest(alerts)
 
 
@@ -327,22 +333,82 @@ def send_realization_alerts(today=None) -> list[dict]:
 	for r in frappe.get_all(
 		"Export Realization",
 		filters={"status": ["not in", closed], "due_date": ["is", "set"]},
-		fields=["name", "export_invoice", "customer", "due_date", "status"],
+		fields=["name", "export_invoice", "customer", "due_date", "status", "shipment"],
 	):
 		try:
 			days_left = (getdate(r.due_date) - today).days
 			if _should_alert(days_left, REALIZATION_ALERT_DAYS):
 				inv = r.export_invoice or r.name
-				subject = f"Export proceeds: {inv} realization due {_when(days_left)}"
-				body = (
-					f"Realization {r.name} ({inv}{', ' + r.customer if r.customer else ''}) is due on "
-					f"{r.due_date} and is {r.status}. Realize + self-certify the eBRC before the FEMA "
-					f"window closes — unrealized proceeds risk RoDTEP/Drawback clawback with interest."
+				merchanting = bool(
+					r.shipment
+					and frappe.db.get_value("Export Shipment", r.shipment, "trade_type") == MERCHANTING
 				)
+				if merchanting:
+					subject = f"Merchanting trade: {inv} must complete {_when(days_left)}"
+					body = (
+						f"Realization {r.name} ({inv}{', ' + r.customer if r.customer else ''}) is a "
+						f"third-country / merchanting trade. The whole trade must complete (export "
+						f"proceeds received) by {r.due_date} per the RBI FEMA MTT window — close it "
+						f"through EDPMS/IDPMS, not eBRC."
+					)
+				else:
+					subject = f"Export proceeds: {inv} realization due {_when(days_left)}"
+					body = (
+						f"Realization {r.name} ({inv}{', ' + r.customer if r.customer else ''}) is due on "
+						f"{r.due_date} and is {r.status}. Realize + self-certify the eBRC before the FEMA "
+						f"window closes — unrealized proceeds risk RoDTEP/Drawback clawback with interest."
+					)
 				alerts.append({"realization": r.name, "days_left": days_left, "subject": subject})
 				notify_export_users(subject, body, "Export Realization", r.name)
 		except Exception:
 			frappe.log_error(title=f"Realization alert failed: {r.name}", message=frappe.get_traceback())
+
+	return alerts
+
+
+def send_mtt_outlay_alerts(today=None) -> list[dict]:
+	"""FEMA merchanting rule: there must be no foreign-exchange outlay beyond
+	~4 months. From the import-leg payment date, alert at 15/7 days and weekly
+	once overdue, until the export proceeds have been received."""
+	from exportflow.mtt import mtt_months
+
+	today = getdate(today or nowdate())
+	_completion_months, outlay_months = mtt_months(frappe.get_cached_doc("ExportFlow Settings"))
+	alerts = []
+
+	ships = frappe.get_all(
+		"Export Shipment",
+		filters={
+			"trade_type": MERCHANTING,
+			"mtt_import_payment_date": ["is", "set"],
+			"mtt_completion_date": ["is", "not set"],
+		},
+		fields=["name", "customer_name", "mtt_import_payment_date"],
+	)
+	for shp in ships:
+		try:
+			# any inward remittance against the shipment closes the outlay clock
+			received = flt(
+				frappe.db.sql(
+					"SELECT COALESCE(SUM(amount_received), 0) FROM `tabExport Realization` WHERE shipment = %s",
+					(shp.name,),
+				)[0][0]
+			)
+			if received > 0:
+				continue
+			outlay_due = add_months(getdate(shp.mtt_import_payment_date), outlay_months)
+			days_left = (outlay_due - today).days
+			if _should_alert(days_left, MTT_OUTLAY_ALERT_DAYS):
+				subject = f"MTT forex outlay: {shp.name} export receipt due {_when(days_left)}"
+				body = (
+					f"Merchanting shipment {shp.name} ({shp.customer_name or ''}) paid its import leg "
+					f"on {shp.mtt_import_payment_date}. RBI FEMA caps the forex outlay at "
+					f"{outlay_months} months — the export proceeds must be received by {outlay_due}."
+				)
+				alerts.append({"shipment": shp.name, "days_left": days_left, "subject": subject})
+				notify_export_users(subject, body, "Export Shipment", shp.name)
+		except Exception:
+			frappe.log_error(title=f"MTT outlay alert failed: {shp.name}", message=frappe.get_traceback())
 
 	return alerts
 

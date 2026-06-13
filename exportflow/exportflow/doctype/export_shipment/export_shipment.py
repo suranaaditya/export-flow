@@ -46,6 +46,10 @@ class ExportShipment(Document):
 			from exportflow.company import exportflow_company
 
 			self.company = exportflow_company()
+		if not self.trade_type:
+			from exportflow.mtt import DEFAULT_TRADE_TYPE
+
+			self.trade_type = DEFAULT_TRADE_TYPE
 		self.seed_milestones()
 		self.validate_items()
 		self.validate_lc()

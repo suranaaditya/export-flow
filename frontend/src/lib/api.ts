@@ -217,27 +217,69 @@ export interface RealizationRow {
 	overdue?: boolean;
 }
 
+// ---- Third-country / merchanting (MTT) ----
+
+export const TRADE_TYPES = ['Export from India', 'Third-country / Merchanting'] as const;
+export type TradeType = (typeof TRADE_TYPES)[number];
+
+export function isMerchanting(t: string | null | undefined): boolean {
+	return t === 'Third-country / Merchanting';
+}
+
+/** FEMA merchanting compliance picture for one shipment (exportflow.mtt.clocks). */
+export interface MTTBlock {
+	is_merchanting: true;
+	commencement_date: string | null;
+	completion_due: string | null;
+	completion_days: number | null;
+	completed: boolean;
+	completion_date: string | null;
+	outlay_due: string | null;
+	outlay_days: number | null;
+	outlay_open: boolean;
+	import_payment_date: string | null;
+	import_value_inr: number | null;
+	export_proceeds_inr: number | null;
+	net_fx_profit_inr: number | null;
+	same_ad_bank: boolean;
+	ad_bank: string | null;
+	idpms_status: string | null;
+	edpms_status: string | null;
+}
+
+export interface MTTTrade extends MTTBlock {
+	shipment: string;
+	customer_name: string | null;
+}
+
 export interface FinanceWorkspaceData {
 	incentives: IncentiveRow[];
 	realizations: RealizationRow[];
+	mtt_trades: MTTTrade[];
 	kpis: {
 		incentive_total?: number;
 		incentive_pending?: number;
 		realized?: number;
 		overdue_count?: number;
 		open_count?: number;
+		mtt_count?: number;
+		mtt_completion_overdue?: number;
+		mtt_outlay_overdue?: number;
+		mtt_fx_negative?: number;
 	};
 	can: {
 		incentive_read: boolean;
 		realization_read: boolean;
 		incentive_write: boolean;
 		realization_write: boolean;
+		mtt_read: boolean;
 	};
 }
 
 export interface ShipmentFinanceData {
 	incentives: IncentiveRow[];
 	realizations: RealizationRow[];
+	mtt: MTTBlock | null;
 	can: { incentive_write: boolean; realization_write: boolean };
 }
 
@@ -302,7 +344,7 @@ export interface DashShipmentRow {
 }
 
 export interface DeadlineRow {
-	kind: 'lc' | 'gst' | 'compliance';
+	kind: 'lc' | 'gst' | 'compliance' | 'mtt';
 	label: string;
 	/** ID rendered mono+cyan (LC number, PO name); null for compliance rows */
 	ref: string | null;
@@ -529,6 +571,7 @@ export interface ShipmentDetailData {
 		customer: string;
 		customer_name: string;
 		mode: 'Sea' | 'Air';
+		trade_type: TradeType;
 		current_milestone: string;
 		incoterm: string | null;
 		cha: string | null;
@@ -555,6 +598,15 @@ export interface ShipmentDetailData {
 		awb_date: string | null;
 		letter_of_credit: string | null;
 		notes: string | null;
+		mtt_ad_bank: string | null;
+		mtt_same_ad_bank: 0 | 1;
+		mtt_import_supplier: string | null;
+		mtt_import_value_inr: number | null;
+		mtt_commencement_date: string | null;
+		mtt_import_payment_date: string | null;
+		mtt_completion_date: string | null;
+		mtt_idpms_status: string | null;
+		mtt_edpms_status: string | null;
 	};
 	milestones: ShipmentMilestoneRow[];
 	items: ShipmentItemRow[];

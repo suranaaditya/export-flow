@@ -16,12 +16,56 @@ import json
 import frappe
 from frappe.utils import add_days, flt
 
+from exportflow.mtt import EXPORT_FROM_INDIA, MERCHANTING
+
 USD_FALLBACK_RATE = 85.0  # FY25-26 ballpark when the sheet leaves the $ rate blank
 GENERIC = {"third country", "na", "nil", "cancelled", "-"}
 
 
 def _is_generic(v) -> bool:
 	return not v or str(v).strip().lower() in GENERIC
+
+
+def _is_merchanting(group) -> bool:
+	"""The MIS marks third-country / merchanting rows by putting "Third Country"
+	in the CHA and forwarder columns (note the recurring typo "Third Counrty").
+	Goods ship A→B without entering India."""
+	for key in ("cha", "forwarder"):
+		v = (group.get(key) or "").strip().lower()
+		if v.startswith("third coun"):
+			return True
+	return False
+
+
+def _import_value_inr(group, rate: float) -> float | None:
+	"""Buy-leg outlay in INR from the per-item supplier rates (for the MTT
+	net-FX-profit check). None when the sheet carries no supplier pricing."""
+	fcy = sum(
+		flt(it["qty"]) * flt(it.get("supplier_rate"))
+		for it in group["items"]
+		if it.get("qty") and it.get("supplier_rate")
+	)
+	return flt(fcy * rate, 2) if fcy else None
+
+
+def _mtt_shipment_fields(group, merchanting: bool, rate: float) -> dict:
+	"""MTT fields to stamp on a merchanting shipment from the MIS row. The sheet
+	carries no import-payment date, so the 9-month clock is anchored on the
+	export (B/L) date as a proxy and the outlay clock stays manual."""
+	if not merchanting:
+		return {}
+	sup_name = group.get("supplier_name")
+	fields = {
+		"mtt_ad_bank": group.get("bank") or None,
+		"mtt_import_supplier": (
+			ensure_supplier(sup_name) if sup_name and not _is_generic(sup_name) else None
+		),
+		"mtt_commencement_date": group.get("bl_date") or group.get("shipping_bill_date") or None,
+		"mtt_import_value_inr": _import_value_inr(group, rate),
+	}
+	if flt(group.get("amount_received")) > 0 and group.get("pay_received_date"):
+		fields["mtt_completion_date"] = group.get("pay_received_date")
+	return fields
 
 
 # ---------------------------------------------------------------- masters
@@ -234,6 +278,7 @@ def import_group(group: dict, company: str) -> dict:
 	pol = ensure_port(group.get("port_of_loading"), mode)
 	pod = ensure_port(group.get("pod"), mode)
 	cha = ensure_cha(group.get("cha"))
+	merchanting = _is_merchanting(group)
 
 	ship_items = []
 	for row, it in zip(so.items, [i for i in group["items"] if i.get("qty") and i.get("rate")]):
@@ -252,6 +297,7 @@ def import_group(group: dict, company: str) -> dict:
 			"company": company,
 			"customer": customer,
 			"mode": mode,
+			"trade_type": MERCHANTING if merchanting else EXPORT_FROM_INDIA,
 			"port_of_loading": pol,
 			"port_of_discharge": pod,
 			"final_destination": group.get("country") or group.get("pod"),
@@ -262,6 +308,7 @@ def import_group(group: dict, company: str) -> dict:
 			"egm_date": group.get("egm_date"),
 			"bl_number": group.get("bl_no"),
 			"bl_date": group.get("bl_date"),
+			**_mtt_shipment_fields(group, merchanting, rate),
 			"items": ship_items,
 		}
 	)
@@ -375,6 +422,64 @@ def import_group(group: dict, company: str) -> dict:
 
 
 # ---------------------------------------------------------------- maintenance
+
+def backfill_trade_types(path: str, company: str = "MN Globex", dry_run: int = 1) -> dict:
+	"""Set trade_type (and the MTT fields) on shipments already imported, keyed
+	by export invoice → realization → shipment. Idempotent: re-running just
+	rewrites the same values. Saving each shipment re-runs the checklist engine,
+	which removes the now-suppressed India-only documents on merchanting rows.
+
+	Run on the server (the client JSON is not in the repo):
+	    bench --site <site> execute exportflow.mis_import.backfill_trade_types \\
+	        --kwargs "{'path': '/tmp/mis_clean.json', 'company': 'MN Globex', 'dry_run': False}"
+	"""
+	dry_run = int(dry_run)
+	with open(path) as f:
+		groups = json.load(f)
+	if not frappe.db.exists("Company", company):
+		frappe.throw(f"Unknown company {company}")
+
+	result = {"merchanting": 0, "export": 0, "missing": 0, "company": company}
+	for group in groups:
+		inv = group.get("export_invoice") or group.get("buyer_po_no")
+		if not inv:
+			continue
+		rel = frappe.db.get_value(
+			"Export Realization",
+			{"export_invoice": inv, "company": company},
+			["name", "shipment"],
+			as_dict=True,
+		)
+		if not rel or not rel.shipment or not frappe.db.exists("Export Shipment", rel.shipment):
+			result["missing"] += 1
+			continue
+
+		merchanting = _is_merchanting(group)
+		_currency, rate = _currency_rate(group)
+		shp = frappe.get_doc("Export Shipment", rel.shipment)
+		shp.trade_type = MERCHANTING if merchanting else EXPORT_FROM_INDIA
+		for field, value in _mtt_shipment_fields(group, merchanting, rate).items():
+			shp.set(field, value)
+		shp.save(ignore_permissions=True)
+
+		# the realization's FEMA clock changes basis for merchanting (MTT
+		# completion, not export+15mo) — clear the due so validate recomputes it
+		if merchanting:
+			realization = frappe.get_doc("Export Realization", rel.name)
+			realization.due_date = None
+			realization.save(ignore_permissions=True)
+
+		result["merchanting" if merchanting else "export"] += 1
+
+	if dry_run:
+		frappe.db.rollback()
+		result["mode"] = "dry-run (rolled back)"
+	else:
+		frappe.db.commit()
+		result["mode"] = "committed"
+	frappe.logger().info(f"MIS trade-type backfill: {result}")
+	return result
+
 
 def clear_company_data(company: str) -> dict:
 	"""Delete the ExportFlow transactional docs for a company so the import can

@@ -18,6 +18,8 @@ by two 0.1%-scheme POs owes two packs, one per supplier.
 import frappe
 from frappe.utils import add_days, cint, getdate
 
+from exportflow.mtt import SUPPRESSED_DOCS as MERCHANTING_SUPPRESSED, is_merchanting
+
 GST_PACK_TYPE = "GST Supplier Compliance Pack"
 TRUTHY = {"1", "yes", "true", "y"}
 BOOL_FIELDS = {"letter_of_credit", "merchant_export_scheme"}
@@ -95,6 +97,7 @@ def _context(shipment) -> dict:
 		"customer": shipment.customer or "",
 		"letter_of_credit": "Yes" if shipment.letter_of_credit else "No",
 		"merchant_export_scheme": "Yes" if _merchant_scheme_pos(shipment) else "No",
+		"trade_type": shipment.trade_type or "",
 	}
 
 
@@ -176,6 +179,14 @@ def _required_documents(shipment) -> dict[str, dict]:
 				if spec and not spec.get("due_date"):
 					spec["due_date"] = presentation_due
 
+	# Merchanting trades never touch Indian customs/incentive/eBRC machinery —
+	# drop the documents that legally cannot exist (and their milestone gates),
+	# whatever rule produced them. The MTT compliance panel tracks them instead.
+	if is_merchanting(shipment.trade_type):
+		for key, spec in list(required.items()):
+			if spec.get("document_type") in MERCHANTING_SUPPRESSED:
+				del required[key]
+
 	return required
 
 
@@ -254,6 +265,7 @@ def _sync(shipment) -> None:
 
 	# lapsed requirements: drop rows nobody touched; rows carrying real work
 	# are handed to the user (source Manual) instead of silently destroyed
+	merchanting = is_merchanting(shipment.trade_type)
 	for rows in by_key.values():
 		for inst in rows:
 			if _untouched(inst):
@@ -261,11 +273,15 @@ def _sync(shipment) -> None:
 					"Document Instance", inst.name, force=True, ignore_permissions=True
 				)
 			elif inst.source != "Manual":
+				changes = {"source": "Manual", "source_key": None}
+				# a suppressed India-customs doc on a merchanting trade can never
+				# reach its unblock status — drop its milestone gate so it cannot
+				# permanently block Let Export Order
+				if merchanting and inst.document_type in MERCHANTING_SUPPRESSED:
+					changes["blocking"] = 0
+					changes["blocked_milestone"] = None
 				frappe.db.set_value(
-					"Document Instance",
-					inst.name,
-					{"source": "Manual", "source_key": None},
-					update_modified=False,
+					"Document Instance", inst.name, changes, update_modified=False
 				)
 
 
@@ -317,17 +333,26 @@ def _update_instance(inst, spec: dict, key: str) -> None:
 
 def milestone_blockers(shipment_name: str, milestone: str) -> list[dict]:
 	"""Unresolved blocking instances gating this milestone (§4.2: default —
-	ADC NOC and Shipping Bill block "Let Export Order")."""
+	ADC NOC and Shipping Bill block "Let Export Order").
+
+	India-customs documents never gate a merchanting trade — they cannot reach
+	their unblock status (the goods never clear Indian customs), so a stray
+	blocking row of that kind must not freeze the milestone."""
 	from exportflow.exportflow.doctype.document_instance.document_instance import status_index
+
+	filters = {
+		"shipment": shipment_name,
+		"blocking": 1,
+		"blocked_milestone": milestone,
+		"status": ["!=", "Not Applicable"],
+	}
+	trade_type = frappe.db.get_value("Export Shipment", shipment_name, "trade_type")
+	if is_merchanting(trade_type):
+		filters["document_type"] = ["not in", list(MERCHANTING_SUPPRESSED)]
 
 	rows = frappe.get_all(
 		"Document Instance",
-		filters={
-			"shipment": shipment_name,
-			"blocking": 1,
-			"blocked_milestone": milestone,
-			"status": ["!=", "Not Applicable"],
-		},
+		filters=filters,
 		fields=["name", "document_type", "status", "min_unblock_status"],
 	)
 	return [

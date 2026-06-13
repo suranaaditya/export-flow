@@ -29,6 +29,7 @@ const DEADLINE_ICONS: Record<DeadlineRow['kind'], IconName> = {
 	lc: 'calendar',
 	gst: 'clock',
 	compliance: 'shield',
+	mtt: 'globe',
 };
 
 function todayLine(): string {
@@ -289,7 +290,7 @@ export function Dashboard() {
 				</Card>
 
 				<div className="stack">
-					{(!d || d.can.lc || d.can.po || d.can.compliance) && (
+					{(!d || d.can.lc || d.can.po || d.can.compliance || d.can.shipment) && (
 						<Card>
 							<CHead icon="calendar" title="Deadlines" count="upcoming" />
 							<CardBody

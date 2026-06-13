@@ -1013,6 +1013,7 @@ def create_shipment(payload) -> dict:
 			"company": exportflow_company(),
 			"customer": payload.get("customer"),
 			"mode": payload.get("mode") or "Sea",
+			"trade_type": payload.get("trade_type") or None,
 			"incoterm": payload.get("incoterm") or None,
 			"cha": payload.get("cha") or None,
 			"port_of_loading": payload.get("port_of_loading") or None,
@@ -1138,6 +1139,7 @@ def get_shipment_detail(name: str) -> dict:
 				"customer",
 				"customer_name",
 				"mode",
+				"trade_type",
 				"current_milestone",
 				"incoterm",
 				"cha",
@@ -1164,6 +1166,15 @@ def get_shipment_detail(name: str) -> dict:
 				"awb_date",
 				"letter_of_credit",
 				"notes",
+				"mtt_ad_bank",
+				"mtt_same_ad_bank",
+				"mtt_import_supplier",
+				"mtt_import_value_inr",
+				"mtt_commencement_date",
+				"mtt_import_payment_date",
+				"mtt_completion_date",
+				"mtt_idpms_status",
+				"mtt_edpms_status",
 			)
 		},
 		"milestones": [
@@ -1701,6 +1712,59 @@ def _incentive_realized(row) -> bool:
 	return row.status in INCENTIVE_REALIZED
 
 
+# shipment fields the MTT compliance panel reads
+MTT_SHIPMENT_FIELDS = (
+	"trade_type",
+	"mtt_ad_bank",
+	"mtt_same_ad_bank",
+	"mtt_import_supplier",
+	"mtt_import_value_inr",
+	"mtt_commencement_date",
+	"mtt_import_payment_date",
+	"mtt_completion_date",
+	"mtt_idpms_status",
+	"mtt_edpms_status",
+	"etd",
+)
+
+
+def _mtt_block(shipment_facts: dict, realizations: list) -> dict | None:
+	"""The FEMA merchanting picture for one shipment — clocks, net-FX profit and
+	closure status — or None when the shipment is an ordinary export. Export
+	proceeds come from the linked realizations (realized INR if money has
+	arrived, else the expected invoice value in INR)."""
+	from exportflow import mtt
+
+	if not mtt.is_merchanting(shipment_facts.get("trade_type")):
+		return None
+	completion_months, outlay_months = mtt.mtt_months(frappe.get_cached_doc("ExportFlow Settings"))
+
+	# proceeds per realization = the greater of what has actually arrived and
+	# what is still expected (invoice × rate) — so a partial receipt does not
+	# wipe out the still-outstanding balance and falsely flag an FX loss
+	# (mirrors the receivable convention used by the sales dashboard)
+	proceeds_inr = flt(
+		sum(
+			max(
+				flt(r.get("amount_received_inr")),
+				flt(r.get("invoice_value")) * (flt(r.get("conversion_rate")) or 1.0),
+			)
+			for r in realizations
+		)
+	)
+	received_any = any(
+		flt(r.get("amount_received")) > 0 or flt(r.get("amount_received_inr")) > 0 for r in realizations
+	)
+
+	return mtt.clocks(
+		shipment_facts,
+		completion_months=completion_months,
+		outlay_months=outlay_months,
+		export_proceeds_inr=proceeds_inr or None,
+		proceeds_received=received_any,
+	)
+
+
 @frappe.whitelist()
 def get_finance_workspace() -> dict:
 	"""Incentives + realizations portfolio for the Finance screen, one trip."""
@@ -1744,23 +1808,74 @@ def get_finance_workspace() -> dict:
 		kpis["overdue_count"] = sum(1 for r in realizations if r["overdue"])
 		kpis["open_count"] = sum(1 for r in realizations if r.status not in closed)
 
+	# third-country / merchanting trades — FEMA MTT compliance, not incentives
+	from exportflow.mtt import MERCHANTING
+
+	mtt_trades = []
+	can_ship = frappe.has_permission("Export Shipment", "read")
+	if can_ship:
+		rels_by_ship: dict[str, list] = {}
+		for r in realizations:
+			if r.get("shipment"):
+				rels_by_ship.setdefault(r["shipment"], []).append(r)
+		merch = frappe.get_all(
+			"Export Shipment",
+			filters={**cf, "trade_type": MERCHANTING},
+			fields=["name", "customer_name", *MTT_SHIPMENT_FIELDS],
+			order_by="modified desc",
+			limit_page_length=0,
+		)
+		for shp in merch:
+			block = _mtt_block(shp, rels_by_ship.get(shp["name"], []))
+			if not block:
+				continue
+			block["shipment"] = shp["name"]
+			block["customer_name"] = shp.get("customer_name")
+			mtt_trades.append(block)
+		kpis["mtt_count"] = len(mtt_trades)
+		kpis["mtt_completion_overdue"] = sum(
+			1 for t in mtt_trades if not t["completed"] and (t["completion_days"] or 0) < 0
+		)
+		kpis["mtt_outlay_overdue"] = sum(
+			1 for t in mtt_trades if t["outlay_open"] and (t["outlay_days"] or 0) < 0
+		)
+		kpis["mtt_fx_negative"] = sum(
+			1 for t in mtt_trades if t["net_fx_profit_inr"] is not None and t["net_fx_profit_inr"] < 0
+		)
+
 	return {
 		"incentives": incentives,
 		"realizations": realizations,
+		"mtt_trades": mtt_trades,
 		"kpis": kpis,
 		"can": {
 			"incentive_read": can_inc,
 			"realization_read": can_rel,
 			"incentive_write": bool(frappe.has_permission("Export Incentive", "write")),
 			"realization_write": bool(frappe.has_permission("Export Realization", "write")),
+			"mtt_read": can_ship,
 		},
 	}
 
 
 @frappe.whitelist()
 def get_shipment_finance(shipment: str) -> dict:
-	"""Incentives + realizations attached to one shipment (detail card)."""
+	"""Incentives + realizations attached to one shipment (detail card), plus
+	the FEMA merchanting compliance block when the shipment is third-country."""
 	frappe.has_permission("Export Shipment", "read", doc=shipment, throw=True)
+	realizations = (
+		frappe.get_all(
+			"Export Realization",
+			filters={"shipment": shipment},
+			fields=REALIZATION_FIELDS,
+			order_by="creation asc",
+		)
+		if frappe.has_permission("Export Realization", "read")
+		else []
+	)
+	facts = frappe.db.get_value(
+		"Export Shipment", shipment, MTT_SHIPMENT_FIELDS, as_dict=True
+	)
 	return {
 		"incentives": frappe.get_all(
 			"Export Incentive",
@@ -1770,14 +1885,8 @@ def get_shipment_finance(shipment: str) -> dict:
 		)
 		if frappe.has_permission("Export Incentive", "read")
 		else [],
-		"realizations": frappe.get_all(
-			"Export Realization",
-			filters={"shipment": shipment},
-			fields=REALIZATION_FIELDS,
-			order_by="creation asc",
-		)
-		if frappe.has_permission("Export Realization", "read")
-		else [],
+		"realizations": realizations,
+		"mtt": _mtt_block(facts, realizations) if facts else None,
 		"can": {
 			"incentive_write": bool(frappe.has_permission("Export Incentive", "create")),
 			"realization_write": bool(frappe.has_permission("Export Realization", "create")),
@@ -2028,9 +2137,55 @@ def get_dashboard() -> dict:
 						"route": "/compliance",
 					}
 				)
+	# merchanting (MTT) clocks: 4-month forex outlay and 9-month completion
+	if can["shipment"]:
+		from exportflow.mtt import MERCHANTING
+
+		merch = frappe.get_all(
+			"Export Shipment",
+			filters=cf({"trade_type": MERCHANTING, "mtt_completion_date": ["is", "not set"]}),
+			fields=["name", "customer_name", *MTT_SHIPMENT_FIELDS],
+			limit_page_length=0,
+		)
+		if merch:
+			rel_rows = frappe.get_all(
+				"Export Realization",
+				filters={"shipment": ["in", [m.name for m in merch]]},
+				fields=["shipment", "amount_received", "amount_received_inr", "invoice_value", "conversion_rate"],
+				limit_page_length=0,
+			)
+			rels_by_ship: dict[str, list] = {}
+			for r in rel_rows:
+				rels_by_ship.setdefault(r.shipment, []).append(r)
+			for shp in merch:
+				block = _mtt_block(shp, rels_by_ship.get(shp.name, []))
+				if not block:
+					continue
+				if block["outlay_open"] and block["outlay_days"] is not None and block["outlay_days"] <= 30:
+					deadlines.append(
+						{
+							"kind": "mtt",
+							"label": "MTT forex outlay (4-month)",
+							"ref": shp.name,
+							"sub": f"{shp.customer_name or ''} · receive export proceeds",
+							"days": block["outlay_days"],
+							"route": f"/shipments/{shp.name}",
+						}
+					)
+				if not block["completed"] and block["completion_days"] is not None and block["completion_days"] <= 30:
+					deadlines.append(
+						{
+							"kind": "mtt",
+							"label": "MTT completion (9-month)",
+							"ref": shp.name,
+							"sub": f"{shp.customer_name or ''} · complete the trade",
+							"days": block["completion_days"],
+							"route": f"/shipments/{shp.name}",
+						}
+					)
 	deadlines.sort(key=lambda d: d["days"])
 	out["deadlines"] = deadlines[:8]
-	if can["lc"] or can["po"] or can["compliance"]:
+	if can["lc"] or can["po"] or can["compliance"] or can["shipment"]:
 		out["kpis"]["deadlines_14d"] = sum(1 for d in deadlines if d["days"] <= 14)
 		out["kpis"]["lc_at_risk"] = len(at_risk_lcs)
 		out["kpis"]["gst_at_risk"] = sum(

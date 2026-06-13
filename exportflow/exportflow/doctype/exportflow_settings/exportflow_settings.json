@@ -21,6 +21,10 @@
   "signatory_designation",
   "section_declarations",
   "scomet_text",
+  "section_mtt",
+  "mtt_completion_months",
+  "cb_efs_mtt",
+  "mtt_outlay_months",
   "section_alerts",
   "email_digest_enabled"
  ],
@@ -115,6 +119,33 @@
    "label": "SCOMET Declaration Text"
   },
   {
+   "collapsible": 1,
+   "description": "RBI FEMA merchanting-trade windows. Defaults: complete within 9 months, forex outlay within 4. FEM Export/Import Regs 2026 (effective 1 Oct 2026) may revise these.",
+   "fieldname": "section_mtt",
+   "fieldtype": "Section Break",
+   "label": "Merchanting (MTT) Clocks"
+  },
+  {
+   "default": "9",
+   "description": "Whole merchanting trade must complete within this many months of commencement.",
+   "fieldname": "mtt_completion_months",
+   "fieldtype": "Int",
+   "label": "Completion window (months)",
+   "non_negative": 1
+  },
+  {
+   "fieldname": "cb_efs_mtt",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "4",
+   "description": "Forex outlay (import payment ahead of export receipt) may not exceed this many months.",
+   "fieldname": "mtt_outlay_months",
+   "fieldtype": "Int",
+   "label": "Forex-outlay window (months)",
+   "non_negative": 1
+  },
+  {
    "fieldname": "section_alerts",
    "fieldtype": "Section Break",
    "label": "Alerts"
@@ -130,7 +161,7 @@
  "index_web_pages_for_search": 0,
  "issingle": 1,
  "links": [],
- "modified": "2026-06-12 10:00:00.000000",
+ "modified": "2026-06-13 14:00:00.000000",
  "modified_by": "Administrator",
  "module": "ExportFlow",
  "name": "ExportFlow Settings",
