@@ -625,6 +625,84 @@ def relink_purchase_orders(path: str, company: str = "MN Globex", dry_run: int =
 	return result
 
 
+def import_addresses(path: str, dry_run: int = 1, recreate: int = 0) -> dict:
+	"""Create Address records for suppliers/customers from a cleaned JSON list
+	(one Address per party, linked via Dynamic Link). Idempotent — a party that
+	already has any linked Address is skipped, unless recreate is set (then its
+	existing addresses are dropped and rebuilt). Country is set only when it
+	exists in the Country master; unresolvable parties are reported, not guessed.
+
+	Run on the server:
+	    bench --site <site> execute exportflow.mis_import.import_addresses \\
+	        --kwargs "{'path': '/tmp/addresses.json', 'dry_run': False}"
+	"""
+	dry_run = int(dry_run)
+	recreate = int(recreate)
+	with open(path) as f:
+		rows = json.load(f)
+
+	result = {"created": 0, "deleted": 0, "skipped_existing": 0, "unresolved": [], "errors": []}
+	for r in rows:
+		link_dt = r["link_doctype"]
+		name_field = "supplier_name" if link_dt == "Supplier" else "customer_name"
+		link_name = frappe.db.get_value(link_dt, {name_field: r["link_name"]}, "name")
+		if not link_name:
+			result["unresolved"].append(f"{link_dt}: {r['link_name']}")
+			continue
+		existing = frappe.get_all(
+			"Dynamic Link",
+			filters={"parenttype": "Address", "link_doctype": link_dt, "link_name": link_name},
+			pluck="parent",
+		)
+		if existing:
+			if not recreate:
+				result["skipped_existing"] += 1
+				continue
+			for addr in set(existing):
+				frappe.delete_doc("Address", addr, force=True, ignore_permissions=True)
+				result["deleted"] += 1
+		country = r.get("country")
+		if country and not frappe.db.exists("Country", country):
+			country = None
+		# india_compliance only requires a state when the address reads as Indian
+		# (incl. a null country) — fall back to the city just for that case, so a
+		# foreign address is not left with a redundant city-as-state line
+		state = r.get("state") or (r.get("city") if not country else None)
+		frappe.db.savepoint("addr")
+		try:
+			frappe.get_doc(
+				{
+					"doctype": "Address",
+					"address_title": r["link_name"][:100],
+					"address_type": "Billing",
+					"address_line1": r.get("address_line1") or r.get("city") or r["link_name"],
+					"address_line2": r.get("address_line2"),
+					"city": r.get("city"),
+					"state": state,
+					"country": country,
+					"pincode": r.get("pincode") or None,
+					"is_primary_address": 1,
+					"is_shipping_address": 1 if link_dt == "Customer" else 0,
+					"links": [{"link_doctype": link_dt, "link_name": link_name}],
+				}
+			).insert(ignore_permissions=True)
+			result["created"] += 1
+			if not dry_run:
+				frappe.db.commit()
+		except Exception as e:
+			frappe.db.rollback(save_point="addr")
+			result["errors"].append({"name": r["link_name"], "error": str(e)[:200]})
+
+	if dry_run:
+		frappe.db.rollback()
+		result["mode"] = "dry-run (rolled back)"
+	else:
+		frappe.db.commit()
+		result["mode"] = "committed"
+	frappe.logger().info(f"Address import: {result}")
+	return result
+
+
 def clear_company_data(company: str) -> dict:
 	"""Delete the ExportFlow transactional docs for a company so the import can
 	be re-run cleanly. Masters (customers/items/suppliers) are left in place —
