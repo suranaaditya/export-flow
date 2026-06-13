@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
 	useFrappeGetCall,
 	useFrappeGetDoc,
@@ -44,8 +44,15 @@ export function NewShipment() {
 	const navigate = useNavigate();
 	const [searchParams] = useSearchParams();
 
-	const [so, setSo] = useState('');
-	const [customer, setCustomer] = useState(searchParams.get('customer') ?? '');
+	// the shipment is booked for ONE customer; one or more of that customer's
+	// open sales orders are then added to it (the backend enforces same-customer).
+	// A ?so= deep link drives the customer itself, so ignore any ?customer there.
+	const soParam = searchParams.get('so');
+	const [customer, setCustomer] = useState(soParam ? '' : (searchParams.get('customer') ?? ''));
+	const [selectedSos, setSelectedSos] = useState<string[]>([]);
+	// SOs added before their shippable lines have loaded (deep-link path) —
+	// auto-ticked once the lines arrive
+	const [pendingSos, setPendingSos] = useState<string[]>([]);
 	const [tradeType, setTradeType] = useState<string>('Export from India');
 	const [mode, setModeRaw] = useState('Sea');
 	const setMode = (m: string) => {
@@ -68,26 +75,53 @@ export function NewShipment() {
 	const [sel, setSel] = useState<Record<string, LineSel>>({});
 	const [err, setErr] = useState<string | null>(null);
 	const [addingCha, setAddingCha] = useState(false);
-	// SO lines waiting to be ticked once the shippable list loads
-	const [pendingPreselect, setPendingPreselect] = useState<string[] | null>(null);
+
+	// the SO whose deal defaults prefilled the header (incoterm/destination/LC),
+	// and the exact values applied — so removing that SO clears the still-untouched
+	// prefill instead of silently carrying its (SO-specific) LC onto another deal
+	const [prefillSo, setPrefillSo] = useState<string | null>(null);
+	const prefilled = useRef<{ incoterm: string; finalDestination: string; lc: string }>({
+		incoterm: '',
+		finalDestination: '',
+		lc: '',
+	});
+	// the user has made a manual choice — guards the async deep-link prefill from
+	// clobbering a customer/SO the user picked while its fetch was in flight
+	const touched = useRef(false);
+	// only the first SO added (when none are selected) prefills the header — this
+	// is claimed synchronously so two rapid adds can't both prefill (LC bleed)
+	const prefillClaimed = useRef(false);
 
 	const customers = useFrappeGetDocList<{ name: string; customer_name: string }>('Customer', {
 		fields: ['name', 'customer_name'],
 		filters: [['disabled', '=', 0]],
 		limit: 200,
 	});
-	const salesOrders = useFrappeGetDocList<{ name: string; customer_name: string }>('Sales Order', {
-		fields: ['name', 'customer_name'],
-		filters: [
-			['docstatus', '=', 1],
-			['status', '!=', 'Closed'],
-		],
-		orderBy: { field: 'transaction_date', order: 'desc' },
-		limit: 100,
-	});
-	const { call: fetchDefaults, loading: loadingDefaults } = useFrappePostCall<{
-		message: ShipmentDefaults;
-	}>(API.shipmentDefaults);
+	// labels for the SO picker — this customer's open deals (the eligible *set*
+	// is derived from the shippable lines below, so the two never disagree)
+	const salesOrders = useFrappeGetDocList<{
+		name: string;
+		customer_name: string;
+		transaction_date: string;
+		currency: string;
+		grand_total: number;
+	}>(
+		'Sales Order',
+		{
+			fields: ['name', 'customer_name', 'transaction_date', 'currency', 'grand_total'],
+			filters: [
+				['customer', '=', customer],
+				['docstatus', '=', 1],
+				['status', '!=', 'Closed'],
+			],
+			orderBy: { field: 'transaction_date', order: 'desc' },
+			limit: 200,
+		},
+		customer ? undefined : null,
+	);
+	const { call: fetchDefaults } = useFrappePostCall<{ message: ShipmentDefaults }>(
+		API.shipmentDefaults,
+	);
 	const incoterms = useFrappeGetDocList<{ name: string }>('Incoterm', {
 		fields: ['name'],
 		limit: 100,
@@ -137,7 +171,8 @@ export function NewShipment() {
 		{ customer },
 		customer ? undefined : null,
 	);
-	const lines = linesResult.data?.message ?? [];
+	// stable reference so the pending-tick effect doesn't churn every render
+	const lines = useMemo(() => linesResult.data?.message ?? [], [linesResult.data]);
 
 	const { call: createShipment, loading: saving } = useFrappePostCall<{
 		message: { name: string };
@@ -149,91 +184,178 @@ export function NewShipment() {
 	const selFor = (l: ShippableLine): LineSel =>
 		sel[rowKey(l)] ?? { checked: false, qty: String(l.remaining), batch: '' };
 
-	const patchSel = (l: ShippableLine, patch: Partial<LineSel>) =>
+	const patchSel = (l: ShippableLine, patch: Partial<LineSel>) => {
+		setErr(null);
 		setSel((s) => ({
 			...s,
 			[rowKey(l)]: { ...(s[rowKey(l)] ?? selFor(l)), ...patch },
 		}));
+	};
 
-	// in-flight defaults requests are invalidated by any newer pick
-	const defaultsReq = useRef(0);
+	/** Tick (pre-select) every shippable sub-row belonging to these sales orders. */
+	function tickLinesFor(soList: string[]) {
+		const wanted = new Set(soList);
+		setSel((s) => {
+			const next = { ...s };
+			for (const l of lines) {
+				if (wanted.has(l.sales_order)) {
+					next[rowKey(l)] = {
+						checked: true,
+						qty: String(l.remaining),
+						batch: next[rowKey(l)]?.batch ?? '',
+					};
+				}
+			}
+			return next;
+		});
+	}
+
+	/** Record the header prefill a first/deep-linked SO supplied (non-clobbering). */
+	function recordPrefill(so: string, d: ShipmentDefaults) {
+		const inc = d.incoterm || '';
+		const dest = d.named_place || '';
+		const lcv = d.letter_of_credit || '';
+		setIncoterm((v) => v || inc);
+		setFinalDestination((v) => v || dest);
+		setLc((v) => v || lcv);
+		setPrefillSo(so);
+		prefilled.current = { incoterm: inc, finalDestination: dest, lc: lcv };
+	}
+
+	/** Clear the still-untouched prefill that `so` supplied (if any). */
+	function clearPrefillFor(so: string) {
+		if (so !== prefillSo) return;
+		const pf = prefilled.current;
+		setIncoterm((v) => (v === pf.incoterm ? '' : v));
+		setFinalDestination((v) => (v === pf.finalDestination ? '' : v));
+		setLc((v) => (v === pf.lc ? '' : v));
+		setPrefillSo(null);
+		prefillClaimed.current = false;
+		prefilled.current = { incoterm: '', finalDestination: '', lc: '' };
+	}
+
+	// SOs added before their lines loaded (deep link) get ticked when lines arrive;
+	// any that settle with no lines were fully shipped — drop them so no phantom
+	// chip is stranded, and say why
+	useEffect(() => {
+		// only act on a settled, successful result — never treat a still-loading,
+		// failed, or revalidating fetch (data momentarily undefined) as "fully shipped"
+		if (
+			pendingSos.length === 0 ||
+			linesResult.isLoading ||
+			linesResult.error ||
+			linesResult.data === undefined
+		)
+			return;
+		const ready = pendingSos.filter((so) => lines.some((l) => l.sales_order === so));
+		const empty = pendingSos.filter((so) => !lines.some((l) => l.sales_order === so));
+		if (ready.length) tickLinesFor(ready);
+		if (empty.length) {
+			setSelectedSos((p) => p.filter((so) => !empty.includes(so)));
+			empty.forEach(clearPrefillFor);
+			setErr(`${empty.join(', ')} has nothing left to ship.`);
+		}
+		setPendingSos([]);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [lines, pendingSos, linesResult.isLoading, linesResult.error, linesResult.data, prefillSo]);
 
 	function onCustomer(v: string) {
-		defaultsReq.current++;
+		touched.current = true;
 		setCustomer(v);
+		setSelectedSos([]);
+		setPendingSos([]);
 		setSel({});
 		setLc('');
-		setSo('');
-		setPendingPreselect(null);
-	}
-
-	/** Picking the deal fills everything the SO already knows. */
-	async function onSalesOrder(v: string) {
-		const previous = so;
-		const token = ++defaultsReq.current;
-		setSo(v);
-		if (!v) return;
+		setIncoterm('');
+		setFinalDestination('');
+		setPrefillSo(null);
+		prefillClaimed.current = false;
+		prefilled.current = { incoterm: '', finalDestination: '', lc: '' };
 		setErr(null);
+	}
+
+	/** Add an open sales order to the shipment; the first one prefills the
+	 *  shipment header from the deal (overridable). */
+	async function addSalesOrder(so: string) {
+		if (!so || selectedSos.includes(so)) return;
+		touched.current = true;
+		setErr(null);
+		// claim the prefill slot synchronously so two rapid adds can't both prefill
+		const claimPrefill = selectedSos.length === 0 && !prefillClaimed.current;
+		if (claimPrefill) prefillClaimed.current = true;
+		setSelectedSos((p) => (p.includes(so) ? p : [...p, so]));
+		if (lines.some((l) => l.sales_order === so)) tickLinesFor([so]);
+		else setPendingSos((p) => (p.includes(so) ? p : [...p, so]));
+		if (!claimPrefill) return;
 		try {
-			const result = await fetchDefaults({ sales_order: v });
-			if (token !== defaultsReq.current) return; // a newer pick won
-			const d = result.message;
-			setCustomer(d.customer);
-			setSel({});
-			setIncoterm(d.incoterm ?? '');
-			setFinalDestination(d.named_place ?? '');
-			setLc(d.letter_of_credit ?? '');
-			setPendingPreselect(d.so_details);
-		} catch (e) {
-			if (token !== defaultsReq.current) return;
-			// never display an SO whose prefill did not happen
-			setSo(previous);
-			setErr(parseServerError(e));
+			const result = await fetchDefaults({ sales_order: so });
+			recordPrefill(so, result.message);
+		} catch {
+			prefillClaimed.current = false; // best-effort — let a later first-add prefill
 		}
 	}
 
-	// the shippable list arrives async — tick the chosen SO's lines when it does
-	useEffect(() => {
-		if (!pendingPreselect || linesResult.isLoading) return;
-		if (lines.length) {
-			const wanted = new Set(pendingPreselect);
-			setSel((s) => {
-				const next = { ...s };
-				for (const l of lines) {
-					if (wanted.has(l.so_detail)) {
-						next[rowKey(l)] = {
-							checked: true,
-							qty: String(l.remaining),
-							batch: next[rowKey(l)]?.batch ?? '',
-						};
-					}
-				}
-				return next;
-			});
-		}
-		setPendingPreselect(null);
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [lines, pendingPreselect, linesResult.isLoading]);
+	function removeSalesOrder(so: string) {
+		setSelectedSos((p) => p.filter((x) => x !== so));
+		setPendingSos((p) => p.filter((x) => x !== so));
+		setSel((s) => {
+			const next = { ...s };
+			for (const l of lines) if (l.sales_order === so) delete next[rowKey(l)];
+			return next;
+		});
+		clearPrefillFor(so);
+	}
 
-	// deep link: /shipments/new?so=SO-xxxx (e.g. from the SO screen)
+	// deep link: /shipments/new?so=SO-xxxx (e.g. from the SO screen) — pull the
+	// customer + header from the deal, then add that SO once its lines load
 	const soParamApplied = useRef(false);
 	useEffect(() => {
-		const fromParam = searchParams.get('so');
-		if (fromParam && !soParamApplied.current) {
-			soParamApplied.current = true;
-			void onSalesOrder(fromParam);
-		}
+		if (!soParam || soParamApplied.current) return;
+		soParamApplied.current = true;
+		void (async () => {
+			try {
+				const result = await fetchDefaults({ sales_order: soParam });
+				if (touched.current) return; // user already picked something — don't clobber
+				const d = result.message;
+				touched.current = true; // the deep link's own writes are authoritative
+				prefillClaimed.current = true;
+				setCustomer(d.customer);
+				recordPrefill(soParam, d);
+				setSelectedSos([soParam]);
+				setPendingSos([soParam]);
+			} catch (e) {
+				if (touched.current) return;
+				setErr(parseServerError(e));
+			}
+		})();
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 
 	async function onCreate() {
 		if (!customer) return setErr('Pick the customer.');
-		const checked = lines.filter((l) => selFor(l).checked);
+		if (selectedSos.length === 0) return setErr('Add at least one sales order.');
+		const checked = lines.filter(
+			(l) => selectedSos.includes(l.sales_order) && selFor(l).checked,
+		);
 		if (checked.length === 0) return setErr('Tick at least one line to ship.');
 		for (const l of checked) {
 			const q = Number(selFor(l).qty);
 			if (!q || q <= 0) return setErr(`${l.item_name}: quantity to ship is required.`);
 			if (q > l.remaining + 1e-6) return setErr(`${l.item_name}: only ${l.remaining} remaining to ship.`);
+		}
+		// a single SO line can split across several PO sub-rows — mirror the backend's
+		// cumulative per-line cap so cross-PO over-shipping is caught inline, not post-submit
+		const lineRemaining: Record<string, number> = {};
+		for (const l of lines) lineRemaining[l.so_detail] = (lineRemaining[l.so_detail] ?? 0) + l.remaining;
+		const tickedQty: Record<string, number> = {};
+		for (const l of checked) tickedQty[l.so_detail] = (tickedQty[l.so_detail] ?? 0) + Number(selFor(l).qty);
+		for (const l of checked) {
+			const cap = lineRemaining[l.so_detail] ?? 0;
+			if (tickedQty[l.so_detail] > cap + 1e-6) {
+				return setErr(
+					`${l.item_name}: shipping ${tickedQty[l.so_detail]} but only ${cap} remaining on the sales order line.`,
+				);
+			}
 		}
 		setErr(null);
 		try {
@@ -293,6 +415,36 @@ export function NewShipment() {
 		label: p.unlocode ? `${p.name} · ${p.unlocode}` : p.name,
 	}));
 
+	// the eligible SO set comes straight from the shippable lines (an SO appears
+	// only while it still has unshipped quantity), enriched with date/value labels
+	const soMeta = new Map((salesOrders.data ?? []).map((s) => [s.name, s]));
+	const openSoValues = [...new Set(lines.map((l) => l.sales_order))];
+	const soOptions = openSoValues
+		.filter((so) => !selectedSos.includes(so))
+		.map((so) => {
+			const m = soMeta.get(so);
+			const sub = m
+				? `${m.transaction_date ?? ''}${m.grand_total ? ` · ${m.currency} ${Math.round(m.grand_total).toLocaleString('en-IN')}` : ''}`.trim()
+				: undefined;
+			return { value: so, sub: sub || undefined };
+		});
+
+	// the customer genuinely has nothing open to ship (and nothing is selected) —
+	// distinct from "open deals exist, none added yet"
+	const noOpenSos =
+		!!customer &&
+		!linesResult.isLoading &&
+		!linesResult.error &&
+		openSoValues.length === 0 &&
+		selectedSos.length === 0;
+	const soHint = !customer
+		? 'Pick the customer first'
+		: noOpenSos
+			? 'This customer has no open sales orders left to ship'
+			: soOptions.length === 0
+				? 'All open sales orders added'
+				: 'Add one or more open deals — all lines ship under one shipment';
+
 	return (
 		<main className="tight">
 			<div className="eyebrow">Logistics · New shipment</div>
@@ -308,20 +460,6 @@ export function NewShipment() {
 				<Card accent>
 					<CHead icon="ship" title="Shipment" />
 					<div className="formgrid">
-						<Field
-							label="Sales order"
-							hint={loadingDefaults ? 'Filling from the deal…' : 'Prefills customer, incoterm, destination and LC'}
-						>
-							<SearchSelect
-								value={so}
-								onChange={(v) => void onSalesOrder(v)}
-								options={(salesOrders.data ?? []).map((s) => ({
-									value: s.name,
-									sub: s.customer_name,
-								}))}
-								placeholder="Start from a deal…"
-							/>
-						</Field>
 						<Field label="Customer" required>
 							<SearchSelect
 								value={customer}
@@ -340,6 +478,40 @@ export function NewShipment() {
 								options={[{ value: 'Sea' }, { value: 'Air' }]}
 							/>
 						</Field>
+						<div className="span2">
+							<Field label="Sales orders" required hint={soHint}>
+								<SearchSelect
+									value=""
+									onChange={(v) => void addSalesOrder(v)}
+									options={soOptions}
+									placeholder={
+										linesResult.isLoading
+											? 'Loading open deals…'
+											: customer
+												? 'Add a sales order…'
+												: 'Pick the customer first'
+									}
+									disabled={!customer || linesResult.isLoading || soOptions.length === 0}
+								/>
+							</Field>
+							{selectedSos.length > 0 && (
+								<div className="sochips">
+									{selectedSos.map((so) => (
+										<span className="sochip" key={so}>
+											{so}
+											<button
+												type="button"
+												className="x"
+												aria-label={`Remove ${so}`}
+												onClick={() => removeSalesOrder(so)}
+											>
+												×
+											</button>
+										</span>
+									))}
+								</div>
+							)}
+						</div>
 						<Field
 							label="Trade type"
 							hint={
@@ -376,6 +548,20 @@ export function NewShipment() {
 								disabled={autoCha && merchanting}
 							/>
 						</Field>
+						<Field
+							label="Letter of credit"
+							hint={customer ? 'LCs for this customer' : 'Pick the customer first'}
+						>
+							<SearchSelect
+								value={lc}
+								onChange={setLc}
+								options={(lcs.data ?? []).map((r) => ({
+									value: r.name,
+									label: r.lc_number || r.name,
+								}))}
+								disabled={!customer}
+							/>
+						</Field>
 						<Field label="Port of loading">
 							<SearchSelect value={pol} onChange={setPol} options={portOptions} placeholder="Search ports…" />
 						</Field>
@@ -397,20 +583,6 @@ export function NewShipment() {
 						<Field label="ETA">
 							<TextInput type="date" value={eta} onChange={setEta} />
 						</Field>
-						<Field
-							label="Letter of credit"
-							hint={customer ? 'LCs for this customer' : 'Pick the customer first'}
-						>
-							<SearchSelect
-								value={lc}
-								onChange={setLc}
-								options={(lcs.data ?? []).map((r) => ({
-									value: r.name,
-									label: r.lc_number || r.name,
-								}))}
-								disabled={!customer}
-							/>
-						</Field>
 					</div>
 
 					<div
@@ -427,7 +599,7 @@ export function NewShipment() {
 					{!customer ? (
 						<EmptyMsg
 							title="Pick a customer"
-							text="Shippable sales order lines appear once the customer is chosen."
+							text="Choose the customer, then add their open sales orders to ship."
 						/>
 					) : linesResult.error ? (
 						<div className="ferr" style={{ padding: '14px 18px' }}>
@@ -437,51 +609,74 @@ export function NewShipment() {
 						<div className="sub" style={{ padding: '14px 18px', margin: 0 }}>
 							Loading…
 						</div>
-					) : lines.length === 0 ? (
+					) : noOpenSos ? (
 						<EmptyMsg
 							title="Nothing to ship"
 							text="This customer has no open sales order lines left to ship."
 						/>
+					) : selectedSos.length === 0 ? (
+						<EmptyMsg
+							title="Add a sales order"
+							text="Pick one or more of this customer's open deals above to choose lines to ship."
+						/>
 					) : (
-						lines.map((l) => {
-							const s = selFor(l);
+						selectedSos.map((so) => {
+							// a just-added SO's lines are still settling — the effect will
+							// tick or drop it next commit; don't flash an empty group meanwhile
+							if (pendingSos.includes(so)) return null;
+							const rows = lines.filter((l) => l.sales_order === so);
 							return (
-								<div
-									className="reqrow"
-									key={rowKey(l)}
-									style={{ gridTemplateColumns: LINE_COLS }}
-								>
-									<label className="checkrow" style={{ justifyContent: 'center' }}>
-										<input
-											type="checkbox"
-											aria-label={`Ship ${l.item_name}`}
-											checked={s.checked}
-											onChange={(e) => patchSel(l, { checked: e.target.checked })}
-										/>
-									</label>
-									<div>
-										<div className="c1">{l.item_name}</div>
-										<div className="c2">{l.sales_order}</div>
+								<div key={so}>
+									<div className="sogrp">
+										<span className="glabel">Sales order</span>
+										<span className="gid">{so}</span>
 									</div>
-									<div>
-										<div className="dim">{l.purchase_order ?? 'no PO yet'}</div>
-										{l.supplier ? <div className="c2">{l.supplier}</div> : null}
-									</div>
-									<TextInput
-										type="number"
-										mono
-										value={s.qty}
-										onChange={(v) => patchSel(l, { qty: v })}
-									/>
-									<span className="dim">
-										{l.remaining} {l.uom ?? ''}
-									</span>
-									<TextInput
-										mono
-										value={s.batch}
-										onChange={(v) => patchSel(l, { batch: v })}
-										placeholder="Batch no"
-									/>
+									{rows.length === 0 ? (
+										<div className="sonote">Nothing left to ship on this order.</div>
+									) : (
+										rows.map((l) => {
+											const s = selFor(l);
+											return (
+												<div
+													className="reqrow"
+													key={rowKey(l)}
+													style={{ gridTemplateColumns: LINE_COLS }}
+												>
+													<label className="checkrow" style={{ justifyContent: 'center' }}>
+														<input
+															type="checkbox"
+															aria-label={`Ship ${l.item_name}`}
+															checked={s.checked}
+															onChange={(e) => patchSel(l, { checked: e.target.checked })}
+														/>
+													</label>
+													<div>
+														<div className="c1">{l.item_name}</div>
+														<div className="c2">{l.item_code}</div>
+													</div>
+													<div>
+														<div className="dim">{l.purchase_order ?? 'no PO yet'}</div>
+														{l.supplier ? <div className="c2">{l.supplier}</div> : null}
+													</div>
+													<TextInput
+														type="number"
+														mono
+														value={s.qty}
+														onChange={(v) => patchSel(l, { qty: v })}
+													/>
+													<span className="dim">
+														{l.remaining} {l.uom ?? ''}
+													</span>
+													<TextInput
+														mono
+														value={s.batch}
+														onChange={(v) => patchSel(l, { batch: v })}
+														placeholder="Batch no"
+													/>
+												</div>
+											);
+										})
+									)}
 								</div>
 							);
 						})
