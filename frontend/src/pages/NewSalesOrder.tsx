@@ -223,7 +223,8 @@ export function NewSalesOrder() {
 	const customers = (ctx?.customers ?? []).map((c) => ({ value: c.name, label: c.customer_name }));
 	const items = (ctx?.items ?? []).map((i) => ({
 		value: i.name,
-		label: i.pharmacopoeia_grade ? `${i.item_name} · ${i.pharmacopoeia_grade}` : i.item_name,
+		label: i.item_name,
+		sub: [i.pharmacopoeia_grade, i.stock_uom].filter(Boolean).join(' · ') || undefined,
 	}));
 
 	return (

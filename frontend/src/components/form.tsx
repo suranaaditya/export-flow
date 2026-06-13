@@ -183,7 +183,7 @@ export function SearchSelect({
 								setOpen(false);
 							}}
 						>
-							<div>{o.label ?? o.value}</div>
+							<div className="lbl">{o.label ?? o.value}</div>
 							{o.sub && <div className="sub">{o.sub}</div>}
 						</div>
 					))}
