@@ -25,6 +25,8 @@
   "mtt_completion_months",
   "cb_efs_mtt",
   "mtt_outlay_months",
+  "section_automation",
+  "auto_cha_third_country",
   "section_alerts",
   "email_digest_enabled"
  ],
@@ -146,6 +148,18 @@
    "non_negative": 1
   },
   {
+   "fieldname": "section_automation",
+   "fieldtype": "Section Break",
+   "label": "Automation"
+  },
+  {
+   "default": "0",
+   "description": "When a shipment's trade type is Third-country / Merchanting, set its CHA to \"Third Country\" automatically (a merchanting trade has no Indian customs agent).",
+   "fieldname": "auto_cha_third_country",
+   "fieldtype": "Check",
+   "label": "Set CHA to \"Third Country\" on merchanting shipments"
+  },
+  {
    "fieldname": "section_alerts",
    "fieldtype": "Section Break",
    "label": "Alerts"
@@ -161,7 +175,7 @@
  "index_web_pages_for_search": 0,
  "issingle": 1,
  "links": [],
- "modified": "2026-06-13 14:00:00.000000",
+ "modified": "2026-06-13 18:00:00.000000",
  "modified_by": "Administrator",
  "module": "ExportFlow",
  "name": "ExportFlow Settings",

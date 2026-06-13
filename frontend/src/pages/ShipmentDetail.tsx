@@ -1,6 +1,7 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import {
 	useFrappeGetCall,
+	useFrappeGetDoc,
 	useFrappeGetDocList,
 	useFrappePostCall,
 	useFrappeUpdateDoc,
@@ -12,6 +13,7 @@ import { Card, CHead, EmptyMsg, Facts, LRow, Modal, Tag } from '@/components/ui'
 import { CheckInput, Field, SearchSelect, SelectInput, TextArea, TextInput } from '@/components/form';
 import {
 	API,
+	THIRD_COUNTRY_CHA,
 	TRADE_TYPES,
 	incentiveTone,
 	isMerchanting,
@@ -1018,6 +1020,27 @@ function EditShipmentModal({
 		limit: 300,
 	});
 	const chas = useFrappeGetDocList<{ name: string }>('CHA', { fields: ['name'], limit: 100 });
+	const settings = useFrappeGetDoc<{ auto_cha_third_country?: 0 | 1 }>(
+		'ExportFlow Settings',
+		'ExportFlow Settings',
+	);
+	const autoCha = !!settings.data?.auto_cha_third_country;
+	const chaLocked = autoCha && isMerchanting(form.trade_type);
+
+	// keep the CHA in step with the trade type when the auto rule is on
+	useEffect(() => {
+		if (!autoCha) return;
+		setForm((f) =>
+			isMerchanting(f.trade_type)
+				? f.cha === THIRD_COUNTRY_CHA
+					? f
+					: { ...f, cha: THIRD_COUNTRY_CHA }
+				: f.cha === THIRD_COUNTRY_CHA
+					? { ...f, cha: '' }
+					: f,
+		);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [form.trade_type, autoCha]);
 	const incoterms = useFrappeGetDocList<{ name: string }>('Incoterm', { fields: ['name'], limit: 100 });
 	const lcs = useFrappeGetDocList<{ name: string; lc_number: string }>('Letter of Credit', {
 		fields: ['name', 'lc_number'],
@@ -1083,12 +1106,16 @@ function EditShipmentModal({
 						placeholder="Search incoterms…"
 					/>
 				</Field>
-				<Field label="CHA">
+				<Field
+					label="CHA"
+					hint={chaLocked ? 'Auto-set for merchanting trades (see Settings)' : undefined}
+				>
 					<SearchSelect
 						value={form.cha}
 						onChange={(v) => set('cha', v)}
 						options={(chas.data ?? []).map((c) => ({ value: c.name }))}
 						placeholder="Search CHAs…"
+						disabled={chaLocked}
 					/>
 				</Field>
 				<Field label="Port of loading">

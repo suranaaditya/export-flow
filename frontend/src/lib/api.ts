@@ -262,6 +262,10 @@ export interface RealizationRow {
 export const TRADE_TYPES = ['Export from India', 'Third-country / Merchanting'] as const;
 export type TradeType = (typeof TRADE_TYPES)[number];
 
+/** Placeholder CHA auto-stamped on merchanting shipments (ExportFlow Settings
+ *  toggle) — a merchanting trade has no Indian customs agent. */
+export const THIRD_COUNTRY_CHA = 'Third Country';
+
 export function isMerchanting(t: string | null | undefined): boolean {
 	return t === 'Third-country / Merchanting';
 }

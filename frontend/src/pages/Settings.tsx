@@ -405,12 +405,12 @@ const EMPTY_PROFILE: ExporterProfile = {
 
 /** Exporter identity printed on every §5.2 document (IEC, GSTIN, LUT…). */
 function ExporterProfilePanel({ canEdit }: { canEdit: boolean }) {
-	const { data, error, isLoading, mutate } = useFrappeGetDoc<Partial<ExporterProfile>>(
-		'ExportFlow Settings',
-		'ExportFlow Settings',
-	);
+	const { data, error, isLoading, mutate } = useFrappeGetDoc<
+		Partial<ExporterProfile> & { auto_cha_third_country?: 0 | 1 }
+	>('ExportFlow Settings', 'ExportFlow Settings');
 	const { updateDoc, loading: saving } = useFrappeUpdateDoc();
 	const [form, setForm] = useState<ExporterProfile>(EMPTY_PROFILE);
+	const [autoCha, setAutoCha] = useState(false);
 	const [seeded, setSeeded] = useState(false);
 	const [err, setErr] = useState<string | null>(null);
 	const [savedTick, setSavedTick] = useState(false);
@@ -424,6 +424,7 @@ function ExporterProfilePanel({ canEdit }: { canEdit: boolean }) {
 				(Object.keys(EMPTY_PROFILE) as (keyof ExporterProfile)[]).map((k) => [k, data[k] ?? '']),
 			),
 		}));
+		setAutoCha(!!data.auto_cha_third_country);
 		setSeeded(true);
 	}, [data, seeded]);
 
@@ -441,6 +442,7 @@ function ExporterProfilePanel({ canEdit }: { canEdit: boolean }) {
 				lut_valid_upto: form.lut_valid_upto || null,
 				mtt_completion_months: Number(form.mtt_completion_months) || 9,
 				mtt_outlay_months: Number(form.mtt_outlay_months) || 4,
+				auto_cha_third_country: autoCha ? 1 : 0,
 			});
 			setSavedTick(true);
 			mutate();
@@ -527,6 +529,16 @@ function ExporterProfilePanel({ canEdit }: { canEdit: boolean }) {
 								placeholder="4"
 							/>
 						</Field>
+						<div className="span2">
+							<CheckInput
+								checked={autoCha}
+								onChange={(v) => {
+									setSavedTick(false);
+									setAutoCha(v);
+								}}
+								label="Set CHA to “Third Country” automatically on merchanting shipments"
+							/>
+						</div>
 					</div>
 					<div className="formfoot">
 						{err && <span className="ferr">{err}</span>}

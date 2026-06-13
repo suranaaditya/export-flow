@@ -50,11 +50,25 @@ class ExportShipment(Document):
 			from exportflow.mtt import DEFAULT_TRADE_TYPE
 
 			self.trade_type = DEFAULT_TRADE_TYPE
+		self.apply_merchanting_cha()
 		self.seed_milestones()
 		self.validate_items()
 		self.validate_lc()
 		self.validate_milestone_blockers()
 		self.set_current_milestone()
+
+	def apply_merchanting_cha(self):
+		"""Optional rule (ExportFlow Settings): a merchanting trade has no Indian
+		CHA, so stamp the placeholder "Third Country" CHA on it automatically."""
+		from exportflow.mtt import is_merchanting
+
+		if not is_merchanting(self.trade_type):
+			return
+		if not frappe.db.get_single_value("ExportFlow Settings", "auto_cha_third_country"):
+			return
+		from exportflow.exportflow.doctype.cha.cha import ensure_third_country_cha
+
+		self.cha = ensure_third_country_cha()
 
 	def validate_milestone_blockers(self):
 		"""The UI completes milestones via set_milestone, but a direct document

@@ -1,11 +1,23 @@
 import { useEffect, useRef, useState } from 'react';
-import { useFrappeGetCall, useFrappeGetDocList, useFrappePostCall } from 'frappe-react-sdk';
+import {
+	useFrappeGetCall,
+	useFrappeGetDoc,
+	useFrappeGetDocList,
+	useFrappePostCall,
+} from 'frappe-react-sdk';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
 import { MasterModal } from '@/components/MasterModal';
 import { Field, SearchSelect, SelectInput, TextInput } from '@/components/form';
 import { Card, CHead, EmptyMsg } from '@/components/ui';
-import { API, TRADE_TYPES, isMerchanting, parseServerError, type ShippableLine } from '@/lib/api';
+import {
+	API,
+	THIRD_COUNTRY_CHA,
+	TRADE_TYPES,
+	isMerchanting,
+	parseServerError,
+	type ShippableLine,
+} from '@/lib/api';
 import { MASTERS, STATIC_OPTIONS, type OptionSource } from '@/lib/masters';
 
 const CHA_DEF = MASTERS.find((m) => m.doctype === 'CHA')!;
@@ -81,6 +93,20 @@ export function NewShipment() {
 		limit: 100,
 	});
 	const chas = useFrappeGetDocList<{ name: string }>('CHA', { fields: ['name'], limit: 100 });
+	const settings = useFrappeGetDoc<{ auto_cha_third_country?: 0 | 1 }>(
+		'ExportFlow Settings',
+		'ExportFlow Settings',
+	);
+	const autoCha = !!settings.data?.auto_cha_third_country;
+	const merchanting = isMerchanting(tradeType);
+
+	// auto-stamp the placeholder CHA on merchanting trades when the setting is on
+	useEffect(() => {
+		if (!autoCha) return;
+		if (isMerchanting(tradeType)) setCha(THIRD_COUNTRY_CHA);
+		else setCha((c) => (c === THIRD_COUNTRY_CHA ? '' : c));
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [tradeType, autoCha]);
 	const masterOptions: Record<OptionSource, string[]> = {
 		currencies: [],
 		incoterms: [],
@@ -336,7 +362,10 @@ export function NewShipment() {
 								placeholder="Search incoterms…"
 							/>
 						</Field>
-						<Field label="CHA">
+						<Field
+							label="CHA"
+							hint={autoCha && merchanting ? 'Auto-set for merchanting trades (see Settings)' : undefined}
+						>
 							<SearchSelect
 								value={cha}
 								onChange={setCha}
@@ -344,6 +373,7 @@ export function NewShipment() {
 								placeholder="Search CHAs…"
 								onCreate={() => setAddingCha(true)}
 								createLabel="New CHA / forwarder"
+								disabled={autoCha && merchanting}
 							/>
 						</Field>
 						<Field label="Port of loading">

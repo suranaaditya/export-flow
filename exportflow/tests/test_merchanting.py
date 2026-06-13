@@ -197,6 +197,29 @@ class TestMerchanting(IntegrationTestCase):
 		shp = self.make_shipment(so, customer)
 		self.assertIsNone(get_shipment_finance(shp)["mtt"])
 
+	# ---------------------------------------------------------------- auto CHA
+
+	def test_auto_cha_third_country_setting(self):
+		"""When the setting is on, a merchanting shipment is stamped with the
+		'Third Country' placeholder CHA; ordinary exports are untouched."""
+		from exportflow.exportflow.doctype.cha.cha import THIRD_COUNTRY_CHA
+
+		frappe.db.set_single_value("ExportFlow Settings", "auto_cha_third_country", 0)
+		so, customer = self.make_deal()
+		off = self.make_shipment(so, customer, trade_type=MERCHANTING)
+		self.assertNotEqual(frappe.db.get_value("Export Shipment", off, "cha"), THIRD_COUNTRY_CHA)
+
+		frappe.db.set_single_value("ExportFlow Settings", "auto_cha_third_country", 1)
+		so2, customer2 = self.make_deal()
+		on = self.make_shipment(so2, customer2, trade_type=MERCHANTING)
+		self.assertEqual(frappe.db.get_value("Export Shipment", on, "cha"), THIRD_COUNTRY_CHA)
+
+		# an ordinary export keeps its (empty) CHA even with the setting on
+		so3, customer3 = self.make_deal()
+		exp = self.make_shipment(so3, customer3)
+		self.assertNotEqual(frappe.db.get_value("Export Shipment", exp, "cha"), THIRD_COUNTRY_CHA)
+		frappe.db.set_single_value("ExportFlow Settings", "auto_cha_third_country", 0)
+
 	# ---------------------------------------------------------------- review regressions
 
 	def test_switch_with_progressed_blocking_unblocks_leo(self):
