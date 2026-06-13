@@ -762,6 +762,99 @@ def merge_customers(source: str, target: str, dry_run: int = 1) -> dict:
 	}
 
 
+# Repair for the bare ports the early MIS import created (wrong country=India,
+# raw modes, no UN/LOCODE) — see the port-data audit. MERGES fold a duplicate /
+# misspelling into its curated seeded port (repointing shipments); FIXES set the
+# correct country + mode on a genuinely-new port.
+PORT_MERGES = {
+	"Bejing": "Beijing",  # typo (Beijing itself is corrected below)
+	"HCMC": "Ho Chi Minh City (Cat Lai)",
+	"Hochiminh": "Ho Chi Minh City (Cat Lai)",
+	"Hochiminh City": "Ho Chi Minh City (Cat Lai)",
+	"Johannesburg": "Johannesburg Air Cargo (ORTIA)",
+	"Mumbai Airport": "Mumbai Air Cargo (CSMIA)",
+	"New York": "New York / Newark",
+	"Nhava Sheva": "Nhava Sheva (JNPT)",
+}
+# canonical ports that serve both modes once the air variants merge in
+PORT_MODE_OVERRIDE = {"Ho Chi Minh City (Cat Lai)": "Sea & Air"}
+PORT_FIXES = {  # name -> (country, mode)
+	"Bandar Abbas": ("Iran", "Sea"),
+	"Beijing": ("China", "Air"),
+	"Beirut": ("Lebanon", "Sea"),
+	"Biratnagar": ("Nepal", "Sea"),
+	"Cairo": ("Egypt", "Sea"),
+	"Guangzhou": ("China", "Sea"),
+	"Hangzhou": ("China", "Sea"),
+	"Hong Kong": ("Hong Kong", "Sea"),
+	"Paranagua": ("Brazil", "Sea"),
+	"Penang": ("Malaysia", "Sea"),
+	"Port of Spain": ("Trinidad and Tobago", "Sea"),
+	"PVG, Airport": ("China", "Air"),
+	"Shanghai": ("China", "Sea"),
+	"Sydney": ("Australia", "Sea"),
+	"Tansonnhat": ("Vietnam", "Air"),
+	"Wuhan": ("China", "Air"),
+	"Xiamen": ("China", "Air"),
+}
+
+
+def fix_ports(dry_run: int = 1) -> dict:
+	"""Repair the bare MIS-created ports: merge duplicates/typos into their
+	curated seeded port and correct the country + mode of the rest. Idempotent
+	(a merged source is gone on re-run; a fix just rewrites the same values).
+
+	Run on the server:
+	    bench --site <site> execute exportflow.mis_import.fix_ports \\
+	        --kwargs "{'dry_run': False}"
+	"""
+	dry_run = int(dry_run)
+	result = {"merged": [], "corrected": [], "missing_target": [], "skipped": [], "mode": ""}
+
+	if dry_run:
+		result["plan_merges"] = {
+			s: d for s, d in PORT_MERGES.items() if frappe.db.exists("Port", s)
+		}
+		result["plan_fixes"] = {
+			n: v for n, v in PORT_FIXES.items() if frappe.db.exists("Port", n)
+		}
+		result["mode"] = "dry-run (no changes)"
+		return result
+
+	for src, dest in PORT_MERGES.items():
+		if not frappe.db.exists("Port", src):
+			result["skipped"].append(f"{src} (already gone)")
+			continue
+		if not frappe.db.exists("Port", dest):
+			result["missing_target"].append(dest)
+			continue
+		frappe.rename_doc("Port", src, dest, merge=True)
+		result["merged"].append(f"{src} → {dest}")
+
+	for name, mode in PORT_MODE_OVERRIDE.items():
+		if frappe.db.exists("Port", name):
+			frappe.db.set_value("Port", name, "mode", mode, update_modified=False)
+
+	for name, (country, mode) in PORT_FIXES.items():
+		if not frappe.db.exists("Port", name):
+			result["skipped"].append(f"{name} (gone)")
+			continue
+		if country and not frappe.db.exists("Country", country):
+			try:
+				frappe.get_doc({"doctype": "Country", "country_name": country}).insert(
+					ignore_permissions=True
+				)
+			except Exception:
+				country = None
+		frappe.db.set_value("Port", name, {"country": country, "mode": mode}, update_modified=False)
+		result["corrected"].append(f"{name}: {country}/{mode}")
+
+	frappe.db.commit()
+	result["mode"] = "committed"
+	frappe.logger().info(f"Port fix: {result}")
+	return result
+
+
 def clear_company_data(company: str) -> dict:
 	"""Delete the ExportFlow transactional docs for a company so the import can
 	be re-run cleanly. Masters (customers/items/suppliers) are left in place —
