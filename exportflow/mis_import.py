@@ -68,6 +68,49 @@ def _mtt_shipment_fields(group, merchanting: bool, rate: float) -> dict:
 	return fields
 
 
+def _linked_po_items(items, so, txn) -> list[dict]:
+	"""PO lines for a supplier's items, each linked to the SO line of the same
+	item so the shipment shows its source PO and the SO↔PO relationship holds.
+	A given SO line is linked only once across the group's suppliers — the used
+	set rides on the SO doc instance so successive supplier buckets share it."""
+	so_by_code: dict = {}
+	for r in so.items:
+		so_by_code.setdefault(r.item_code, r)
+	used: set = getattr(so, "_ef_linked_so_rows", None) or set()
+	so._ef_linked_so_rows = used
+	po_items = []
+	for it in items:
+		item_code = ensure_item(it["product"], it.get("hs_code"), it.get("uom") or "Kg")
+		line = {
+			"item_code": item_code,
+			"qty": flt(it["qty"]),
+			"rate": flt(it["supplier_rate"]),
+			"uom": ensure_uom(it.get("uom") or "Kg"),
+			"schedule_date": add_days(txn, 7),
+		}
+		so_row = so_by_code.get(item_code)
+		if so_row and so_row.name not in used:
+			line.update(
+				{"sales_order": so.name, "sales_order_item": so_row.name, "delivered_by_supplier": 1}
+			)
+			used.add(so_row.name)
+		po_items.append(line)
+	return po_items
+
+
+def _flag_dropship_so_rows(po, supplier):
+	"""Stamp the drop-ship supplier on the SO lines a PO sources (mirrors the
+	in-app negotiated-PO flow) so the link is symmetric on both documents."""
+	for row in po.items:
+		if row.sales_order_item:
+			frappe.db.set_value(
+				"Sales Order Item",
+				row.sales_order_item,
+				{"supplier": supplier, "delivered_by_supplier": 1},
+				update_modified=False,
+			)
+
+
 # ---------------------------------------------------------------- masters
 
 def _suppress_gst_company_fixtures():
@@ -314,26 +357,18 @@ def import_group(group: dict, company: str) -> dict:
 	)
 	shipment.insert(ignore_permissions=True)
 
-	# --- procurement (best-effort) — one PO per ACTUAL supplier of each line ---
+	# --- procurement — one PO per ACTUAL supplier, linked to the SO lines so
+	# the shipment shows its source PO (on_submit backfills the shipment links) ---
 	buckets: dict[str, list] = {}
 	for it in group["items"]:
 		if not (it.get("qty") and it.get("supplier_rate")):
 			continue
 		sup_name = it.get("supplier_name") or group.get("supplier_name")
-		if sup_name:
+		if sup_name and not _is_generic(sup_name):
 			buckets.setdefault(sup_name, []).append(it)
 	for sup_name, items in buckets.items():
 		supplier = ensure_supplier(sup_name)
-		po_items = [
-			{
-				"item_code": ensure_item(it["product"], it.get("hs_code"), it.get("uom") or "Kg"),
-				"qty": flt(it["qty"]),
-				"rate": flt(it["supplier_rate"]),
-				"uom": ensure_uom(it.get("uom") or "Kg"),
-				"schedule_date": add_days(txn_date, 7),
-			}
-			for it in items
-		]
+		po_items = _linked_po_items(items, so, txn_date)
 		# savepoint so one supplier's PO failure undoes only that PO
 		frappe.db.savepoint("po")
 		try:
@@ -350,6 +385,7 @@ def import_group(group: dict, company: str) -> dict:
 				}
 			)
 			po.insert(ignore_permissions=True)
+			_flag_dropship_so_rows(po, supplier)
 			po.submit()
 		except Exception:
 			# procurement is supplementary — never fail the export import on it
@@ -478,6 +514,114 @@ def backfill_trade_types(path: str, company: str = "MN Globex", dry_run: int = 1
 		frappe.db.commit()
 		result["mode"] = "committed"
 	frappe.logger().info(f"MIS trade-type backfill: {result}")
+	return result
+
+
+def relink_purchase_orders(path: str, company: str = "MN Globex", dry_run: int = 1) -> dict:
+	"""Rebuild the imported POs with proper Sales Order links. The first import
+	created per-supplier POs with no sales_order_item, so shipments showed no
+	source PO and the SO↔PO relationship was missing. This deletes the
+	company's POs and recreates them per group, linked to the group's SO
+	(recovered via realization → shipment → SO line) and submitted — the PO
+	on_submit hook then backfills the shipment-item PO links. SOs, shipments,
+	realizations and incentives are untouched (their names are preserved).
+
+	Run on the server:
+	    bench --site <site> execute exportflow.mis_import.relink_purchase_orders \\
+	        --kwargs "{'path': '/tmp/mis_clean.json', 'company': 'MN Globex', 'dry_run': False}"
+	"""
+	dry_run = int(dry_run)
+	with open(path) as f:
+		groups = json.load(f)
+	if not frappe.db.exists("Company", company):
+		frappe.throw(f"Unknown company {company}")
+
+	deleted = 0
+	for n in frappe.get_all("Purchase Order", filters={"company": company}, pluck="name"):
+		doc = frappe.get_doc("Purchase Order", n)
+		if doc.docstatus == 1:
+			doc.flags.ignore_links = True
+			doc.cancel()
+		frappe.delete_doc("Purchase Order", n, force=True, ignore_permissions=True)
+		deleted += 1
+
+	result = {
+		"deleted": deleted,
+		"pos_created": 0,
+		"linked_groups": 0,
+		"skipped": 0,
+		"errors": [],
+		"company": company,
+	}
+	for group in groups:
+		inv = group.get("export_invoice") or group.get("buyer_po_no")
+		if not inv:
+			continue
+		frappe.db.savepoint("relink")
+		try:
+			shipment = frappe.db.get_value(
+				"Export Realization", {"export_invoice": inv, "company": company}, "shipment"
+			)
+			so_name = (
+				frappe.db.get_value(
+					"Export Shipment Item",
+					{"parent": shipment, "sales_order": ["is", "set"]},
+					"sales_order",
+				)
+				if shipment
+				else None
+			)
+			if not so_name:
+				result["skipped"] += 1
+				continue
+			so = frappe.get_doc("Sales Order", so_name)
+			currency, rate = _currency_rate(group)
+			txn = group.get("shipping_bill_date") or group.get("bl_date") or "2025-04-01"
+
+			buckets: dict[str, list] = {}
+			for it in group["items"]:
+				if not (it.get("qty") and it.get("supplier_rate")):
+					continue
+				sup_name = it.get("supplier_name") or group.get("supplier_name")
+				if sup_name and not _is_generic(sup_name):
+					buckets.setdefault(sup_name, []).append(it)
+
+			created_here = 0
+			for sup_name, items in buckets.items():
+				supplier = ensure_supplier(sup_name)
+				po_items = _linked_po_items(items, so, txn)
+				po = frappe.get_doc(
+					{
+						"doctype": "Purchase Order",
+						"company": company,
+						"supplier": supplier,
+						"transaction_date": txn,
+						"schedule_date": add_days(txn, 7),
+						"currency": currency,
+						"conversion_rate": rate,
+						"items": po_items,
+					}
+				)
+				po.insert(ignore_permissions=True)
+				_flag_dropship_so_rows(po, supplier)
+				po.submit()  # on_submit backfills shipment-item PO links
+				created_here += 1
+
+			result["pos_created"] += created_here
+			result["linked_groups" if created_here else "skipped"] += 1
+			if not dry_run:
+				frappe.db.commit()
+		except Exception as e:
+			frappe.db.rollback(save_point="relink")
+			result["errors"].append({"invoice": inv, "error": str(e)[:200]})
+
+	if dry_run:
+		frappe.db.rollback()
+		result["mode"] = "dry-run (rolled back)"
+	else:
+		frappe.db.commit()
+		result["mode"] = "committed"
+	frappe.logger().info(f"MIS PO relink: {result}")
 	return result
 
 

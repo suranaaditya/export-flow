@@ -206,6 +206,9 @@ th {
 }
 td { padding: 11px 14px; border-bottom: 1px solid var(--hairline); vertical-align: middle }
 tr:last-child td { border-bottom: 0 }
+/* scrollable list: browse every record without paging, header stays put */
+.tablescroll { max-height: 440px; overflow-y: auto }
+.tablescroll thead th { position: sticky; top: 0; z-index: 2 }
 tbody tr { transition: background .18s var(--ease), transform .25s var(--spring) }
 tbody tr:hover { background: var(--row-hover); transform: translateX(3px) }
 /* dashboard-style tables navigate on row click; detail tables (shipment items) do not */

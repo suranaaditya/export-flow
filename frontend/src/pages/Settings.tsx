@@ -31,7 +31,7 @@ function MasterPanel({
 	const { data, error, mutate } = useFrappeGetDocList<Row>(def.doctype, {
 		fields: def.listFields,
 		orderBy: { field: 'modified', order: 'desc' },
-		limit: 100,
+		limit: 0, // all records — the list is browsable, not search-only
 	});
 
 	const rows = useMemo(() => {
@@ -78,34 +78,31 @@ function MasterPanel({
 			) : rows.length === 0 ? (
 				<EmptyMsg title={query ? 'No matches' : `No ${def.title.toLowerCase()} yet`} />
 			) : (
-				<table className={canEdit ? 'clickable' : undefined}>
-					<thead>
-						<tr>
-							{def.columns.map((c) => (
-								<th key={c.key}>{c.label}</th>
-							))}
-						</tr>
-					</thead>
-					<tbody>
-						{rows.slice(0, 12).map((r) => (
-							<tr key={r.name} onClick={canEdit ? () => setModal(r) : undefined}>
-								{def.columns.map((c) => {
-									const v = r[c.key];
-									const isCheck = def.fields.find((f) => f.key === c.key)?.type === 'check';
-									return (
-										<td key={c.key} className={c.dim ? 'dim' : 'c1'}>
-											{isCheck ? (v ? 'Yes' : '—') : v != null && v !== '' ? String(v) : '—'}
-										</td>
-									);
-								})}
+				<div className="tablescroll">
+					<table className={canEdit ? 'clickable' : undefined}>
+						<thead>
+							<tr>
+								{def.columns.map((c) => (
+									<th key={c.key}>{c.label}</th>
+								))}
 							</tr>
-						))}
-					</tbody>
-				</table>
-			)}
-			{rows.length > 12 && (
-				<div className="dim" style={{ padding: '8px 18px 12px' }}>
-					{rows.length - 12} more — refine the search
+						</thead>
+						<tbody>
+							{rows.map((r) => (
+								<tr key={r.name} onClick={canEdit ? () => setModal(r) : undefined}>
+									{def.columns.map((c) => {
+										const v = r[c.key];
+										const isCheck = def.fields.find((f) => f.key === c.key)?.type === 'check';
+										return (
+											<td key={c.key} className={c.dim ? 'dim' : 'c1'}>
+												{isCheck ? (v ? 'Yes' : '—') : v != null && v !== '' ? String(v) : '—'}
+											</td>
+										);
+									})}
+								</tr>
+							))}
+						</tbody>
+					</table>
 				</div>
 			)}
 			{modal !== null && (

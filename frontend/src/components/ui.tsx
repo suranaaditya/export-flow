@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { Icon, type IconName } from '@/components/Icon';
 
 /** Mockup card shell: hairline border, 16px radius, duxSettle entrance. */
@@ -118,7 +119,10 @@ export function Modal({
 	onClose: () => void;
 	children: ReactNode;
 }) {
-	return (
+	// Portal to <body>: a modal rendered inside a card (overflow:hidden +
+	// transform animation) would otherwise be clipped to the card instead of
+	// covering the viewport.
+	return createPortal(
 		<div
 			className="overlay"
 			onClick={(e) => {
@@ -136,7 +140,8 @@ export function Modal({
 				</div>
 				{children}
 			</div>
-		</div>
+		</div>,
+		document.body,
 	);
 }
 
