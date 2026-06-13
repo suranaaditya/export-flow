@@ -52,6 +52,7 @@ export default function App() {
 								<Route path="sales" element={<Sales />} />
 								<Route path="sales-orders" element={<SalesOrders />} />
 								<Route path="sales-orders/new" element={<NewSalesOrder />} />
+								<Route path="sales-orders/:id/edit" element={<NewSalesOrder />} />
 								<Route path="sales-orders/:id" element={<SalesOrderDetail />} />
 								<Route path="pfi/new" element={<ProFormaInvoicePage />} />
 								<Route path="pfi/:name" element={<ProFormaInvoicePage />} />
@@ -59,6 +60,7 @@ export default function App() {
 								<Route path="lc/:name" element={<LetterOfCreditPage />} />
 								<Route path="purchases" element={<Purchases />} />
 								<Route path="purchases/new" element={<NewPurchaseOrder />} />
+								<Route path="purchases/:id/edit" element={<NewPurchaseOrder />} />
 								<Route path="purchases/:id" element={<PurchaseOrderDetail />} />
 								<Route path="shipments" element={<Shipments />} />
 								<Route path="shipments/new" element={<NewShipment />} />

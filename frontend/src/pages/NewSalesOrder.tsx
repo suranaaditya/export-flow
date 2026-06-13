@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFrappeGetCall, useFrappePostCall } from 'frappe-react-sdk';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
 import { MasterModal } from '@/components/MasterModal';
 import { Field, SearchSelect, TextArea, TextInput } from '@/components/form';
 import { Card, CHead, Facts } from '@/components/ui';
-import { API, parseServerError, type ItemInfo, type NewSOContext } from '@/lib/api';
+import { API, parseServerError, type ItemInfo, type NewSOContext, type SalesOrderForEdit } from '@/lib/api';
 import { fmtMoney } from '@/lib/format';
 import { MASTERS, STATIC_OPTIONS, type OptionSource } from '@/lib/masters';
 
@@ -28,14 +28,26 @@ function todayISO(): string {
 
 export function NewSalesOrder() {
 	const navigate = useNavigate();
+	const { id: editId } = useParams<{ id?: string }>();
+	const isEdit = !!editId;
 
 	const ctxResult = useFrappeGetCall<{ message: NewSOContext }>(API.newSoContext, undefined);
 	const ctx = ctxResult.data?.message;
+
+	const editResult = useFrappeGetCall<{ message: SalesOrderForEdit }>(
+		API.soForEdit,
+		{ name: editId },
+		isEdit ? undefined : null,
+	);
 
 	const { call: fetchItemInfo } = useFrappePostCall<{ message: ItemInfo }>(API.itemInfo);
 	const { call: createSo, loading: saving } = useFrappePostCall<{
 		message: { name: string; docstatus: number };
 	}>(API.createSo);
+	const { call: updateSo, loading: updating } = useFrappePostCall<{
+		message: { name: string; docstatus: number };
+	}>(API.updateSo);
+	const busy = saving || updating;
 
 	const [customer, setCustomer] = useState('');
 	const [orderDate, setOrderDate] = useState(todayISO());
@@ -50,14 +62,46 @@ export function NewSalesOrder() {
 	const [err, setErr] = useState<string | null>(null);
 	const [quickCreate, setQuickCreate] = useState<'customer' | 'item' | null>(null);
 
-	// customer defaults flow into the deal header
+	// prefill from the existing order when editing (seed exactly once)
+	const seeded = useRef(false);
+	const seededCurrency = useRef<string | null>(null);
+	const seededRate = useRef<string>('');
 	useEffect(() => {
-		if (!ctx || !customer) return;
+		if (!isEdit || seeded.current) return;
+		const d = editResult.data?.message;
+		if (!d) return;
+		setCustomer(d.customer ?? '');
+		setOrderDate(d.transaction_date ?? todayISO());
+		setDeliveryDate(d.delivery_date ?? '');
+		seededCurrency.current = d.currency ?? '';
+		seededRate.current = d.conversion_rate != null ? String(d.conversion_rate) : '';
+		setCurrency(d.currency ?? '');
+		setRate(seededRate.current);
+		setRateTouched(true); // keep the order's stored rate, don't auto-suggest over it
+		setIncoterm(d.incoterm ?? '');
+		setNamedPlace(d.named_place ?? '');
+		setTerms(d.payment_terms_narrative ?? '');
+		setRows(
+			(d.items ?? []).length
+				? d.items.map((it) => ({
+						item_code: it.item_code,
+						qty: String(it.qty),
+						rate: String(it.rate),
+						uom: it.uom ?? '',
+					}))
+				: [{ ...EMPTY_ROW }],
+		);
+		seeded.current = true;
+	}, [isEdit, editResult.data]);
+
+	// customer defaults flow into the deal header — never on an edit prefill
+	useEffect(() => {
+		if (!ctx || !customer || isEdit) return;
 		const c = ctx.customers.find((x) => x.name === customer);
 		if (!c) return;
 		if (c.default_currency) setCurrency(c.default_currency);
 		if (c.default_incoterm) setIncoterm(c.default_incoterm);
-	}, [customer, ctx]);
+	}, [customer, ctx, isEdit]);
 
 	// suggest the day's exchange rate whenever the currency changes
 	const rateResult = useFrappeGetCall<{ message: number }>(
@@ -65,9 +109,17 @@ export function NewSalesOrder() {
 		{ currency },
 		currency ? undefined : null,
 	);
+	// a deliberate currency change re-arms the day-rate suggestion; returning to
+	// the edited order's booked currency restores its stored rate instead of
+	// letting the day-rate clobber it
 	useEffect(() => {
+		if (isEdit && seededCurrency.current !== null && currency === seededCurrency.current) {
+			setRate(seededRate.current);
+			setRateTouched(true);
+			return;
+		}
 		setRateTouched(false);
-	}, [currency]);
+	}, [currency, isEdit]);
 	useEffect(() => {
 		const suggested = rateResult.data?.message;
 		if (!rateTouched && suggested && suggested > 0) setRate(String(suggested));
@@ -113,26 +165,30 @@ export function NewSalesOrder() {
 			if (!r.rate || Number(r.rate) <= 0) return setErr(`Item row ${i + 1}: rate is required.`);
 		}
 		setErr(null);
+		const deal = {
+			customer,
+			transaction_date: orderDate,
+			delivery_date: deliveryDate,
+			currency,
+			conversion_rate: Number(rate) || 1,
+			incoterm: incoterm || null,
+			named_place: namedPlace,
+			payment_terms_narrative: terms,
+			submit: submit ? 1 : 0,
+			items: kept.map((r) => ({
+				item_code: r.item_code,
+				qty: Number(r.qty),
+				rate: Number(r.rate),
+			})),
+		};
 		try {
-			const result = await createSo({
-				deal: {
-					customer,
-					transaction_date: orderDate,
-					delivery_date: deliveryDate,
-					currency,
-					conversion_rate: Number(rate) || 1,
-					incoterm: incoterm || null,
-					named_place: namedPlace,
-					payment_terms_narrative: terms,
-					submit: submit ? 1 : 0,
-					items: kept.map((r) => ({
-						item_code: r.item_code,
-						qty: Number(r.qty),
-						rate: Number(r.rate),
-					})),
-				},
-			});
-			navigate('/sales-orders/' + result.message.name);
+			if (isEdit) {
+				await updateSo({ name: editId, deal });
+				navigate('/sales-orders/' + editId);
+			} else {
+				const result = await createSo({ deal });
+				navigate('/sales-orders/' + result.message.name);
+			}
 		} catch (e) {
 			setErr(parseServerError(e));
 		}
@@ -172,12 +228,13 @@ export function NewSalesOrder() {
 
 	return (
 		<main className="tight">
-			<div className="eyebrow">Selling · New deal</div>
+			<div className="eyebrow">Selling · {isEdit ? 'Edit deal' : 'New deal'}</div>
 			<div className="crumb" style={{ marginTop: 6 }}>
-				<Link to="/sales-orders">Sales orders</Link> / <span>New</span>
+				<Link to="/sales-orders">Sales orders</Link> /{' '}
+				{isEdit ? <span className="data">{editId}</span> : <span>New</span>}
 			</div>
 			<div className="titlebar">
-				<span className="who">New export deal</span>
+				<span className="who">{isEdit ? `Edit ${editId}` : 'New export deal'}</span>
 				<span className="spacer" />
 			</div>
 
@@ -287,12 +344,12 @@ export function NewSalesOrder() {
 						<span className="num" style={{ fontSize: 15 }}>
 							{fmtMoney(total, currency || undefined)}
 						</span>
-						<button type="button" className="btn" disabled={saving} onClick={() => void onSave(false)}>
-							Save draft
+						<button type="button" className="btn" disabled={busy} onClick={() => void onSave(false)}>
+							{busy ? 'Saving…' : 'Save draft'}
 						</button>
-						<button type="button" className="btn primary" disabled={saving} onClick={() => void onSave(true)}>
+						<button type="button" className="btn primary" disabled={busy} onClick={() => void onSave(true)}>
 							<Icon name="check" size={15} />
-							{saving ? 'Saving…' : 'Create & submit'}
+							{busy ? 'Saving…' : isEdit ? 'Save & submit' : 'Create & submit'}
 						</button>
 					</div>
 				</Card>

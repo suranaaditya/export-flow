@@ -31,6 +31,9 @@ export function PurchaseOrderDetail() {
 		{ name: id },
 	);
 	const { call: submitPo, loading: submitting } = useFrappePostCall(API.submitPo);
+	const { call: amendDoc, loading: amending } = useFrappePostCall<{ message: { name: string } }>(
+		API.amendDoc,
+	);
 	const { updateDoc, loading: savingInvoice } = useFrappeUpdateDoc<POInvoiceWritable>();
 	const [actionErr, setActionErr] = useState<string | null>(null);
 	const [invoiceErr, setInvoiceErr] = useState<string | null>(null);
@@ -54,6 +57,16 @@ export function PurchaseOrderDetail() {
 		try {
 			await submitPo({ name: id });
 			await mutate();
+		} catch (e) {
+			setActionErr(parseServerError(e));
+		}
+	}
+
+	async function onAmend() {
+		setActionErr(null);
+		try {
+			const r = await amendDoc({ doctype: 'Purchase Order', name: id });
+			navigate('/purchases/' + r.message.name + '/edit');
 		} catch (e) {
 			setActionErr(parseServerError(e));
 		}
@@ -112,7 +125,7 @@ export function PurchaseOrderDetail() {
 		);
 	}
 
-	const { items, shipments } = detail;
+	const { items, shipments, can } = detail;
 	const linkedSos = [...new Set(items.map((it) => it.sales_order).filter((so): so is string => !!so))];
 	const deadlineDays = daysUntil(po.gst_export_deadline);
 	const deadlineTone = urgencyTone(deadlineDays);
@@ -139,7 +152,17 @@ export function PurchaseOrderDetail() {
 				<a className="btn" href={printPdfUrl('Purchase Order', id, 'ExportFlow Purchase Order')} style={{ textDecoration: 'none' }}>
 					<Icon name="download" size={15} /> PDF
 				</a>
-				{po.docstatus === 0 && (
+				{can.edit && (
+					<button className="btn" onClick={() => navigate(`/purchases/${id}/edit`)}>
+						<Icon name="file-text" size={15} /> Edit
+					</button>
+				)}
+				{can.amend && (
+					<button className="btn" disabled={amending} onClick={() => void onAmend()}>
+						<Icon name="refresh" size={15} /> {amending ? 'Amending…' : 'Amend'}
+					</button>
+				)}
+				{po.docstatus === 0 && can.submit && (
 					<button className="btn primary" disabled={submitting} onClick={() => void onSubmitOrder()}>
 						<Icon name="check" size={15} /> {submitting ? 'Submitting…' : 'Submit order'}
 					</button>

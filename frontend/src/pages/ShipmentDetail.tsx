@@ -12,6 +12,7 @@ import { Card, CHead, EmptyMsg, Facts, LRow, Modal, Tag } from '@/components/ui'
 import { CheckInput, Field, SearchSelect, SelectInput, TextArea, TextInput } from '@/components/form';
 import {
 	API,
+	TRADE_TYPES,
 	incentiveTone,
 	isMerchanting,
 	lcIsOpen,
@@ -41,6 +42,7 @@ export function ShipmentDetail() {
 	const { call: setMilestone, loading: completing } = useFrappePostCall(API.setMilestone);
 	const [actionErr, setActionErr] = useState<string | null>(null);
 	const [editing, setEditing] = useState(false);
+	const [editingShipment, setEditingShipment] = useState(false);
 
 	if (isLoading) {
 		return (
@@ -83,7 +85,7 @@ export function ShipmentDetail() {
 		);
 	}
 
-	const { shipment, milestones, items, lc, sales_orders } = detail;
+	const { shipment, milestones, items, lc, sales_orders, can } = detail;
 	const isAir = shipment.mode === 'Air';
 	const merchanting = isMerchanting(shipment.trade_type);
 
@@ -158,10 +160,17 @@ export function ShipmentDetail() {
 					)}
 				</span>
 				<span className="spacer" />
-				<button className="btn" onClick={() => setEditing(true)}>
-					<Icon name="ship" size={15} /> Update voyage
-				</button>
-				{nextPending && (
+				{can.write && (
+					<button className="btn" onClick={() => setEditingShipment(true)}>
+						<Icon name="sliders" size={15} /> Edit
+					</button>
+				)}
+				{can.write && (
+					<button className="btn" onClick={() => setEditing(true)}>
+						<Icon name="ship" size={15} /> Update voyage
+					</button>
+				)}
+				{can.write && nextPending && (
 					<button className="btn primary" disabled={completing} onClick={() => void onComplete()}>
 						<Icon name="circle-check" size={15} />{' '}
 						{completing ? 'Completing…' : `Complete: ${nextPending.milestone}`}
@@ -372,7 +381,7 @@ export function ShipmentDetail() {
 					</Card>
 
 					{merchanting && (
-						<MTTComplianceCard shipment={shipment} onSaved={() => mutate()} />
+						<MTTComplianceCard shipment={shipment} canEdit={can.write} onSaved={() => mutate()} />
 					)}
 					<ShipmentFinanceCard shipment={id} merchanting={merchanting} />
 				</div>
@@ -386,6 +395,19 @@ export function ShipmentDetail() {
 					onSaved={() => {
 						mutate();
 						setEditing(false);
+					}}
+				/>
+			)}
+
+			{editingShipment && (
+				<EditShipmentModal
+					id={id}
+					shipment={shipment}
+					items={items}
+					onClose={() => setEditingShipment(false)}
+					onSaved={() => {
+						mutate();
+						setEditingShipment(false);
 					}}
 				/>
 			)}
@@ -673,7 +695,15 @@ const MTT_PMS_OPTIONS = [{ value: '' }, { value: 'Open' }, { value: 'Closed' }, 
 
 /** FEMA merchanting-trade compliance for a third-country shipment: the two
  *  RBI clocks, same-AD-bank confirmation, net-FX profit and EDPMS/IDPMS. */
-function MTTComplianceCard({ shipment, onSaved }: { shipment: ShipmentDoc; onSaved: () => void }) {
+function MTTComplianceCard({
+	shipment,
+	canEdit,
+	onSaved,
+}: {
+	shipment: ShipmentDoc;
+	canEdit: boolean;
+	onSaved: () => void;
+}) {
 	const { data, mutate } = useFrappeGetCall<{ message: ShipmentFinanceData }>(API.shipmentFinance, {
 		shipment: shipment.name,
 	});
@@ -754,16 +784,18 @@ function MTTComplianceCard({ shipment, onSaved }: { shipment: ShipmentDoc; onSav
 				icon="globe"
 				title="Merchanting (MTT) compliance"
 				action={
-					<a
-						href="#"
-						onClick={(e) => {
-							e.preventDefault();
-							setEditing(true);
-						}}
-						style={{ fontSize: '12.5px', color: 'var(--iris)', textDecoration: 'none', fontWeight: 500 }}
-					>
-						Edit
-					</a>
+					canEdit ? (
+						<a
+							href="#"
+							onClick={(e) => {
+								e.preventDefault();
+								setEditing(true);
+							}}
+							style={{ fontSize: '12.5px', color: 'var(--iris)', textDecoration: 'none', fontWeight: 500 }}
+						>
+							Edit
+						</a>
+					) : undefined
 				}
 			/>
 			{!mtt ? (
@@ -916,6 +948,206 @@ function MTTEditModal({
 					/>
 				</Field>
 			</div>
+			<div className="formfoot">
+				{err && <span className="ferr">{err}</span>}
+				<span className="spacer" />
+				<button type="button" className="btn" onClick={onClose}>
+					Cancel
+				</button>
+				<button type="button" className="btn primary" disabled={saving} onClick={() => void onSave()}>
+					{saving ? 'Saving…' : 'Save changes'}
+				</button>
+			</div>
+		</Modal>
+	);
+}
+
+interface ShipmentLineEdit {
+	name: string;
+	qty: string;
+	batch_no: string;
+	pack_description: string;
+}
+
+const SHIP_LINE_GRID = '1.8fr 110px 1fr 1fr';
+
+/** Edit a shipment's deal/routing header + existing line qty/batch/pack.
+ *  Voyage/customs live in Update voyage; MTT lives in its own card. */
+function EditShipmentModal({
+	id,
+	shipment,
+	items,
+	onClose,
+	onSaved,
+}: {
+	id: string;
+	shipment: ShipmentDoc;
+	items: ShipmentDetailData['items'];
+	onClose: () => void;
+	onSaved: () => void;
+}) {
+	const { call: update, loading: saving } = useFrappePostCall(API.updateShipment);
+	const [err, setErr] = useState<string | null>(null);
+	const [form, setForm] = useState(() => ({
+		mode: shipment.mode as 'Sea' | 'Air',
+		trade_type: shipment.trade_type as string,
+		incoterm: shipment.incoterm ?? '',
+		cha: shipment.cha ?? '',
+		port_of_loading: shipment.port_of_loading ?? '',
+		port_of_discharge: shipment.port_of_discharge ?? '',
+		final_destination: shipment.final_destination ?? '',
+		letter_of_credit: shipment.letter_of_credit ?? '',
+		notes: shipment.notes ?? '',
+	}));
+	const [lines, setLines] = useState<ShipmentLineEdit[]>(() =>
+		items.map((it) => ({
+			name: it.name,
+			qty: String(it.qty),
+			batch_no: it.batch_no ?? '',
+			pack_description: it.pack_description ?? '',
+		})),
+	);
+	const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) =>
+		setForm((f) => ({ ...f, [k]: v }));
+	const setLine = (i: number, patch: Partial<ShipmentLineEdit>) =>
+		setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
+
+	const ports = useFrappeGetDocList<{ name: string; mode: string }>('Port', {
+		fields: ['name', 'mode'],
+		filters: [['disabled', '=', 0]],
+		limit: 300,
+	});
+	const chas = useFrappeGetDocList<{ name: string }>('CHA', { fields: ['name'], limit: 100 });
+	const incoterms = useFrappeGetDocList<{ name: string }>('Incoterm', { fields: ['name'], limit: 100 });
+	const lcs = useFrappeGetDocList<{ name: string; lc_number: string }>('Letter of Credit', {
+		fields: ['name', 'lc_number'],
+		filters: [['customer', '=', shipment.customer]],
+		limit: 50,
+	});
+	const portOpts = (ports.data ?? [])
+		.filter((p) => p.mode === form.mode || p.mode === 'Sea & Air')
+		.map((p) => ({ value: p.name }));
+
+	async function onSave() {
+		setErr(null);
+		const orNull = (v: string) => v || null;
+		try {
+			await update({
+				name: id,
+				payload: {
+					mode: form.mode,
+					trade_type: form.trade_type,
+					incoterm: orNull(form.incoterm),
+					cha: orNull(form.cha),
+					port_of_loading: orNull(form.port_of_loading),
+					port_of_discharge: orNull(form.port_of_discharge),
+					final_destination: form.final_destination,
+					letter_of_credit: orNull(form.letter_of_credit),
+					notes: form.notes,
+					items: lines.map((l) => ({
+						name: l.name,
+						qty: Number(l.qty),
+						batch_no: l.batch_no,
+						pack_description: l.pack_description,
+					})),
+				},
+			});
+			onSaved();
+		} catch (e) {
+			setErr(parseServerError(e));
+		}
+	}
+
+	return (
+		<Modal title="Edit shipment" icon="sliders" onClose={onClose}>
+			<div className="formgrid">
+				<Field label="Mode">
+					<SelectInput
+						value={form.mode}
+						onChange={(v) => set('mode', v as 'Sea' | 'Air')}
+						options={[{ value: 'Sea' }, { value: 'Air' }]}
+					/>
+				</Field>
+				<Field label="Trade type">
+					<SelectInput
+						value={form.trade_type}
+						onChange={(v) => set('trade_type', v)}
+						options={TRADE_TYPES.map((t) => ({ value: t }))}
+					/>
+				</Field>
+				<Field label="Incoterm">
+					<SearchSelect
+						value={form.incoterm}
+						onChange={(v) => set('incoterm', v)}
+						options={(incoterms.data ?? []).map((i) => ({ value: i.name }))}
+						placeholder="Search incoterms…"
+					/>
+				</Field>
+				<Field label="CHA">
+					<SearchSelect
+						value={form.cha}
+						onChange={(v) => set('cha', v)}
+						options={(chas.data ?? []).map((c) => ({ value: c.name }))}
+						placeholder="Search CHAs…"
+					/>
+				</Field>
+				<Field label="Port of loading">
+					<SearchSelect
+						value={form.port_of_loading}
+						onChange={(v) => set('port_of_loading', v)}
+						options={portOpts}
+						placeholder="Search ports…"
+					/>
+				</Field>
+				<Field label="Port of discharge">
+					<SearchSelect
+						value={form.port_of_discharge}
+						onChange={(v) => set('port_of_discharge', v)}
+						options={portOpts}
+						placeholder="Search ports…"
+					/>
+				</Field>
+				<Field label="Final destination">
+					<TextInput value={form.final_destination} onChange={(v) => set('final_destination', v)} />
+				</Field>
+				<Field label="Letter of credit">
+					<SearchSelect
+						value={form.letter_of_credit}
+						onChange={(v) => set('letter_of_credit', v)}
+						options={(lcs.data ?? []).map((r) => ({ value: r.name, label: r.lc_number || r.name }))}
+						placeholder="Search LCs…"
+					/>
+				</Field>
+				<div className="span2">
+					<Field label="Notes">
+						<TextArea value={form.notes} onChange={(v) => set('notes', v)} rows={2} />
+					</Field>
+				</div>
+			</div>
+			{lines.length > 0 && (
+				<>
+					<div className="reqhead" style={{ gridTemplateColumns: SHIP_LINE_GRID }}>
+						<span>Item</span>
+						<span>Qty</span>
+						<span>Batch</span>
+						<span>Pack</span>
+					</div>
+					{lines.map((l, i) => (
+						<div className="reqrow" key={l.name} style={{ gridTemplateColumns: SHIP_LINE_GRID }}>
+							<div>
+								<div className="c1">{items[i]?.item_name}</div>
+								<div className="c2">{items[i]?.sales_order}</div>
+							</div>
+							<TextInput type="number" mono value={l.qty} onChange={(v) => setLine(i, { qty: v })} />
+							<TextInput mono value={l.batch_no} onChange={(v) => setLine(i, { batch_no: v })} />
+							<TextInput
+								value={l.pack_description}
+								onChange={(v) => setLine(i, { pack_description: v })}
+							/>
+						</div>
+					))}
+				</>
+			)}
 			<div className="formfoot">
 				{err && <span className="ferr">{err}</span>}
 				<span className="spacer" />

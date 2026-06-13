@@ -7,6 +7,7 @@ except ImportError:  # frappe < 16
 	from frappe.tests.utils import FrappeTestCase as IntegrationTestCase
 
 from exportflow.api import (
+	amend_document,
 	create_export_sales_order,
 	create_purchase_order,
 	create_purchase_order_draft,
@@ -17,6 +18,9 @@ from exportflow.api import (
 	set_shipment_milestone,
 	submit_purchase_order,
 	submit_sales_order,
+	update_purchase_order_doc,
+	update_sales_order,
+	update_shipment,
 )
 from exportflow.exportflow.doctype.export_shipment.export_shipment import (
 	AIR_MILESTONES,
@@ -383,6 +387,119 @@ class TestLogistics(IntegrationTestCase):
 					],
 				}
 			)
+
+	def test_edit_draft_and_amend_sales_order(self):
+		"""Drafts edit in place; a submitted SO (no downstream links) amends into
+		a fresh draft and edits are then blocked on the cancelled original."""
+		sfx = _suffix()
+		item = make_plain_item(f"_Test EF Edit Item {sfx}")
+		customer = make_customer(f"_Test EF Edit Cust {sfx}")
+		cc = frappe.db.get_value("Company", self.company, "default_currency")
+		created = create_export_sales_order(
+			{
+				"customer": customer,
+				"delivery_date": add_days(nowdate(), 30),
+				"currency": cc,
+				"conversion_rate": 1,
+				"items": [{"item_code": item, "qty": 10, "rate": 5}],
+			}
+		)
+		name = created["name"]
+
+		# edit the draft — qty/rate change sticks
+		update_sales_order(
+			name,
+			{
+				"customer": customer,
+				"delivery_date": add_days(nowdate(), 40),
+				"currency": cc,
+				"conversion_rate": 1,
+				"items": [{"item_code": item, "qty": 20, "rate": 7}],
+			},
+		)
+		so = frappe.get_doc("Sales Order", name)
+		self.assertEqual(flt(so.items[0].qty), 20.0)
+		self.assertEqual(flt(so.items[0].rate), 7.0)
+
+		# submit, then editing the submitted doc is refused
+		submit_sales_order(name)
+		with self.assertRaises(frappe.ValidationError):
+			update_sales_order(name, {"items": [{"item_code": item, "qty": 1, "rate": 1}]})
+
+		# amend reopens an editable draft; the original is cancelled
+		amended = amend_document("Sales Order", name)
+		self.assertNotEqual(amended["name"], name)
+		new = frappe.get_doc("Sales Order", amended["name"])
+		self.assertEqual(new.docstatus, 0)
+		self.assertEqual(new.amended_from, name)
+		self.assertEqual(frappe.db.get_value("Sales Order", name, "docstatus"), 2)
+
+	def test_edit_draft_purchase_order(self):
+		so, _customer, supplier_one, _s2 = self.setup_deal(qty_a=100)
+		result = create_purchase_order(
+			so.name, [{"so_detail": so.items[0].name, "supplier": supplier_one, "qty": 40, "rate": 9}]
+		)
+		po_name = result["purchase_orders"][0]["name"]
+		update_purchase_order_doc(
+			po_name,
+			{
+				"supplier": supplier_one,
+				"items": [
+					{
+						"item_code": so.items[0].item_code,
+						"qty": 30,
+						"rate": 8,
+						"sales_order": so.name,
+						"so_detail": so.items[0].name,
+					}
+				],
+			},
+		)
+		po = frappe.get_doc("Purchase Order", po_name)
+		self.assertEqual(flt(po.items[0].qty), 30.0)
+		self.assertEqual(flt(po.items[0].rate), 8.0)
+		self.assertEqual(po.items[0].sales_order, so.name)
+
+	def test_po_edit_respects_remaining_cap(self):
+		"""Review finding: the edit path must keep the over-ordering cap, only
+		excluding the edited PO's own draft contribution (not dropping it)."""
+		so, _customer, supplier_one, _s2 = self.setup_deal(qty_a=100)
+		result = create_purchase_order(
+			so.name, [{"so_detail": so.items[0].name, "supplier": supplier_one, "qty": 40, "rate": 9}]
+		)
+		po_name = result["purchase_orders"][0]["name"]
+		linked = {
+			"item_code": so.items[0].item_code,
+			"sales_order": so.name,
+			"so_detail": so.items[0].name,
+			"rate": 9,
+		}
+		# editing UP to the full SO qty is fine — its own 40 is excluded from the cap
+		update_purchase_order_doc(po_name, {"supplier": supplier_one, "items": [{**linked, "qty": 100}]})
+		self.assertEqual(
+			flt(frappe.db.get_value("Purchase Order Item", {"parent": po_name}, "qty")), 100.0
+		)
+		# but editing BEYOND the SO line qty is still rejected
+		with self.assertRaises(frappe.ValidationError):
+			update_purchase_order_doc(po_name, {"supplier": supplier_one, "items": [{**linked, "qty": 101}]})
+
+	def test_update_shipment_header_and_lines(self):
+		so, customer, _s1, _s2 = self.setup_deal(qty_a=100)
+		shp = self.make_test_shipment(so, customer, qty=60)
+		row = frappe.db.get_value("Export Shipment Item", {"parent": shp["name"]}, "name")
+		update_shipment(
+			shp["name"],
+			{
+				"notes": "edited",
+				"final_destination": "Durban yard",
+				"items": [{"name": row, "qty": 50, "batch_no": "B-1", "pack_description": "25kg drums"}],
+			},
+		)
+		doc = frappe.get_doc("Export Shipment", shp["name"])
+		self.assertEqual(doc.notes, "edited")
+		self.assertEqual(doc.final_destination, "Durban yard")
+		self.assertEqual(flt(doc.items[0].qty), 50.0)
+		self.assertEqual(doc.items[0].batch_no, "B-1")
 
 	def test_shipment_rejects_foreign_so_line(self):
 		so, customer, _s1, _s2 = self.setup_deal(qty_a=10)

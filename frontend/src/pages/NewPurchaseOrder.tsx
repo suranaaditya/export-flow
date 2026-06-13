@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFrappeGetCall, useFrappePostCall } from 'frappe-react-sdk';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
 import { MasterModal } from '@/components/MasterModal';
 import { CheckInput, Field, SearchSelect, TextArea, TextInput } from '@/components/form';
@@ -9,6 +9,7 @@ import {
 	API,
 	parseServerError,
 	type NewPOContext,
+	type PODetailData,
 	type POTotals,
 	type SOProcurement,
 } from '@/lib/api';
@@ -48,9 +49,17 @@ function todayISO(): string {
 export function NewPurchaseOrder() {
 	const navigate = useNavigate();
 	const [searchParams] = useSearchParams();
+	const { id: editId } = useParams<{ id?: string }>();
+	const isEdit = !!editId;
 
 	const ctxResult = useFrappeGetCall<{ message: NewPOContext }>(API.newPoContext, undefined);
 	const ctx = ctxResult.data?.message;
+
+	const editResult = useFrappeGetCall<{ message: PODetailData }>(
+		API.poDetail,
+		{ name: editId },
+		isEdit ? undefined : null,
+	);
 
 	const [supplier, setSupplier] = useState('');
 	const [mes, setMes] = useState(false);
@@ -67,13 +76,50 @@ export function NewPurchaseOrder() {
 	const [quickCreate, setQuickCreate] = useState<'supplier' | 'item' | 'terms' | null>(null);
 	const [preview, setPreview] = useState<POTotals | null>(null);
 
-	// default the taxes template once the context arrives
+	// default the taxes template once the context arrives (creates only — an
+	// edit prefills the order's own template)
 	useEffect(() => {
-		if (!ctx || taxDefaulted) return;
+		if (!ctx || taxDefaulted || isEdit) return;
 		const def = ctx.taxes_templates.find((t) => t.is_default);
 		if (def) setTaxesTemplate(def.name);
 		setTaxDefaulted(true);
-	}, [ctx, taxDefaulted]);
+	}, [ctx, taxDefaulted, isEdit]);
+
+	// prefill from the existing PO when editing (seed exactly once)
+	const seeded = useRef(false);
+	useEffect(() => {
+		if (!isEdit || seeded.current) return;
+		const d = editResult.data?.message;
+		if (!d) return;
+		setSupplier(d.po.supplier ?? '');
+		setMes(d.po.merchant_export_scheme === 1);
+		setOrderDate(d.po.transaction_date ?? todayISO());
+		setRequiredBy(d.po.schedule_date ?? '');
+		setTcName(d.po.tc_name ?? '');
+		setTerms(d.po.terms ?? '');
+		setTaxesTemplate(d.po.taxes_and_charges ?? '');
+		setTaxDefaulted(true);
+		setCharges(
+			(d.extra_charges ?? []).map((c) => ({
+				description: c.description,
+				account_head: c.account_head,
+				amount: String(c.amount),
+			})),
+		);
+		setRows(
+			(d.items ?? []).map((it) => ({
+				item_code: it.item_code,
+				item_name: it.item_name,
+				qty: String(it.qty),
+				uom: it.uom ?? '',
+				rate: String(it.rate),
+				sales_order: it.sales_order,
+				so_detail: it.sales_order_item,
+				max_qty: null, // editing existing lines — backend skips the remaining guard
+			})),
+		);
+		seeded.current = true;
+	}, [isEdit, editResult.data]);
 
 	// lines of the picked SO, to pull into the order
 	const soLines = useFrappeGetCall<{ message: SOProcurement }>(
@@ -89,6 +135,10 @@ export function NewPurchaseOrder() {
 	const { call: createPo, loading: saving } = useFrappePostCall<{
 		message: { name: string; docstatus: number };
 	}>(API.createPoDraft);
+	const { call: updatePo, loading: updating } = useFrappePostCall<{
+		message: { name: string; docstatus: number };
+	}>(API.updatePo);
+	const busy = saving || updating;
 
 	function buildPayload(submit: boolean) {
 		return {
@@ -240,8 +290,13 @@ export function NewPurchaseOrder() {
 		}
 		setErr(null);
 		try {
-			const result = await createPo({ podata: buildPayload(submit) });
-			navigate('/purchases/' + result.message.name);
+			if (isEdit) {
+				await updatePo({ name: editId, podata: buildPayload(submit) });
+				navigate('/purchases/' + editId);
+			} else {
+				const result = await createPo({ podata: buildPayload(submit) });
+				navigate('/purchases/' + result.message.name);
+			}
 		} catch (e) {
 			setErr(parseServerError(e));
 		}
@@ -288,12 +343,13 @@ export function NewPurchaseOrder() {
 
 	return (
 		<main className="tight">
-			<div className="eyebrow">Buying · New purchase order</div>
+			<div className="eyebrow">Buying · {isEdit ? 'Edit purchase order' : 'New purchase order'}</div>
 			<div className="crumb" style={{ marginTop: 6 }}>
-				<Link to="/purchases">Purchases</Link> / <span>New</span>
+				<Link to="/purchases">Purchases</Link> /{' '}
+				{isEdit ? <span className="data">{editId}</span> : <span>New</span>}
 			</div>
 			<div className="titlebar">
-				<span className="who">New purchase order</span>
+				<span className="who">{isEdit ? `Edit ${editId}` : 'New purchase order'}</span>
 				<span className="spacer" />
 			</div>
 
@@ -479,12 +535,12 @@ export function NewPurchaseOrder() {
 						<span className="num" style={{ fontSize: 15 }}>
 							{fmtMoney(totals?.grand_total ?? subtotal, currency)}
 						</span>
-						<button type="button" className="btn" disabled={saving} onClick={() => void onSave(false)}>
-							Save draft
+						<button type="button" className="btn" disabled={busy} onClick={() => void onSave(false)}>
+							{busy ? 'Saving…' : 'Save draft'}
 						</button>
-						<button type="button" className="btn primary" disabled={saving} onClick={() => void onSave(true)}>
+						<button type="button" className="btn primary" disabled={busy} onClick={() => void onSave(true)}>
 							<Icon name="check" size={15} />
-							{saving ? 'Saving…' : 'Create & submit'}
+							{busy ? 'Saving…' : isEdit ? 'Save & submit' : 'Create & submit'}
 						</button>
 					</div>
 				</Card>

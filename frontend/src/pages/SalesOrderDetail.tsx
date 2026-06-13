@@ -41,7 +41,20 @@ export function SalesOrderDetail() {
 		{ sales_order: id },
 	);
 	const { call: submitSo, loading: submitting } = useFrappePostCall(API.submitSo);
+	const { call: amendDoc, loading: amending } = useFrappePostCall<{ message: { name: string } }>(
+		API.amendDoc,
+	);
 	const [actionErr, setActionErr] = useState<string | null>(null);
+
+	async function onAmend() {
+		setActionErr(null);
+		try {
+			const r = await amendDoc({ doctype: 'Sales Order', name: id });
+			navigate('/sales-orders/' + r.message.name + '/edit');
+		} catch (e) {
+			setActionErr(parseServerError(e));
+		}
+	}
 
 	// procurement state per SO line + the POs already raised against each
 	const proc = useFrappeGetCall<{ message: SOProcurement }>(API.soProcurement, {
@@ -175,7 +188,7 @@ export function SalesOrderDetail() {
 		);
 	}
 
-	const { so, pfis, lcs, summary } = detail;
+	const { so, pfis, lcs, summary, items, can } = detail;
 
 	return (
 		<main className="tight">
@@ -192,11 +205,25 @@ export function SalesOrderDetail() {
 				</span>
 				<span className="spacer" />
 				{so.docstatus === 0 ? (
-					<button className="btn primary" disabled={submitting} onClick={() => void onSubmitOrder()}>
-						<Icon name="check" size={15} /> {submitting ? 'Submitting…' : 'Submit order'}
-					</button>
+					<>
+						{can.edit && (
+							<button className="btn" onClick={() => navigate(`/sales-orders/${id}/edit`)}>
+								<Icon name="file-text" size={15} /> Edit
+							</button>
+						)}
+						{can.submit && (
+							<button className="btn primary" disabled={submitting} onClick={() => void onSubmitOrder()}>
+								<Icon name="check" size={15} /> {submitting ? 'Submitting…' : 'Submit order'}
+							</button>
+						)}
+					</>
 				) : (
 					<>
+						{can.amend && (
+							<button className="btn" disabled={amending} onClick={() => void onAmend()}>
+								<Icon name="refresh" size={15} /> {amending ? 'Amending…' : 'Amend'}
+							</button>
+						)}
 						<button className="btn" onClick={() => navigate('/lc/new?so=' + id)}>
 							<Icon name="calendar" size={15} /> New letter of credit
 						</button>
@@ -217,6 +244,12 @@ export function SalesOrderDetail() {
 					<b>Date</b>
 					<span className="data">{fmtDateLong(so.transaction_date)}</span>
 				</span>
+				{so.delivery_date && (
+					<span className="kv">
+						<b>Delivery</b>
+						<span className="data">{fmtDate(so.delivery_date)}</span>
+					</span>
+				)}
 				<span className="kv">
 					<b>Incoterm</b>
 					{[so.incoterm, so.named_place].filter(Boolean).join(' ') || '—'}
@@ -245,6 +278,43 @@ export function SalesOrderDetail() {
 								{ k: 'Balance', v: fmtMoney(summary.balance, so.currency), data: true },
 							]}
 						/>
+					</Card>
+
+					<Card>
+						<CHead
+							icon="package"
+							title="Order items"
+							count={`${items.length} ${items.length === 1 ? 'line' : 'lines'}`}
+						/>
+						{items.length === 0 ? (
+							<EmptyMsg title="No item lines" />
+						) : (
+							<table>
+								<thead>
+									<tr>
+										<th>Item</th>
+										<th>Qty</th>
+										<th>Rate</th>
+										<th style={{ textAlign: 'right' }}>Amount</th>
+									</tr>
+								</thead>
+								<tbody>
+									{items.map((it, i) => (
+										<tr key={i}>
+											<td>
+												<div className="c1">{it.item_name}</div>
+												<div className="c2">{it.item_code}</div>
+											</td>
+											<td className="num">{`${it.qty} ${it.uom ?? ''}`.trim()}</td>
+											<td className="num">{fmtMoney(it.rate, so.currency)}</td>
+											<td className="num" style={{ textAlign: 'right' }}>
+												{fmtMoney(it.amount, so.currency)}
+											</td>
+										</tr>
+									))}
+								</tbody>
+							</table>
+						)}
 					</Card>
 
 					<Card>

@@ -85,6 +85,13 @@ def get_so_money_summary(sales_order: str) -> dict:
 			"received": received,
 			"balance": flt(flt(so.grand_total) - received, 2),
 		},
+		"items": frappe.get_all(
+			"Sales Order Item",
+			filters={"parent": sales_order, "parenttype": "Sales Order"},
+			fields=["item_code", "item_name", "qty", "uom", "rate", "amount"],
+			order_by="idx asc",
+		),
+		"can": _doc_can("Sales Order", sales_order),
 	}
 
 
@@ -327,16 +334,141 @@ def submit_sales_order(name: str) -> dict:
 	return {"name": doc.name, "docstatus": doc.docstatus}
 
 
-def _draft_po_qty(so_detail: str) -> float:
+# ---------------------------------------------------------------- edit / amend
+
+def _doc_can(doctype: str, name: str, *, amendable: bool = True) -> dict:
+	"""Edit affordances the detail screens gate on — straight from the user's
+	ERPNext role permissions. `amend` is offered only for a submitted doc the
+	user may amend; `edit` means a draft the user may write."""
+	docstatus = cint(frappe.db.get_value(doctype, name, "docstatus"))
+	can_write = bool(frappe.has_permission(doctype, "write", doc=name))
+	return {
+		"docstatus": docstatus,
+		"write": can_write,
+		"edit": can_write and docstatus == 0,
+		"submit": bool(frappe.has_permission(doctype, "submit", doc=name)),
+		"cancel": bool(frappe.has_permission(doctype, "cancel", doc=name)),
+		"amend": bool(
+			amendable and docstatus == 1 and frappe.has_permission(doctype, "amend", doc=name)
+		),
+	}
+
+
+@frappe.whitelist()
+def amend_document(doctype: str, name: str) -> dict:
+	"""ERPNext-faithful amend: cancel the submitted document and reopen it as an
+	editable draft (amended_from set). Raises a clear error when downstream
+	links (PFIs, submitted POs, …) block the cancel — exactly as the desk does."""
+	if doctype not in ("Sales Order", "Purchase Order"):
+		frappe.throw(_("{0} cannot be amended here").format(doctype))
+	doc = frappe.get_doc(doctype, name)
+	doc.check_permission("amend")
+	if doc.docstatus != 1:
+		frappe.throw(_("Only a submitted document can be amended"))
+	doc.cancel()
+	amended = frappe.copy_doc(doc)
+	amended.amended_from = name
+	amended.docstatus = 0
+	amended.insert()
+	return {"name": amended.name, "doctype": doctype}
+
+
+@frappe.whitelist()
+def get_sales_order_for_edit(name: str) -> dict:
+	"""SO header + item lines in the deal-form shape, for the edit screen."""
+	frappe.has_permission("Sales Order", "read", doc=name, throw=True)
+	so = frappe.db.get_value(
+		"Sales Order",
+		name,
+		[
+			"name",
+			"customer",
+			"currency",
+			"conversion_rate",
+			"transaction_date",
+			"delivery_date",
+			"incoterm",
+			"named_place",
+			"payment_terms_narrative",
+			"docstatus",
+		],
+		as_dict=True,
+	)
+	if not so:
+		frappe.throw(_("Sales Order {0} not found").format(name))
+	so["items"] = frappe.get_all(
+		"Sales Order Item",
+		filters={"parent": name, "parenttype": "Sales Order"},
+		fields=["item_code", "item_name", "qty", "uom", "rate"],
+		order_by="idx asc",
+	)
+	return so
+
+
+@frappe.whitelist()
+def update_sales_order(name: str, deal) -> dict:
+	"""Edit a DRAFT sales order's header + item lines (submitted orders must be
+	amended first). Mirrors create_export_sales_order's validation."""
+	doc = frappe.get_doc("Sales Order", name)
+	doc.check_permission("write")
+	if doc.docstatus != 0:
+		frappe.throw(_("Only a draft sales order can be edited — amend it first"))
+	if isinstance(deal, str):
+		deal = json.loads(deal)
+
+	items = deal.get("items") or []
+	if not items:
+		frappe.throw(_("Add at least one item to the deal"))
+	for idx, row in enumerate(items, start=1):
+		if not row.get("item_code"):
+			frappe.throw(_("Row {0}: item is required").format(idx))
+		if flt(row.get("qty")) <= 0:
+			frappe.throw(_("Row {0}: quantity must be greater than zero").format(idx))
+		if flt(row.get("rate")) <= 0:
+			frappe.throw(_("Row {0}: rate must be greater than zero").format(idx))
+
+	company_currency = frappe.db.get_value("Company", doc.company, "default_currency")
+	currency = deal.get("currency") or company_currency
+	conversion_rate = 1.0 if currency == company_currency else flt(deal.get("conversion_rate"))
+	if conversion_rate <= 0:
+		frappe.throw(_("Exchange rate must be greater than zero"))
+
+	doc.customer = deal.get("customer") or doc.customer
+	doc.transaction_date = deal.get("transaction_date") or doc.transaction_date
+	doc.delivery_date = deal.get("delivery_date")
+	doc.currency = currency
+	doc.conversion_rate = conversion_rate
+	doc.incoterm = deal.get("incoterm") or None
+	doc.named_place = deal.get("named_place")
+	doc.payment_terms_narrative = deal.get("payment_terms_narrative")
+	doc.set(
+		"items",
+		[
+			{"item_code": row["item_code"], "qty": flt(row["qty"]), "rate": flt(row["rate"])}
+			for row in items
+		],
+	)
+	doc.save()
+
+	if frappe.utils.cint(deal.get("submit")):
+		doc.check_permission("submit")
+		doc.submit()
+	return {"name": doc.name, "docstatus": doc.docstatus}
+
+
+def _draft_po_qty(so_detail: str, exclude_po: str | None = None) -> float:
 	"""Quantity already covered by DRAFT POs for an SO line (submitted POs are
-	reflected in the SO item's ordered_qty by ERPNext itself)."""
+	reflected in the SO item's ordered_qty by ERPNext itself). When editing a
+	draft PO, exclude_po drops its own current contribution so the remaining
+	check doesn't double-count the very PO being edited."""
 	return flt(
 		frappe.db.sql(
 			"""SELECT COALESCE(SUM(poi.qty), 0)
 			   FROM `tabPurchase Order Item` poi
 			   JOIN `tabPurchase Order` po ON po.name = poi.parent
-			   WHERE poi.sales_order_item = %s AND po.docstatus = 0""",
-			(so_detail,),
+			   WHERE poi.sales_order_item = %s AND po.docstatus = 0
+			     AND (%s IS NULL OR po.name != %s)""",
+			(so_detail, exclude_po, exclude_po),
 		)[0][0]
 	)
 
@@ -598,10 +730,12 @@ def get_terms_text(template: str) -> str:
 	return frappe.db.get_value("Terms and Conditions", template, "terms") or ""
 
 
-def _build_po_doc(podata, validate_remaining: bool = True):
-	"""Construct the in-memory PO the standalone form describes: header,
-	mixed SO-linked/free rows, taxes template rows, and extra charge heads.
-	Shared by the live tax preview and the actual create."""
+def _build_po_doc(podata, validate_remaining: bool = True, target=None, exclude_po: str | None = None):
+	"""Construct the PO the standalone form describes: header, mixed
+	SO-linked/free rows, taxes template rows, and extra charge heads. Shared by
+	the live tax preview, the create, and (with target=an existing draft) the
+	edit path. exclude_po drops the edited PO's own draft contribution from the
+	remaining-qty check so an in-place edit isn't rejected for double-counting."""
 	items = podata.get("items") or []
 	if not items:
 		frappe.throw(_("Add at least one item"))
@@ -648,7 +782,7 @@ def _build_po_doc(podata, validate_remaining: bool = True):
 				frappe.throw(_("Row {0}: item does not match the sales order line").format(idx))
 			if validate_remaining:
 				ordered = flt(so_row.ordered_qty) / (flt(so_row.conversion_factor) or 1.0)
-				remaining = flt(so_row.qty) - ordered - _draft_po_qty(row["so_detail"])
+				remaining = flt(so_row.qty) - ordered - _draft_po_qty(row["so_detail"], exclude_po)
 				if flt(row["qty"]) > remaining + 1e-6:
 					frappe.throw(
 						_("Row {0}: only {1} remains unordered on {2}").format(
@@ -696,22 +830,33 @@ def _build_po_doc(podata, validate_remaining: bool = True):
 			}
 		)
 
+	header = {
+		"supplier": supplier,
+		"transaction_date": podata.get("transaction_date") or frappe.utils.nowdate(),
+		"schedule_date": schedule_date,
+		"conversion_rate": 1,
+		"merchant_export_scheme": 1 if podata.get("merchant_export_scheme") else 0,
+		"taxes_and_charges": taxes_template or None,
+		"tc_name": podata.get("tc_name") or None,
+		"terms": podata.get("terms"),
+	}
+	if target is not None:
+		# editing an existing draft — keep its name/company/currency, replace
+		# the header fields, lines and taxes
+		target.update(header)
+		target.set("items", po_rows)
+		target.set("taxes", taxes)
+		return target
+
 	company = exportflow_company()
 	return frappe.get_doc(
 		{
 			"doctype": "Purchase Order",
-			"supplier": supplier,
 			"company": company,
-			"transaction_date": podata.get("transaction_date") or frappe.utils.nowdate(),
-			"schedule_date": schedule_date,
 			"currency": frappe.db.get_value("Company", company, "default_currency"),
-			"conversion_rate": 1,
-			"merchant_export_scheme": 1 if podata.get("merchant_export_scheme") else 0,
-			"taxes_and_charges": taxes_template or None,
-			"taxes": taxes,
-			"tc_name": podata.get("tc_name") or None,
-			"terms": podata.get("terms"),
 			"items": po_rows,
+			"taxes": taxes,
+			**header,
 		}
 	)
 
@@ -797,6 +942,42 @@ def submit_purchase_order(name: str) -> dict:
 
 
 @frappe.whitelist()
+def update_purchase_order_doc(name: str, podata) -> dict:
+	"""Edit a DRAFT purchase order (header + lines + taxes); submitted POs must
+	be amended first. Re-runs the same builder as create, so item/HSN GST
+	autofills exactly the same way."""
+	doc = frappe.get_doc("Purchase Order", name)
+	doc.check_permission("write")
+	if doc.docstatus != 0:
+		frappe.throw(_("Only a draft purchase order can be edited — amend it first"))
+	if isinstance(podata, str):
+		podata = json.loads(podata)
+
+	# enforce the remaining-qty cap, but exclude this PO's own current draft
+	# contribution so an in-place edit isn't rejected for double-counting itself
+	_build_po_doc(podata, validate_remaining=True, target=doc, exclude_po=doc.name)
+	doc.save()
+
+	for row in doc.items:
+		if row.sales_order_item:
+			current = frappe.db.get_value(
+				"Sales Order Item", row.sales_order_item, ["supplier", "delivered_by_supplier"], as_dict=True
+			)
+			if current.supplier != doc.supplier or not current.delivered_by_supplier:
+				frappe.db.set_value(
+					"Sales Order Item",
+					row.sales_order_item,
+					{"supplier": doc.supplier, "delivered_by_supplier": 1},
+					update_modified=False,
+				)
+
+	if frappe.utils.cint(podata.get("submit")):
+		doc.check_permission("submit")
+		doc.submit()
+	return {"name": doc.name, "docstatus": doc.docstatus}
+
+
+@frappe.whitelist()
 def get_purchase_orders() -> list[dict]:
 	"""Purchases list rows with SO references and the GST clock."""
 	frappe.has_permission("Purchase Order", "read", throw=True)
@@ -862,6 +1043,21 @@ def get_po_detail(name: str) -> dict:
 		(name,),
 		as_dict=True,
 	)
+	# reconstruct the freeform charge heads (Actual rows that are not part of
+	# the taxes template) so the edit form can round-trip them
+	template_accounts = set()
+	if po.taxes_and_charges:
+		from erpnext.controllers.accounts_controller import get_taxes_and_charges
+
+		template_accounts = {
+			t.get("account_head")
+			for t in (get_taxes_and_charges("Purchase Taxes and Charges Template", po.taxes_and_charges) or [])
+		}
+	extra_charges = [
+		{"description": t.description, "account_head": t.account_head, "amount": flt(t.tax_amount)}
+		for t in po.taxes
+		if t.charge_type == "Actual" and t.account_head not in template_accounts
+	]
 	return {
 		"po": {
 			"name": po.name,
@@ -877,12 +1073,15 @@ def get_po_detail(name: str) -> dict:
 			"supplier_invoice_no": po.supplier_invoice_no,
 			"supplier_invoice_date": po.supplier_invoice_date,
 			"gst_export_deadline": po.gst_export_deadline,
+			"taxes_and_charges": po.taxes_and_charges,
 			"tc_name": po.tc_name,
 			"terms": po.terms,
 		},
 		"totals": _po_totals(po),
 		"items": items,
+		"extra_charges": extra_charges,
 		"shipments": shipments,
+		"can": _doc_can("Purchase Order", name),
 	}
 
 
@@ -1190,7 +1389,61 @@ def get_shipment_detail(name: str) -> dict:
 		"items": items,
 		"lc": lc,
 		"sales_orders": sorted({row.sales_order for row in doc.items}),
+		# Export Shipment is not submittable — editing is plain write permission
+		"can": _doc_can("Export Shipment", name, amendable=False),
 	}
+
+
+# header fields the shipment edit form may set (customer/SO links stay fixed —
+# those are structural; change them by re-booking the shipment)
+SHIPMENT_EDITABLE = {
+	"mode",
+	"trade_type",
+	"incoterm",
+	"cha",
+	"port_of_loading",
+	"port_of_discharge",
+	"final_destination",
+	"etd",
+	"eta",
+	"letter_of_credit",
+	"notes",
+}
+SHIPMENT_DATE_FIELDS = {"etd", "eta"}
+
+
+@frappe.whitelist()
+def update_shipment(name: str, payload) -> dict:
+	"""Edit a shipment's header fields and the qty/batch/pack of its existing
+	lines. Adding or removing lines goes through the booking flow. Runs the full
+	controller validation (cross-shipment qty, milestone seeding, checklist)."""
+	doc = frappe.get_doc("Export Shipment", name)
+	doc.check_permission("write")
+	if isinstance(payload, str):
+		payload = json.loads(payload)
+
+	for field in SHIPMENT_EDITABLE:
+		if field in payload:
+			value = payload[field]
+			if field in SHIPMENT_DATE_FIELDS and not value:
+				value = None
+			doc.set(field, value if value != "" else None)
+
+	if "items" in payload:
+		patch = {row.get("name"): row for row in payload["items"] if row.get("name")}
+		for row in doc.items:
+			p = patch.get(row.name)
+			if not p:
+				continue
+			if "qty" in p:
+				row.qty = flt(p["qty"])
+			if "batch_no" in p:
+				row.batch_no = p.get("batch_no")
+			if "pack_description" in p:
+				row.pack_description = p.get("pack_description")
+
+	doc.save()
+	return {"name": doc.name}
 
 
 @frappe.whitelist()

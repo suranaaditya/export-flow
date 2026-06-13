@@ -63,6 +63,25 @@ export interface LCRow {
 	latest_shipment_date: string;
 }
 
+/** Edit affordances mirrored from the user's ERPNext role permissions. */
+export interface DocCan {
+	docstatus: 0 | 1 | 2;
+	write: boolean;
+	edit: boolean; // draft the user may write
+	submit: boolean;
+	cancel: boolean;
+	amend: boolean; // submitted doc the user may amend
+}
+
+export interface SOItemLine {
+	item_code: string;
+	item_name: string;
+	qty: number;
+	uom: string | null;
+	rate: number;
+	amount: number;
+}
+
 export interface SOMoneySummary {
 	so: SOHeader;
 	pfis: PFIRow[];
@@ -73,6 +92,22 @@ export interface SOMoneySummary {
 		received: number;
 		balance: number;
 	};
+	items: SOItemLine[];
+	can: DocCan;
+}
+
+export interface SalesOrderForEdit {
+	name: string;
+	customer: string;
+	currency: string;
+	conversion_rate: number;
+	transaction_date: string;
+	delivery_date: string | null;
+	incoterm: string | null;
+	named_place: string | null;
+	payment_terms_narrative: string | null;
+	docstatus: 0 | 1 | 2;
+	items: { item_code: string; item_name: string; qty: number; uom: string | null; rate: number }[];
 }
 
 export type PFIStatus = 'Draft' | 'Sent' | 'Partially Paid' | 'Paid' | 'Cancelled';
@@ -123,6 +158,11 @@ export const API = {
 	compliancePermissions: 'exportflow.api.get_compliance_permissions',
 	financeWorkspace: 'exportflow.api.get_finance_workspace',
 	shipmentFinance: 'exportflow.api.get_shipment_finance',
+	soForEdit: 'exportflow.api.get_sales_order_for_edit',
+	updateSo: 'exportflow.api.update_sales_order',
+	updatePo: 'exportflow.api.update_purchase_order_doc',
+	updateShipment: 'exportflow.api.update_shipment',
+	amendDoc: 'exportflow.api.amend_document',
 } as const;
 
 // ---- Phase 6: export incentives + bank realization ----
@@ -489,6 +529,7 @@ export interface POListRow {
 export interface PODetailData {
 	po: Omit<POListRow, 'sales_orders'> & {
 		schedule_date: string | null;
+		taxes_and_charges: string | null;
 		tc_name: string | null;
 		terms: string | null;
 	};
@@ -505,7 +546,9 @@ export interface PODetailData {
 		sales_order_item: string | null;
 		delivered_by_supplier: 0 | 1;
 	}[];
+	extra_charges: { description: string; account_head: string; amount: number }[];
 	shipments: { shipment: string; current_milestone: string; mode: string; etd: string | null }[];
+	can: DocCan;
 }
 
 export interface ShippableLine {
@@ -619,6 +662,7 @@ export interface ShipmentDetailData {
 		issuing_bank: string | null;
 	} | null;
 	sales_orders: string[];
+	can: DocCan;
 }
 
 // ---- Phase 4: documents (exportflow.api) ----
