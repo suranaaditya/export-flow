@@ -855,6 +855,56 @@ def fix_ports(dry_run: int = 1) -> dict:
 	return result
 
 
+# CHA master cleanup: MERGES fold a truncation/typo into the fuller name
+# (repointing shipments); JUNK is the merchanting marker that leaked in via
+# the import — a merchanting trade has no Indian CHA, so clear it and delete.
+CHA_MERGES = {
+	"Flyjac": "Flyjack",
+	"Macro Logi": "Macro Logistics",
+}
+CHA_JUNK = ["Third Counrty"]
+
+
+def fix_chas(dry_run: int = 1) -> dict:
+	"""Merge duplicate/typo CHAs into their canonical name and drop the junk
+	"Third Counrty" merchanting marker (clearing it off its shipment first).
+
+	Run on the server:
+	    bench --site <site> execute exportflow.mis_import.fix_chas --kwargs "{'dry_run': False}"
+	"""
+	dry_run = int(dry_run)
+	result = {"merged": [], "junk_cleared": [], "skipped": [], "mode": ""}
+
+	if dry_run:
+		result["plan_merges"] = {s: d for s, d in CHA_MERGES.items() if frappe.db.exists("CHA", s)}
+		result["plan_junk"] = [j for j in CHA_JUNK if frappe.db.exists("CHA", j)]
+		result["mode"] = "dry-run (no changes)"
+		return result
+
+	for src, dest in CHA_MERGES.items():
+		if not frappe.db.exists("CHA", src):
+			result["skipped"].append(f"{src} (already gone)")
+			continue
+		if not frappe.db.exists("CHA", dest):
+			result["skipped"].append(f"target {dest} missing")
+			continue
+		frappe.rename_doc("CHA", src, dest, merge=True)
+		result["merged"].append(f"{src} → {dest}")
+
+	for junk in CHA_JUNK:
+		if not frappe.db.exists("CHA", junk):
+			continue
+		for shp in frappe.get_all("Export Shipment", filters={"cha": junk}, pluck="name"):
+			frappe.db.set_value("Export Shipment", shp, "cha", None, update_modified=False)
+			result["junk_cleared"].append(shp)
+		frappe.delete_doc("CHA", junk, force=True, ignore_permissions=True)
+
+	frappe.db.commit()
+	result["mode"] = "committed"
+	frappe.logger().info(f"CHA fix: {result}")
+	return result
+
+
 def clear_company_data(company: str) -> dict:
 	"""Delete the ExportFlow transactional docs for a company so the import can
 	be re-run cleanly. Masters (customers/items/suppliers) are left in place —
