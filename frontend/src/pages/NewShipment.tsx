@@ -2,9 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import { useFrappeGetCall, useFrappeGetDocList, useFrappePostCall } from 'frappe-react-sdk';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
+import { MasterModal } from '@/components/MasterModal';
 import { Field, SearchSelect, SelectInput, TextInput } from '@/components/form';
 import { Card, CHead, EmptyMsg } from '@/components/ui';
 import { API, parseServerError, type ShippableLine } from '@/lib/api';
+import { MASTERS, STATIC_OPTIONS, type OptionSource } from '@/lib/masters';
+
+const CHA_DEF = MASTERS.find((m) => m.doctype === 'CHA')!;
 
 interface LineSel {
 	checked: boolean;
@@ -50,6 +54,7 @@ export function NewShipment() {
 	const [lc, setLc] = useState('');
 	const [sel, setSel] = useState<Record<string, LineSel>>({});
 	const [err, setErr] = useState<string | null>(null);
+	const [addingCha, setAddingCha] = useState(false);
 	// SO lines waiting to be ticked once the shippable list loads
 	const [pendingPreselect, setPendingPreselect] = useState<string[] | null>(null);
 
@@ -75,6 +80,13 @@ export function NewShipment() {
 		limit: 100,
 	});
 	const chas = useFrappeGetDocList<{ name: string }>('CHA', { fields: ['name'], limit: 100 });
+	const masterOptions: Record<OptionSource, string[]> = {
+		currencies: [],
+		incoterms: [],
+		uoms: [],
+		countries: [],
+		...STATIC_OPTIONS,
+	};
 	const ports = useFrappeGetDocList<{ name: string; unlocode: string | null; mode: string }>(
 		'Port',
 		{
@@ -314,6 +326,8 @@ export function NewShipment() {
 								onChange={setCha}
 								options={(chas.data ?? []).map((c) => ({ value: c.name }))}
 								placeholder="Search CHAs…"
+								onCreate={() => setAddingCha(true)}
+								createLabel="New CHA / forwarder"
 							/>
 						</Field>
 						<Field label="Port of loading">
@@ -442,6 +456,20 @@ export function NewShipment() {
 					</div>
 				</Card>
 			</div>
+
+			{addingCha && (
+				<MasterModal
+					def={CHA_DEF}
+					options={masterOptions}
+					record={null}
+					onClose={() => setAddingCha(false)}
+					onSaved={(name) => {
+						setAddingCha(false);
+						void chas.mutate();
+						setCha(name);
+					}}
+				/>
+			)}
 
 			<footer>
 				<b>ExportFlow</b> · DUX Digitech

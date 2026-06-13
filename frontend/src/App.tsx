@@ -6,6 +6,7 @@ import { ThemeProvider } from '@/lib/theme';
 import { Compliance } from '@/pages/Compliance';
 import { Dashboard } from '@/pages/Dashboard';
 import { Documents } from '@/pages/Documents';
+import { Sales } from '@/pages/Sales';
 import { LetterOfCreditPage } from '@/pages/LetterOfCreditPage';
 import { NewSalesOrder } from '@/pages/NewSalesOrder';
 import { ProFormaInvoicePage } from '@/pages/ProFormaInvoicePage';
@@ -47,6 +48,7 @@ export default function App() {
 						<Routes>
 							<Route element={<AppShell />}>
 								<Route index element={<Dashboard />} />
+								<Route path="sales" element={<Sales />} />
 								<Route path="sales-orders" element={<SalesOrders />} />
 								<Route path="sales-orders/new" element={<NewSalesOrder />} />
 								<Route path="sales-orders/:id" element={<SalesOrderDetail />} />

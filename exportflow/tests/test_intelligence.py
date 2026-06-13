@@ -15,7 +15,7 @@ from exportflow.api import (
 	submit_purchase_order,
 	update_document_instance,
 )
-from exportflow.api import create_purchase_order_draft, create_shipment
+from exportflow.api import create_purchase_order_draft, create_shipment, get_sales_dashboard
 from exportflow.setup import seed_checklist_rules, seed_document_types
 from exportflow.tasks import (
 	send_compliance_alerts,
@@ -379,6 +379,38 @@ class TestIntelligence(IntegrationTestCase):
 		self.assertEqual(d["documents"], [])
 		self.assertEqual(d["pfis"], [])
 		self.assertFalse(any(d["can"].values()))
+
+	def test_sales_dashboard(self):
+		so, customer, supplier = self.make_deal(qty=10)
+		result = create_purchase_order(
+			so.name, [{"so_detail": so.items[0].name, "supplier": supplier, "qty": 10, "rate": 9}]
+		)
+		submit_purchase_order(result["purchase_orders"][0]["name"])
+
+		d = get_sales_dashboard()
+		self.assertGreaterEqual(d["kpis"]["export_value_inr"], 1)
+		self.assertGreaterEqual(d["kpis"]["order_count"], 1)
+		self.assertIn("gross_margin_inr", d["kpis"], "procurement present → margin computed")
+		self.assertTrue(any(c["customer"] for c in d["by_customer"]))
+		self.assertTrue(d["can"]["so"])
+		# export value carries the deal currency breakdown
+		self.assertTrue(d["kpis"]["export_value_by_currency"])
+
+	def test_sales_dashboard_permission_gated(self):
+		sfx = _suffix()
+		bare = frappe.get_doc(
+			{
+				"doctype": "User",
+				"email": f"_test_sbare_{sfx}@example.com".lower(),
+				"first_name": "SBare",
+				"user_type": "System User",
+			}
+		).insert(ignore_permissions=True)
+		frappe.set_user(bare.name)
+		self.addCleanup(frappe.set_user, "Administrator")
+		d = get_sales_dashboard()
+		self.assertFalse(d["can"]["so"])
+		self.assertEqual(d["kpis"], {})
 
 	# ---------------------------------------------------------------- dashboard
 

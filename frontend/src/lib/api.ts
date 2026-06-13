@@ -119,8 +119,31 @@ export const API = {
 	generateDocument: 'exportflow.api.generate_document',
 	checklistRules: 'exportflow.api.get_checklist_rules',
 	dashboard: 'exportflow.api.get_dashboard',
+	salesDashboard: 'exportflow.api.get_sales_dashboard',
 	compliancePermissions: 'exportflow.api.get_compliance_permissions',
 } as const;
+
+// ---- Phase 5: sales / financial dashboard ----
+
+export interface SalesDashboardData {
+	kpis: {
+		export_value_inr?: number;
+		export_value_by_currency?: { currency: string; amount: number }[];
+		order_count?: number;
+		open_value_inr?: number;
+		pfi_raised_inr?: number;
+		pfi_received_inr?: number;
+		pfi_outstanding_inr?: number;
+		procurement_inr?: number;
+		gross_margin_inr?: number;
+		margin_pct?: number;
+	};
+	by_customer: { customer: string; value_inr: number; orders: number }[];
+	by_country: { country: string; value_inr: number }[];
+	by_month: { month: string; value_inr: number }[];
+	top_products: { item: string; value_inr: number }[];
+	can: { so: boolean; pfi: boolean; po: boolean };
+}
 
 // ---- Phase 5: dashboard ----
 

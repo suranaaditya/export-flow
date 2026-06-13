@@ -1450,6 +1450,126 @@ def _shipment_chip(shipment, milestones_done: int, milestones_total: int, has_bl
 	return shipment.current_milestone or "Planned", "pend"
 
 
+def _month_key(d) -> str:
+	return getdate(d).strftime("%Y-%m") if d else ""
+
+
+@frappe.whitelist()
+def get_sales_dashboard() -> dict:
+	"""The financial picture (spec §6 sales view): export value booked, money
+	received vs outstanding, procurement cost and indicative gross margin, with
+	breakdowns by customer, destination and month. Computed from the deal data
+	we already hold; incentive/realization sections are layered in once those
+	doctypes exist."""
+	today = getdate(nowdate())
+	out: dict = {"kpis": {}, "by_customer": [], "by_country": [], "by_month": [], "top_products": []}
+
+	can = {
+		"so": frappe.has_permission("Sales Order", "read"),
+		"pfi": frappe.has_permission("Pro Forma Invoice", "read"),
+		"po": frappe.has_permission("Purchase Order", "read"),
+	}
+	out["can"] = can
+	if not can["so"]:
+		return out
+
+	# submitted, non-cancelled sales orders are the export topline
+	sos = frappe.get_all(
+		"Sales Order",
+		filters={"docstatus": 1},
+		fields=[
+			"name",
+			"customer",
+			"customer_name",
+			"currency",
+			"grand_total",
+			"base_grand_total",
+			"transaction_date",
+			"status",
+		],
+		limit_page_length=0,
+	)
+	customer_country = {}
+	for cust in frappe.get_all(
+		"Customer", fields=["name", "destination_country"], limit_page_length=0
+	):
+		customer_country[cust.name] = cust.destination_country or "Unknown"
+
+	by_currency: dict[str, float] = {}
+	value_inr = 0.0
+	by_customer: dict[str, dict] = {}
+	by_country: dict[str, float] = {}
+	by_month: dict[str, float] = {}
+	open_value_inr = 0.0
+	for so in sos:
+		inr = flt(so.base_grand_total)
+		value_inr += inr
+		by_currency[so.currency] = flt(by_currency.get(so.currency, 0) + flt(so.grand_total), 2)
+		c = by_customer.setdefault(
+			so.customer, {"customer": so.customer_name or so.customer, "value_inr": 0.0, "orders": 0}
+		)
+		c["value_inr"] += inr
+		c["orders"] += 1
+		country = customer_country.get(so.customer, "Unknown")
+		by_country[country] = flt(by_country.get(country, 0) + inr, 2)
+		by_month[_month_key(so.transaction_date)] = flt(
+			by_month.get(_month_key(so.transaction_date), 0) + inr, 2
+		)
+		if so.status not in ("Completed", "Closed"):
+			open_value_inr += inr
+
+	out["kpis"]["export_value_inr"] = flt(value_inr, 2)
+	out["kpis"]["export_value_by_currency"] = [
+		{"currency": cur, "amount": amt} for cur, amt in sorted(by_currency.items())
+	]
+	out["kpis"]["order_count"] = len(sos)
+	out["kpis"]["open_value_inr"] = flt(open_value_inr, 2)
+
+	# realization: PFI raised vs received (advances + stage payments)
+	if can["pfi"]:
+		pfis = frappe.get_all(
+			"Pro Forma Invoice",
+			filters={"docstatus": ["<", 2], "status": ["!=", "Cancelled"]},
+			fields=["amount", "paid_amount", "conversion_rate", "currency", "status"],
+			limit_page_length=0,
+		)
+		raised = received = 0.0
+		for p in pfis:
+			rate = flt(p.conversion_rate) or 1.0
+			raised += flt(p.amount) * rate
+			received += flt(p.paid_amount) * rate
+		out["kpis"]["pfi_raised_inr"] = flt(raised, 2)
+		out["kpis"]["pfi_received_inr"] = flt(received, 2)
+		out["kpis"]["pfi_outstanding_inr"] = flt(raised - received, 2)
+
+	# procurement cost (POs are booked in company currency = INR)
+	procurement_inr = 0.0
+	if can["po"]:
+		pos = frappe.get_all(
+			"Purchase Order",
+			filters={"docstatus": 1},
+			fields=["base_grand_total", "grand_total"],
+			limit_page_length=0,
+		)
+		procurement_inr = sum(flt(p.base_grand_total) or flt(p.grand_total) for p in pos)
+		out["kpis"]["procurement_inr"] = flt(procurement_inr, 2)
+		out["kpis"]["gross_margin_inr"] = flt(value_inr - procurement_inr, 2)
+		out["kpis"]["margin_pct"] = flt(100 * (value_inr - procurement_inr) / value_inr, 1) if value_inr else 0.0
+
+	out["by_customer"] = sorted(
+		[{**v, "value_inr": flt(v["value_inr"], 2)} for v in by_customer.values()],
+		key=lambda r: -r["value_inr"],
+	)[:8]
+	out["by_country"] = sorted(
+		[{"country": k, "value_inr": v} for k, v in by_country.items()], key=lambda r: -r["value_inr"]
+	)[:8]
+	out["by_month"] = [
+		{"month": k, "value_inr": by_month[k]} for k in sorted(by_month) if k
+	][-12:]
+
+	return out
+
+
 @frappe.whitelist()
 def get_compliance_permissions() -> dict:
 	"""The register hides mutation affordances from read-only roles."""
