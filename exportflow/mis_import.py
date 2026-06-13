@@ -703,6 +703,65 @@ def import_addresses(path: str, dry_run: int = 1, recreate: int = 0) -> dict:
 	return result
 
 
+def merge_customers(source: str, target: str, dry_run: int = 1) -> dict:
+	"""Merge a duplicate Customer `source` into `target`: repoint every link
+	(sales orders, shipments, realizations, document instances, …) to target and
+	delete source. The source's address is dropped first so the target is not
+	left with two identical addresses, and the denormalized customer_name on
+	repointed sales orders / shipments is refreshed.
+
+	Run on the server:
+	    bench --site <site> execute exportflow.mis_import.merge_customers \\
+	        --kwargs "{'source': 'Hubei Chemore Biotech Ltd.', 'target': 'Hubei Chemore Biotech Co., Ltd.', 'dry_run': False}"
+	"""
+	dry_run = int(dry_run)
+	if not frappe.db.exists("Customer", source):
+		frappe.throw(f"Source customer {source} not found")
+	if not frappe.db.exists("Customer", target):
+		frappe.throw(f"Target customer {target} not found")
+	if source == target:
+		frappe.throw("Source and target are the same customer")
+
+	refs = {
+		"sales_orders": frappe.db.count("Sales Order", {"customer": source}),
+		"shipments": frappe.db.count("Export Shipment", {"customer": source}),
+		"realizations": frappe.db.count("Export Realization", {"customer": source}),
+	}
+	if dry_run:
+		return {"source": source, "target": target, "would_repoint": refs, "mode": "dry-run (no changes)"}
+
+	target_name = frappe.db.get_value("Customer", target, "customer_name")
+	for addr in frappe.get_all(
+		"Dynamic Link",
+		filters={"parenttype": "Address", "link_doctype": "Customer", "link_name": source},
+		pluck="parent",
+	):
+		frappe.delete_doc("Address", addr, force=True, ignore_permissions=True)
+
+	# bench execute runs as Administrator; rename_doc has no ignore_permissions arg
+	frappe.rename_doc("Customer", source, target, merge=True)
+
+	# rename repoints the Link fields but not the denormalized customer_name
+	for dt in ("Sales Order", "Export Shipment"):
+		frappe.db.sql(
+			f"UPDATE `tab{dt}` SET customer_name = %s WHERE customer = %s", (target_name, target)
+		)
+	frappe.db.commit()
+
+	return {
+		"source": source,
+		"target": target,
+		"repointed": refs,
+		"target_totals": {
+			"sales_orders": frappe.db.count("Sales Order", {"customer": target}),
+			"shipments": frappe.db.count("Export Shipment", {"customer": target}),
+			"realizations": frappe.db.count("Export Realization", {"customer": target}),
+		},
+		"source_exists": bool(frappe.db.exists("Customer", source)),
+		"mode": "committed",
+	}
+
+
 def clear_company_data(company: str) -> dict:
 	"""Delete the ExportFlow transactional docs for a company so the import can
 	be re-run cleanly. Masters (customers/items/suppliers) are left in place —
