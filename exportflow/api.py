@@ -800,10 +800,14 @@ def submit_purchase_order(name: str) -> dict:
 def get_purchase_orders() -> list[dict]:
 	"""Purchases list rows with SO references and the GST clock."""
 	frappe.has_permission("Purchase Order", "read", throw=True)
+	company = exportflow_company()
+	po_filters = {"docstatus": ["<", 2]}
+	if company:
+		po_filters["company"] = company
 	# get_list (unlike get_all) applies the caller's role/user permissions
 	pos = frappe.get_list(
 		"Purchase Order",
-		filters={"docstatus": ["<", 2]},
+		filters=po_filters,
 		fields=[
 			"name",
 			"supplier",
@@ -1040,8 +1044,10 @@ def create_shipment(payload) -> dict:
 @frappe.whitelist()
 def get_shipments() -> list[dict]:
 	frappe.has_permission("Export Shipment", "read", throw=True)
+	company = exportflow_company()
 	rows = frappe.get_all(
 		"Export Shipment",
+		filters={"company": company} if company else None,
 		fields=["name", "customer", "customer_name", "mode", "current_milestone", "etd", "eta", "port_of_loading", "port_of_discharge"],
 		order_by="creation desc",
 		limit_page_length=100,
