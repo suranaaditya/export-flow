@@ -121,7 +121,140 @@ export const API = {
 	dashboard: 'exportflow.api.get_dashboard',
 	salesDashboard: 'exportflow.api.get_sales_dashboard',
 	compliancePermissions: 'exportflow.api.get_compliance_permissions',
+	financeWorkspace: 'exportflow.api.get_finance_workspace',
+	shipmentFinance: 'exportflow.api.get_shipment_finance',
 } as const;
+
+// ---- Phase 6: export incentives + bank realization ----
+
+export type IncentiveScheme = 'RoDTEP' | 'Duty Drawback';
+export type IncentiveStatus =
+	| 'Pending'
+	| 'Scroll Generated'
+	| 'Scrip Generated'
+	| 'Credited'
+	| 'Utilized'
+	| 'Not Applicable'
+	| 'Cancelled';
+
+export const INCENTIVE_STATUSES: IncentiveStatus[] = [
+	'Pending',
+	'Scroll Generated',
+	'Scrip Generated',
+	'Credited',
+	'Utilized',
+	'Not Applicable',
+	'Cancelled',
+];
+
+export interface IncentiveRow {
+	name: string;
+	scheme: IncentiveScheme;
+	shipment: string | null;
+	status: IncentiveStatus;
+	shipping_bill_no: string | null;
+	shipping_bill_date: string | null;
+	fob_value: number | null;
+	rate_pct: number | null;
+	amount: number | null;
+	scroll_number: string | null;
+	scroll_date: string | null;
+	scrip_number: string | null;
+	scrip_expiry: string | null;
+	drawback_serial: string | null;
+	amount_received: number | null;
+	received_date: string | null;
+	remarks: string | null;
+	modified: string;
+}
+
+export type RealizationStatus =
+	| 'Lodged with Bank'
+	| 'Awaiting Realization'
+	| 'Partially Realized'
+	| 'Realized'
+	| 'eBRC Closed'
+	| 'Overdue'
+	| 'Written Off'
+	| 'Cancelled';
+
+export const REALIZATION_STATUSES: RealizationStatus[] = [
+	'Lodged with Bank',
+	'Awaiting Realization',
+	'Partially Realized',
+	'Realized',
+	'eBRC Closed',
+	'Overdue',
+	'Written Off',
+	'Cancelled',
+];
+
+export interface RealizationRow {
+	name: string;
+	export_invoice: string | null;
+	shipment: string | null;
+	customer: string | null;
+	status: RealizationStatus;
+	currency: string | null;
+	invoice_value: number | null;
+	export_date: string | null;
+	due_date: string | null;
+	ad_bank: string | null;
+	fbc_number: string | null;
+	firc_no: string | null;
+	remittance_date: string | null;
+	amount_received: number | null;
+	amount_received_inr: number | null;
+	bank_charges: number | null;
+	conversion_mode: string | null;
+	conversion_rate: number | null;
+	ebrc_number: string | null;
+	ebrc_date: string | null;
+	brc_ref: string | null;
+	oc_received: 0 | 1;
+	remarks: string | null;
+	modified: string;
+	overdue?: boolean;
+}
+
+export interface FinanceWorkspaceData {
+	incentives: IncentiveRow[];
+	realizations: RealizationRow[];
+	kpis: {
+		incentive_total?: number;
+		incentive_pending?: number;
+		realized?: number;
+		overdue_count?: number;
+		open_count?: number;
+	};
+	can: {
+		incentive_read: boolean;
+		realization_read: boolean;
+		incentive_write: boolean;
+		realization_write: boolean;
+	};
+}
+
+export interface ShipmentFinanceData {
+	incentives: IncentiveRow[];
+	realizations: RealizationRow[];
+	can: { incentive_write: boolean; realization_write: boolean };
+}
+
+/** Incentive status → chip tone. */
+export function incentiveTone(s: IncentiveStatus): 'ok' | 'pend' | 'err' {
+	if (s === 'Credited' || s === 'Utilized' || s === 'Scrip Generated') return 'ok';
+	if (s === 'Cancelled' || s === 'Not Applicable') return 'err';
+	return 'pend';
+}
+
+/** Realization status → chip tone (overdue overrides). */
+export function realizationTone(r: RealizationRow): 'ok' | 'pend' | 'err' {
+	if (r.overdue) return 'err';
+	if (r.status === 'Realized' || r.status === 'eBRC Closed') return 'ok';
+	if (r.status === 'Written Off' || r.status === 'Cancelled') return 'err';
+	return 'pend';
+}
 
 // ---- Phase 5: sales / financial dashboard ----
 
@@ -137,6 +270,12 @@ export interface SalesDashboardData {
 		procurement_inr?: number;
 		gross_margin_inr?: number;
 		margin_pct?: number;
+		incentive_inr?: number;
+		incentive_pending_inr?: number;
+		realized_inr?: number;
+		realization_outstanding_inr?: number;
+		realization_overdue?: number;
+		net_margin_inr?: number;
 	};
 	by_customer: { customer: string; value_inr: number; orders: number }[];
 	by_country: { country: string; value_inr: number }[];

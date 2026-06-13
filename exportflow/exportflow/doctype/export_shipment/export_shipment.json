@@ -6,6 +6,7 @@
  "engine": "InnoDB",
  "field_order": [
   "naming_series",
+  "company",
   "customer",
   "customer_name",
   "mode",
@@ -52,6 +53,13 @@
   "notes"
  ],
  "fields": [
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company",
+   "in_standard_filter": 1
+  },
   {
    "default": "SHP-.YY.-.####",
    "fieldname": "naming_series",

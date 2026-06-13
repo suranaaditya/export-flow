@@ -1,0 +1,345 @@
+{
+ "actions": [],
+ "autoname": "naming_series:",
+ "creation": "2026-06-13 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "company",
+  "export_invoice",
+  "cb_rel_head",
+  "shipment",
+  "customer",
+  "status",
+  "section_value",
+  "currency",
+  "invoice_value",
+  "export_date",
+  "cb_rel_value",
+  "due_date",
+  "ad_bank",
+  "section_bank",
+  "fbc_number",
+  "bill_date",
+  "bill_type",
+  "cb_rel_bank",
+  "document_submitted_date",
+  "oc_received",
+  "section_remit",
+  "firc_no",
+  "remittance_date",
+  "amount_received",
+  "amount_received_inr",
+  "bank_charges",
+  "cb_rel_remit",
+  "conversion_mode",
+  "conversion_rate",
+  "fwd_contract_no",
+  "fwd_rate",
+  "section_ebrc",
+  "ebrc_number",
+  "ebrc_date",
+  "cb_rel_ebrc",
+  "brc_ref",
+  "section_rel_notes",
+  "remarks"
+ ],
+ "fields": [
+  {
+   "default": "REL-.YY.-.#####",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "hidden": 1,
+   "label": "Series",
+   "no_copy": 1,
+   "options": "REL-.YY.-.#####",
+   "print_hide": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company"
+  },
+  {
+   "description": "Export commercial invoice this realization closes (e.g. MNGPL-01/25-26)",
+   "fieldname": "export_invoice",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Export Invoice"
+  },
+  {
+   "fieldname": "cb_rel_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "shipment",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Shipment",
+   "options": "Export Shipment",
+   "search_index": 1
+  },
+  {
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "label": "Customer",
+   "options": "Customer"
+  },
+  {
+   "default": "Awaiting Realization",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Lodged with Bank\nAwaiting Realization\nPartially Realized\nRealized\neBRC Closed\nOverdue\nWritten Off\nCancelled",
+   "reqd": 1
+  },
+  {
+   "fieldname": "section_value",
+   "fieldtype": "Section Break",
+   "label": "Invoice & FEMA Clock"
+  },
+  {
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "label": "Currency",
+   "options": "Currency"
+  },
+  {
+   "fieldname": "invoice_value",
+   "fieldtype": "Float",
+   "label": "Invoice Value (FCY)",
+   "precision": "2"
+  },
+  {
+   "description": "Date of export (B/L or AWB date) — starts the FEMA realization clock",
+   "fieldname": "export_date",
+   "fieldtype": "Date",
+   "label": "Export Date"
+  },
+  {
+   "fieldname": "cb_rel_value",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Proceeds must be realized by this date (export + 15 months; 18 for INR-settled). RBI raised it from 9 in late 2025.",
+   "fieldname": "due_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Realization Due"
+  },
+  {
+   "fieldname": "ad_bank",
+   "fieldtype": "Data",
+   "label": "AD Bank"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_bank",
+   "fieldtype": "Section Break",
+   "label": "Documents Lodged"
+  },
+  {
+   "description": "Foreign Bill for Collection / FIBCD reference",
+   "fieldname": "fbc_number",
+   "fieldtype": "Data",
+   "label": "FBC / FIBCD Number"
+  },
+  {
+   "fieldname": "bill_date",
+   "fieldtype": "Date",
+   "label": "Bill Date"
+  },
+  {
+   "default": "Collection",
+   "fieldname": "bill_type",
+   "fieldtype": "Select",
+   "label": "Bill Type",
+   "options": "Collection\nNegotiation\nPurchase\nAdvance"
+  },
+  {
+   "fieldname": "cb_rel_bank",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "document_submitted_date",
+   "fieldtype": "Date",
+   "label": "Documents Submitted to Bank"
+  },
+  {
+   "default": "0",
+   "fieldname": "oc_received",
+   "fieldtype": "Check",
+   "label": "Original / Collection Received"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_remit",
+   "fieldtype": "Section Break",
+   "label": "Inward Remittance"
+  },
+  {
+   "description": "FIRC / Inward Remittance Message (IRM/IRT) reference",
+   "fieldname": "firc_no",
+   "fieldtype": "Data",
+   "label": "FIRC / IRM No"
+  },
+  {
+   "fieldname": "remittance_date",
+   "fieldtype": "Date",
+   "label": "Remittance Date"
+  },
+  {
+   "fieldname": "amount_received",
+   "fieldtype": "Float",
+   "label": "Amount Received (FCY)",
+   "precision": "2"
+  },
+  {
+   "fieldname": "amount_received_inr",
+   "fieldtype": "Currency",
+   "label": "Amount Received (INR)",
+   "options": "Company:company:default_currency"
+  },
+  {
+   "fieldname": "bank_charges",
+   "fieldtype": "Float",
+   "label": "Bank Charges (FCY)",
+   "precision": "2"
+  },
+  {
+   "fieldname": "cb_rel_remit",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Direct",
+   "description": "How the proceeds were converted: forward contract, EEFC retention, packing-credit liquidation, or spot",
+   "fieldname": "conversion_mode",
+   "fieldtype": "Select",
+   "label": "Conversion Mode",
+   "options": "Direct\nForward Contract\nEEFC\nPacking Credit"
+  },
+  {
+   "fieldname": "conversion_rate",
+   "fieldtype": "Float",
+   "label": "Conversion Rate",
+   "precision": "4"
+  },
+  {
+   "depends_on": "eval:doc.conversion_mode=='Forward Contract'",
+   "fieldname": "fwd_contract_no",
+   "fieldtype": "Data",
+   "label": "Forward Contract No"
+  },
+  {
+   "depends_on": "eval:doc.conversion_mode=='Forward Contract'",
+   "fieldname": "fwd_rate",
+   "fieldtype": "Float",
+   "label": "Forward Rate",
+   "precision": "4"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_ebrc",
+   "fieldtype": "Section Break",
+   "label": "eBRC Closure"
+  },
+  {
+   "fieldname": "ebrc_number",
+   "fieldtype": "Data",
+   "label": "eBRC Number"
+  },
+  {
+   "fieldname": "ebrc_date",
+   "fieldtype": "Date",
+   "label": "eBRC Date"
+  },
+  {
+   "fieldname": "cb_rel_ebrc",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "brc_ref",
+   "fieldtype": "Data",
+   "label": "BRC Reference"
+  },
+  {
+   "fieldname": "section_rel_notes",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "remarks",
+   "fieldtype": "Small Text",
+   "label": "Remarks"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-06-13 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ExportFlow",
+ "name": "Export Realization",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Export Admin",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Export Accounts",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Export Operations"
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Export Viewer"
+  }
+ ],
+ "search_fields": "export_invoice,shipment,status,firc_no,ebrc_number",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

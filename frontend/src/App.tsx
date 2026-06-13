@@ -6,6 +6,7 @@ import { ThemeProvider } from '@/lib/theme';
 import { Compliance } from '@/pages/Compliance';
 import { Dashboard } from '@/pages/Dashboard';
 import { Documents } from '@/pages/Documents';
+import { Finance } from '@/pages/Finance';
 import { Sales } from '@/pages/Sales';
 import { LetterOfCreditPage } from '@/pages/LetterOfCreditPage';
 import { NewSalesOrder } from '@/pages/NewSalesOrder';
@@ -63,6 +64,7 @@ export default function App() {
 								<Route path="shipments/new" element={<NewShipment />} />
 								<Route path="shipments/:id" element={<ShipmentDetail />} />
 								<Route path="documents" element={<Documents />} />
+								<Route path="finance" element={<Finance />} />
 								<Route path="compliance" element={<Compliance />} />
 								<Route path="settings" element={<Settings />} />
 							</Route>

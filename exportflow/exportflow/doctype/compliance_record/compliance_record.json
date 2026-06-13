@@ -6,6 +6,7 @@
  "engine": "InnoDB",
  "field_order": [
   "naming_series",
+  "company",
   "compliance_type",
   "title",
   "cb_cr_head",
@@ -29,6 +30,12 @@
    "no_copy": 1,
    "options": "CMP-.YY.-.####",
    "print_hide": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company"
   },
   {
    "fieldname": "compliance_type",

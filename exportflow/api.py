@@ -4,6 +4,8 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt, getdate, nowdate
 
+from exportflow.company import exportflow_company
+
 
 @frappe.whitelist()
 def get_so_money_summary(sales_order: str) -> dict:
@@ -103,7 +105,7 @@ def get_new_so_context() -> dict:
 	"""Everything the in-app deal form needs in one round trip."""
 	frappe.has_permission("Sales Order", "create", throw=True)
 
-	company = frappe.db.get_single_value("Global Defaults", "default_company")
+	company = exportflow_company()
 	company_currency = frappe.db.get_value("Company", company, "default_currency")
 
 	return {
@@ -228,7 +230,7 @@ def get_item_info(item_code: str) -> dict:
 	)
 	if not item:
 		frappe.throw(_("Item {0} not found").format(item_code))
-	company = frappe.db.get_single_value("Global Defaults", "default_company")
+	company = exportflow_company()
 	item["default_supplier"] = frappe.db.get_value(
 		"Item Default", {"parent": item_code, "company": company}, "default_supplier"
 	) or frappe.db.get_value("Item Default", {"parent": item_code}, "default_supplier")
@@ -240,7 +242,7 @@ def get_exchange_rate_to_company(currency: str) -> float:
 	"""Selling exchange rate from the deal currency to the company currency
 	(0 when unavailable — the form keeps the field manual)."""
 	frappe.has_permission("Sales Order", "create", throw=True)
-	company = frappe.db.get_single_value("Global Defaults", "default_company")
+	company = exportflow_company()
 	company_currency = frappe.db.get_value("Company", company, "default_currency")
 	if not currency or currency == company_currency:
 		return 1.0
@@ -276,7 +278,7 @@ def create_export_sales_order(deal) -> dict:
 		if flt(row.get("rate")) <= 0:
 			frappe.throw(_("Row {0}: rate must be greater than zero").format(idx))
 
-	company = frappe.db.get_single_value("Global Defaults", "default_company")
+	company = exportflow_company()
 	company_currency = frappe.db.get_value("Company", company, "default_currency")
 	currency = deal.get("currency") or company_currency
 	conversion_rate = 1.0 if currency == company_currency else flt(deal.get("conversion_rate"))
@@ -377,7 +379,7 @@ def get_so_procurement(sales_order: str) -> dict:
 	frappe.has_permission("Sales Order", "read", doc=sales_order, throw=True)
 	frappe.has_permission("Purchase Order", "read", throw=True)
 
-	company = frappe.db.get_single_value("Global Defaults", "default_company")
+	company = exportflow_company()
 	lines = frappe.get_all(
 		"Sales Order Item",
 		filters={"parent": sales_order, "parenttype": "Sales Order"},
@@ -536,7 +538,7 @@ def create_purchase_order(sales_order: str, selections) -> dict:
 def get_new_po_context() -> dict:
 	"""Everything the standalone PO form needs in one round trip."""
 	frappe.has_permission("Purchase Order", "create", throw=True)
-	company = frappe.db.get_single_value("Global Defaults", "default_company")
+	company = exportflow_company()
 	return {
 		"company": company,
 		"company_currency": frappe.db.get_value("Company", company, "default_currency"),
@@ -694,7 +696,7 @@ def _build_po_doc(podata, validate_remaining: bool = True):
 			}
 		)
 
-	company = frappe.db.get_single_value("Global Defaults", "default_company")
+	company = exportflow_company()
 	return frappe.get_doc(
 		{
 			"doctype": "Purchase Order",
@@ -1004,6 +1006,7 @@ def create_shipment(payload) -> dict:
 	doc = frappe.get_doc(
 		{
 			"doctype": "Export Shipment",
+			"company": exportflow_company(),
 			"customer": payload.get("customer"),
 			"mode": payload.get("mode") or "Sea",
 			"incoterm": payload.get("incoterm") or None,
@@ -1461,8 +1464,14 @@ def get_sales_dashboard() -> dict:
 	breakdowns by customer, destination and month. Computed from the deal data
 	we already hold; incentive/realization sections are layered in once those
 	doctypes exist."""
-	today = getdate(nowdate())
 	out: dict = {"kpis": {}, "by_customer": [], "by_country": [], "by_month": [], "top_products": []}
+	company = exportflow_company()
+
+	def cf(extra=None):
+		f = {"company": company} if company else {}
+		if extra:
+			f.update(extra)
+		return f
 
 	can = {
 		"so": frappe.has_permission("Sales Order", "read"),
@@ -1476,7 +1485,7 @@ def get_sales_dashboard() -> dict:
 	# submitted, non-cancelled sales orders are the export topline
 	sos = frappe.get_all(
 		"Sales Order",
-		filters={"docstatus": 1},
+		filters=cf({"docstatus": 1}),
 		fields=[
 			"name",
 			"customer",
@@ -1529,7 +1538,7 @@ def get_sales_dashboard() -> dict:
 	if can["pfi"]:
 		pfis = frappe.get_all(
 			"Pro Forma Invoice",
-			filters={"docstatus": ["<", 2], "status": ["!=", "Cancelled"]},
+			filters=cf({"docstatus": ["<", 2], "status": ["!=", "Cancelled"]}),
 			fields=["amount", "paid_amount", "conversion_rate", "currency", "status"],
 			limit_page_length=0,
 		)
@@ -1547,7 +1556,7 @@ def get_sales_dashboard() -> dict:
 	if can["po"]:
 		pos = frappe.get_all(
 			"Purchase Order",
-			filters={"docstatus": 1},
+			filters=cf({"docstatus": 1}),
 			fields=["base_grand_total", "grand_total"],
 			limit_page_length=0,
 		)
@@ -1555,6 +1564,44 @@ def get_sales_dashboard() -> dict:
 		out["kpis"]["procurement_inr"] = flt(procurement_inr, 2)
 		out["kpis"]["gross_margin_inr"] = flt(value_inr - procurement_inr, 2)
 		out["kpis"]["margin_pct"] = flt(100 * (value_inr - procurement_inr) / value_inr, 1) if value_inr else 0.0
+
+	# export incentives — RoDTEP scrips + Drawback cash earned vs still pending
+	incentive_inr = 0.0
+	if frappe.has_permission("Export Incentive", "read"):
+		can["incentive"] = True
+		incentives = frappe.get_all(
+			"Export Incentive",
+			filters=cf({"status": ["!=", "Cancelled"]}),
+			fields=["amount", "status"],
+			limit_page_length=0,
+		)
+		incentive_inr = sum(flt(i.amount) for i in incentives)
+		pending = sum(flt(i.amount) for i in incentives if i.status in ("Pending", "Scroll Generated"))
+		out["kpis"]["incentive_inr"] = flt(incentive_inr, 2)
+		out["kpis"]["incentive_pending_inr"] = flt(pending, 2)
+
+	# bank realization — proceeds actually realized + overdue (FEMA 15-month)
+	if frappe.has_permission("Export Realization", "read"):
+		can["realization"] = True
+		rels = frappe.get_all(
+			"Export Realization",
+			filters=cf(),
+			fields=["amount_received_inr", "status", "due_date"],
+			limit_page_length=0,
+		)
+		realized = sum(flt(r.amount_received_inr) for r in rels)
+		closed = ("Realized", "eBRC Closed", "Written Off", "Cancelled")
+		today = getdate(nowdate())
+		overdue = sum(
+			1 for r in rels if r.status not in closed and r.due_date and getdate(r.due_date) < today
+		)
+		out["kpis"]["realized_inr"] = flt(realized, 2)
+		out["kpis"]["realization_outstanding_inr"] = flt(max(0.0, value_inr - realized), 2)
+		out["kpis"]["realization_overdue"] = overdue
+
+	# net margin folds incentives into the gross figure
+	if "gross_margin_inr" in out["kpis"]:
+		out["kpis"]["net_margin_inr"] = flt(out["kpis"]["gross_margin_inr"] + incentive_inr, 2)
 
 	out["by_customer"] = sorted(
 		[{**v, "value_inr": flt(v["value_inr"], 2)} for v in by_customer.values()],
@@ -1580,6 +1627,144 @@ def get_compliance_permissions() -> dict:
 	}
 
 
+# ---------------------------------------------------------------- finance (Phase 6)
+
+INCENTIVE_FIELDS = [
+	"name",
+	"scheme",
+	"shipment",
+	"status",
+	"shipping_bill_no",
+	"shipping_bill_date",
+	"fob_value",
+	"rate_pct",
+	"amount",
+	"scroll_number",
+	"scroll_date",
+	"scrip_number",
+	"scrip_expiry",
+	"drawback_serial",
+	"amount_received",
+	"received_date",
+	"remarks",
+	"modified",
+]
+REALIZATION_FIELDS = [
+	"name",
+	"export_invoice",
+	"shipment",
+	"customer",
+	"status",
+	"currency",
+	"invoice_value",
+	"export_date",
+	"due_date",
+	"ad_bank",
+	"fbc_number",
+	"firc_no",
+	"remittance_date",
+	"amount_received",
+	"amount_received_inr",
+	"bank_charges",
+	"conversion_mode",
+	"conversion_rate",
+	"ebrc_number",
+	"ebrc_date",
+	"brc_ref",
+	"oc_received",
+	"remarks",
+	"modified",
+]
+
+
+def _incentive_realized(row) -> bool:
+	return row.status in ("Scrip Generated", "Credited", "Utilized")
+
+
+@frappe.whitelist()
+def get_finance_workspace() -> dict:
+	"""Incentives + realizations portfolio for the Finance screen, one trip."""
+	company = exportflow_company()
+	cf = {"company": company} if company else {}
+	today = getdate(nowdate())
+
+	can_inc = frappe.has_permission("Export Incentive", "read")
+	can_rel = frappe.has_permission("Export Realization", "read")
+	incentives = (
+		frappe.get_all(
+			"Export Incentive", filters=cf, fields=INCENTIVE_FIELDS, order_by="modified desc",
+			limit_page_length=0,
+		)
+		if can_inc
+		else []
+	)
+	realizations = (
+		frappe.get_all(
+			"Export Realization", filters=cf, fields=REALIZATION_FIELDS, order_by="modified desc",
+			limit_page_length=0,
+		)
+		if can_rel
+		else []
+	)
+	closed = ("Realized", "eBRC Closed", "Written Off", "Cancelled")
+	for r in realizations:
+		r["overdue"] = bool(
+			r.status not in closed and r.due_date and getdate(r.due_date) < today
+		)
+
+	kpis = {}
+	if can_inc:
+		active = [i for i in incentives if i.status != "Cancelled"]
+		kpis["incentive_total"] = flt(sum(flt(i.amount) for i in active), 2)
+		kpis["incentive_pending"] = flt(
+			sum(flt(i.amount) for i in active if not _incentive_realized(i)), 2
+		)
+	if can_rel:
+		kpis["realized"] = flt(sum(flt(r.amount_received_inr) for r in realizations), 2)
+		kpis["overdue_count"] = sum(1 for r in realizations if r["overdue"])
+		kpis["open_count"] = sum(1 for r in realizations if r.status not in closed)
+
+	return {
+		"incentives": incentives,
+		"realizations": realizations,
+		"kpis": kpis,
+		"can": {
+			"incentive_read": can_inc,
+			"realization_read": can_rel,
+			"incentive_write": bool(frappe.has_permission("Export Incentive", "write")),
+			"realization_write": bool(frappe.has_permission("Export Realization", "write")),
+		},
+	}
+
+
+@frappe.whitelist()
+def get_shipment_finance(shipment: str) -> dict:
+	"""Incentives + realizations attached to one shipment (detail card)."""
+	frappe.has_permission("Export Shipment", "read", doc=shipment, throw=True)
+	return {
+		"incentives": frappe.get_all(
+			"Export Incentive",
+			filters={"shipment": shipment},
+			fields=INCENTIVE_FIELDS,
+			order_by="creation asc",
+		)
+		if frappe.has_permission("Export Incentive", "read")
+		else [],
+		"realizations": frappe.get_all(
+			"Export Realization",
+			filters={"shipment": shipment},
+			fields=REALIZATION_FIELDS,
+			order_by="creation asc",
+		)
+		if frappe.has_permission("Export Realization", "read")
+		else [],
+		"can": {
+			"incentive_write": bool(frappe.has_permission("Export Incentive", "create")),
+			"realization_write": bool(frappe.has_permission("Export Realization", "create")),
+		},
+	}
+
+
 @frappe.whitelist()
 def get_dashboard() -> dict:
 	"""Everything the dashboard renders, one round trip (spec §6). Each card
@@ -1587,6 +1772,7 @@ def get_dashboard() -> dict:
 	blocks it may see."""
 	today = getdate(nowdate())
 	out: dict = {"kpis": {}, "shipments": [], "deadlines": [], "documents": [], "pfis": []}
+	company = exportflow_company()
 
 	can = {
 		"shipment": frappe.has_permission("Export Shipment", "read"),
@@ -1597,12 +1783,26 @@ def get_dashboard() -> dict:
 		"compliance": frappe.has_permission("Compliance Record", "read"),
 	}
 
+	# every block is scoped to the ExportFlow company
+	def cf(extra=None):
+		f = {"company": company} if company else {}
+		if extra:
+			f.update(extra)
+		return f
+
+	# all of this company's shipment names — scopes the document feeds too
+	company_shipments = (
+		frappe.get_all("Export Shipment", filters=cf(), pluck="name", limit_page_length=0)
+		if can["shipment"]
+		else []
+	)
+
 	# ---- live shipments table -------------------------------------------
 	live_names: list[str] = []
 	if can["shipment"]:
 		shipments = frappe.get_all(
 			"Export Shipment",
-			filters={"current_milestone": ["!=", "Completed"]},
+			filters=cf({"current_milestone": ["!=", "Completed"]}),
 			fields=[
 				"name",
 				"customer_name",
@@ -1616,7 +1816,7 @@ def get_dashboard() -> dict:
 			limit_page_length=8,
 		)
 		live_names = [s.name for s in shipments]
-		live_count = frappe.db.count("Export Shipment", {"current_milestone": ["!=", "Completed"]})
+		live_count = frappe.db.count("Export Shipment", cf({"current_milestone": ["!=", "Completed"]}))
 
 		milestone_rows = (
 			frappe.db.sql(
@@ -1672,7 +1872,7 @@ def get_dashboard() -> dict:
 			)
 		out["kpis"]["live_shipments"] = live_count
 		out["kpis"]["awaiting_leo"] = frappe.db.count(
-			"Export Shipment", {"current_milestone": "Let Export Order"}
+			"Export Shipment", cf({"current_milestone": "Let Export Order"})
 		)
 		# goods past the export milestone on shipments that are not yet done
 		out["kpis"]["in_transit"] = cint(
@@ -1681,16 +1881,17 @@ def get_dashboard() -> dict:
 				   FROM `tabShipment Milestone` sm
 				   JOIN `tabExport Shipment` es ON es.name = sm.parent
 				   WHERE sm.parenttype = 'Export Shipment' AND sm.completed = 1
-				     AND sm.milestone IN %s AND es.current_milestone != 'Completed'""",
-				(_export_milestones(),),
+				     AND sm.milestone IN %(ms)s AND es.current_milestone != 'Completed'
+				     AND (%(co)s IS NULL OR es.company = %(co)s)""",
+				{"ms": _export_milestones(), "co": company},
 			)[0][0]
 		)
 
-	# ---- documents KPIs + pending feed ----------------------------------
-	if can["doc"]:
+	# ---- documents KPIs + pending feed (scoped to this company's shipments) --
+	if can["doc"] and company_shipments:
 		open_docs = frappe.get_all(
 			"Document Instance",
-			filters={"status": ["in", ("Pending", "Drafted")]},
+			filters={"status": ["in", ("Pending", "Drafted")], "shipment": ["in", company_shipments]},
 			fields=[
 				"name",
 				"document_type",
@@ -1735,7 +1936,7 @@ def get_dashboard() -> dict:
 
 		for lc in frappe.get_all(
 			"Letter of Credit",
-			filters={"status": ["in", OPEN_STATUSES]},
+			filters=cf({"status": ["in", OPEN_STATUSES]}),
 			fields=["name", "lc_number", "customer_name", "latest_shipment_date", "expiry_date"],
 			limit_page_length=0,
 		):
@@ -1765,11 +1966,13 @@ def get_dashboard() -> dict:
 		# bounded: only POs whose window closes within the feed horizon
 		for po in frappe.get_all(
 			"Purchase Order",
-			filters={
-				"docstatus": 1,
-				"merchant_export_scheme": 1,
-				"gst_export_deadline": ["<=", frappe.utils.add_days(today, 30)],
-			},
+			filters=cf(
+				{
+					"docstatus": 1,
+					"merchant_export_scheme": 1,
+					"gst_export_deadline": ["<=", frappe.utils.add_days(today, 30)],
+				}
+			),
 			fields=["name", "supplier_name", "gst_export_deadline"],
 			limit_page_length=0,
 		):
@@ -1789,7 +1992,7 @@ def get_dashboard() -> dict:
 	if can["compliance"]:
 		for rec in frappe.get_all(
 			"Compliance Record",
-			filters={"status": "Active", "expiry_date": ["is", "set"]},
+			filters=cf({"status": "Active", "expiry_date": ["is", "set"]}),
 			fields=["name", "compliance_type", "title", "expiry_date"],
 			limit_page_length=0,
 		):
@@ -1818,7 +2021,7 @@ def get_dashboard() -> dict:
 	if can["pfi"]:
 		open_pfis = frappe.get_all(
 			"Pro Forma Invoice",
-			filters={"status": ["in", ("Sent", "Partially Paid")]},
+			filters=cf({"status": ["in", ("Sent", "Partially Paid")]}),
 			fields=[
 				"name",
 				"customer",

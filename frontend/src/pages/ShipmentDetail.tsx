@@ -7,14 +7,17 @@ import { Card, CHead, EmptyMsg, Facts, LRow, Modal, Tag } from '@/components/ui'
 import { CheckInput, Field, TextArea, TextInput } from '@/components/form';
 import {
 	API,
+	incentiveTone,
 	lcIsOpen,
 	lcTone,
 	parseServerError,
+	realizationTone,
 	urgencyLabel,
 	urgencyTone,
 	type ShipmentDetailData,
+	type ShipmentFinanceData,
 } from '@/lib/api';
-import { daysUntil, fmtDate } from '@/lib/format';
+import { daysUntil, fmtDate, fmtMoney } from '@/lib/format';
 
 type ShipmentDoc = ShipmentDetailData['shipment'];
 
@@ -354,6 +357,8 @@ export function ShipmentDetail() {
 							/>
 						)}
 					</Card>
+
+					<ShipmentFinanceCard shipment={id} />
 				</div>
 			</div>
 
@@ -373,6 +378,55 @@ export function ShipmentDetail() {
 				<b>ExportFlow</b> · DUX Digitech
 			</footer>
 		</main>
+	);
+}
+
+/** Incentives + realization attached to this shipment (read-only summary;
+ *  full editing lives on the Finance screen). */
+function ShipmentFinanceCard({ shipment }: { shipment: string }) {
+	const { data } = useFrappeGetCall<{ message: ShipmentFinanceData }>(API.shipmentFinance, {
+		shipment,
+	});
+	const fin = data?.message;
+	if (!fin || (fin.incentives.length === 0 && fin.realizations.length === 0)) return null;
+
+	return (
+		<Card>
+			<CHead
+				icon="banknote"
+				title="Incentives & realization"
+				action={
+					<Link to="/finance" style={{ fontSize: '12.5px', color: 'var(--iris)', textDecoration: 'none', fontWeight: 500 }}>
+						Open finance
+					</Link>
+				}
+			/>
+			{fin.incentives.map((i) => (
+				<LRow
+					key={i.name}
+					icon="shield"
+					t1={<span>{i.scheme}</span>}
+					t2={i.scrip_number || i.scroll_number || i.drawback_serial || 'claim'}
+					right={
+						<span style={{ textAlign: 'right' }}>
+							<span className="num" style={{ display: 'block' }}>
+								{i.amount != null ? fmtMoney(i.amount, 'INR') : '—'}
+							</span>
+							<Tag tone={incentiveTone(i.status)}>{i.status}</Tag>
+						</span>
+					}
+				/>
+			))}
+			{fin.realizations.map((r) => (
+				<LRow
+					key={r.name}
+					icon="calendar"
+					t1={<span className="data">{r.export_invoice ?? r.name}</span>}
+					t2={r.due_date ? `due ${fmtDate(r.due_date)}` : 'realization'}
+					right={<Tag tone={realizationTone(r)}>{r.overdue ? 'Overdue' : r.status}</Tag>}
+				/>
+			))}
+		</Card>
 	);
 }
 

@@ -4,6 +4,8 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
+  "section_company",
+  "company",
   "section_exporter",
   "iec_number",
   "gstin",
@@ -23,6 +25,18 @@
   "email_digest_enabled"
  ],
  "fields": [
+  {
+   "fieldname": "section_company",
+   "fieldtype": "Section Break",
+   "label": "Company"
+  },
+  {
+   "description": "The company ExportFlow operates under. Leave blank to use the site default company.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "ExportFlow Company",
+   "options": "Company"
+  },
   {
    "description": "Printed on every export document (§5.2)",
    "fieldname": "section_exporter",

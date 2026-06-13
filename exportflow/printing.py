@@ -12,6 +12,8 @@ import frappe
 from frappe import _
 from frappe.utils import flt
 
+from exportflow.company import exportflow_company
+
 
 def _address_display(party_type: str, party: str) -> str | None:
 	try:
@@ -38,7 +40,7 @@ def document_print_context(name: str):
 	shipment = frappe.get_doc("Export Shipment", inst.shipment)
 	settings = frappe.get_single("ExportFlow Settings")
 
-	company = frappe.db.get_single_value("Global Defaults", "default_company")
+	company = exportflow_company()
 	company_name = frappe.db.get_value("Company", company, "company_name") or company
 
 	customer_name = shipment.customer_name or shipment.customer

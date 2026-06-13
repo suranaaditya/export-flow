@@ -11,6 +11,7 @@ const NAV_ITEMS: { to: string; label: string; icon: IconName }[] = [
 	{ to: '/purchases', label: 'Purchases', icon: 'cube' },
 	{ to: '/shipments', label: 'Shipments', icon: 'ship' },
 	{ to: '/documents', label: 'Documents', icon: 'copy' },
+	{ to: '/finance', label: 'Finance', icon: 'banknote' },
 	{ to: '/compliance', label: 'Compliance', icon: 'shield-check' },
 ];
 

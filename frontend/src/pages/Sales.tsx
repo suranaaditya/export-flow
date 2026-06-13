@@ -171,6 +171,45 @@ export function Sales() {
 				/>
 			</div>
 
+			{(kpis.incentive_inr !== undefined || kpis.realized_inr !== undefined) && (
+				<div className="kpis">
+					<Kpi
+						icon="shield"
+						label="Incentives earned"
+						value={inr(kpis.incentive_inr)}
+						detail={
+							kpis.incentive_pending_inr ? `${inr(kpis.incentive_pending_inr)} pending` : 'RoDTEP + drawback'
+						}
+						tone={kpis.incentive_pending_inr && kpis.incentive_pending_inr > 0 ? 'warn' : undefined}
+					/>
+					<Kpi
+						icon="banknote"
+						label="Proceeds realized"
+						value={inr(kpis.realized_inr)}
+						detail={
+							kpis.realization_outstanding_inr !== undefined
+								? `${inr(kpis.realization_outstanding_inr)} outstanding`
+								: 'eBRC closure'
+						}
+						tone={kpis.realization_outstanding_inr && kpis.realization_outstanding_inr > 0 ? 'warn' : undefined}
+					/>
+					<Kpi
+						icon="warning"
+						label="Realization overdue"
+						value={String(kpis.realization_overdue ?? 0)}
+						detail="past the FEMA window"
+						tone={kpis.realization_overdue && kpis.realization_overdue > 0 ? 'bad' : undefined}
+					/>
+					<Kpi
+						icon="rupee"
+						label="Net margin"
+						value={inr(kpis.net_margin_inr)}
+						detail="incl. incentives"
+						tone={kpis.net_margin_inr !== undefined && kpis.net_margin_inr < 0 ? 'bad' : undefined}
+					/>
+				</div>
+			)}
+
 			<div className="grid">
 				<div className="stack">
 					<Card accent>

@@ -42,6 +42,10 @@ def milestones_for(mode: str) -> list[str]:
 
 class ExportShipment(Document):
 	def validate(self):
+		if not self.company:
+			from exportflow.company import exportflow_company
+
+			self.company = exportflow_company()
 		self.seed_milestones()
 		self.validate_items()
 		self.validate_lc()

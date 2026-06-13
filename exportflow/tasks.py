@@ -9,6 +9,9 @@ GST_ALERT_DAYS = {30, 14, 7, 3}
 DOC_DUE_ALERT_DAYS = {7, 3, 1}
 # Compliance register renewals (spec §3.2)
 COMPLIANCE_ALERT_DAYS = {60, 30, 7}
+# bank realization (FEMA window) and RoDTEP scrip expiry
+REALIZATION_ALERT_DAYS = {30, 7}
+SCRIP_EXPIRY_ALERT_DAYS = {60, 30, 7}
 
 
 def daily():
@@ -17,6 +20,8 @@ def daily():
 	alerts += send_gst_alerts()
 	alerts += send_document_due_alerts()
 	alerts += send_compliance_alerts()
+	alerts += send_realization_alerts()
+	alerts += send_scrip_expiry_alerts()
 	send_email_digest(alerts)
 
 
@@ -300,6 +305,67 @@ def _alerts_for_lc(lc_name: str, today) -> list[dict]:
 			)
 			alerts.append({"lc": lc.name, "label": label, "days_left": days_left, "subject": subject})
 			notify_export_users(subject, body, "Letter of Credit", lc.name)
+
+	return alerts
+
+
+def send_realization_alerts(today=None) -> list[dict]:
+	"""FEMA realization clock: alert at 30/7 days before the due date and
+	daily once overdue, until proceeds are realized + eBRC closed."""
+	today = getdate(today or nowdate())
+	closed = ("Realized", "eBRC Closed", "Written Off", "Cancelled")
+	alerts = []
+
+	for r in frappe.get_all(
+		"Export Realization",
+		filters={"status": ["not in", closed], "due_date": ["is", "set"]},
+		fields=["name", "export_invoice", "customer", "due_date", "status"],
+	):
+		try:
+			days_left = (getdate(r.due_date) - today).days
+			if days_left in REALIZATION_ALERT_DAYS or days_left <= 0:
+				inv = r.export_invoice or r.name
+				subject = f"Export proceeds: {inv} realization due {_when(days_left)}"
+				body = (
+					f"Realization {r.name} ({inv}{', ' + r.customer if r.customer else ''}) is due on "
+					f"{r.due_date} and is {r.status}. Realize + self-certify the eBRC before the FEMA "
+					f"window closes — unrealized proceeds risk RoDTEP/Drawback clawback with interest."
+				)
+				alerts.append({"realization": r.name, "days_left": days_left, "subject": subject})
+				notify_export_users(subject, body, "Export Realization", r.name)
+		except Exception:
+			frappe.log_error(title=f"Realization alert failed: {r.name}", message=frappe.get_traceback())
+
+	return alerts
+
+
+def send_scrip_expiry_alerts(today=None) -> list[dict]:
+	"""RoDTEP e-scrips are valid 2 years; alert at 60/30/7 days before expiry
+	for scrips not yet fully utilized."""
+	today = getdate(today or nowdate())
+	alerts = []
+
+	for inc in frappe.get_all(
+		"Export Incentive",
+		filters={
+			"scheme": "RoDTEP",
+			"status": ["in", ("Scrip Generated", "Credited")],
+			"scrip_expiry": ["is", "set"],
+		},
+		fields=["name", "scrip_number", "scrip_expiry", "amount"],
+	):
+		try:
+			days_left = (getdate(inc.scrip_expiry) - today).days
+			if days_left in SCRIP_EXPIRY_ALERT_DAYS or (days_left <= 0 and days_left > -2):
+				subject = f"RoDTEP scrip {inc.scrip_number or inc.name} expires {_when(days_left)}"
+				body = (
+					f"RoDTEP scrip {inc.scrip_number or inc.name} expires on {inc.scrip_expiry}. "
+					f"Utilize or transfer it before expiry or the credit is lost."
+				)
+				alerts.append({"incentive": inc.name, "days_left": days_left, "subject": subject})
+				notify_export_users(subject, body, "Export Incentive", inc.name)
+		except Exception:
+			frappe.log_error(title=f"Scrip expiry alert failed: {inc.name}", message=frappe.get_traceback())
 
 	return alerts
 

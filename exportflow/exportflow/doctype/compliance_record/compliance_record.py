@@ -9,6 +9,10 @@ from frappe.utils import getdate
 
 class ComplianceRecord(Document):
 	def validate(self):
+		if not self.company:
+			from exportflow.company import exportflow_company
+
+			self.company = exportflow_company()
 		if self.compliance_type == "AD Code" and not self.port:
 			frappe.throw(_("AD codes are registered per port — pick the port"))
 		if self.compliance_type != "AD Code":

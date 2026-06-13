@@ -1,0 +1,406 @@
+"""Import MN Globex's historical MIS export sheet into ExportFlow.
+
+Reads the cleaned JSON produced by scripts_mis_clean.py and creates, under the
+ExportFlow company: masters (customers / items / suppliers / ports / CHAs),
+submitted Sales Orders, Export Shipments, Export Incentives (RoDTEP + Drawback)
+and Export Realizations. Idempotent at group granularity — a group whose export
+invoice already has a realization is skipped, so re-running never duplicates.
+
+Run on the server:
+    bench --site <site> execute exportflow.mis_import.run \\
+        --kwargs "{'path': '/tmp/mis_clean.json', 'company': 'MN Globex', 'dry_run': True}"
+"""
+
+import json
+
+import frappe
+from frappe.utils import add_days, flt
+
+USD_FALLBACK_RATE = 85.0  # FY25-26 ballpark when the sheet leaves the $ rate blank
+GENERIC = {"third country", "na", "nil", "cancelled", "-"}
+
+
+def _is_generic(v) -> bool:
+	return not v or str(v).strip().lower() in GENERIC
+
+
+# ---------------------------------------------------------------- masters
+
+def _suppress_gst_company_fixtures():
+	"""india_compliance builds GST tax templates on Company on_update that
+	reference this site's pre-configured GST accounts — that fails for a fresh
+	company and would touch the shared site's GST config. ExportFlow uses no
+	GST on imported orders, so no-op those hooks just for the creation."""
+	patched = []
+	for mod in (
+		"india_compliance.gst_india.overrides.company",
+		"india_compliance.income_tax_india.overrides.company",
+	):
+		try:
+			m = frappe.get_module(mod)
+			if hasattr(m, "make_company_fixtures"):
+				patched.append((m, m.make_company_fixtures))
+				m.make_company_fixtures = lambda *a, **k: None
+		except Exception:
+			pass
+	return patched
+
+
+def ensure_company(name: str) -> str:
+	if frappe.db.exists("Company", name):
+		return name
+	patched = _suppress_gst_company_fixtures()
+	try:
+		frappe.get_doc(
+			{
+				"doctype": "Company",
+				"company_name": name,
+				"abbr": "MNG",
+				"default_currency": "INR",
+				"country": "India",
+			}
+		).insert(ignore_permissions=True)
+	finally:
+		for m, fn in patched:
+			m.make_company_fixtures = fn
+	return name
+
+
+def ensure_uom(uom: str) -> str:
+	uom = uom or "Kg"
+	if not frappe.db.exists("UOM", uom):
+		frappe.get_doc({"doctype": "UOM", "uom_name": uom}).insert(ignore_permissions=True)
+	return uom
+
+
+def ensure_customer(name: str, country: str | None) -> str:
+	existing = frappe.db.exists("Customer", {"customer_name": name})
+	if existing:
+		return existing
+	doc = frappe.get_doc(
+		{
+			"doctype": "Customer",
+			"customer_name": name,
+			"customer_type": "Company",
+			"customer_group": frappe.db.get_value("Customer Group", {"is_group": 0}, "name"),
+			"territory": frappe.db.get_value("Territory", {"is_group": 0}, "name"),
+			"default_currency": "USD",
+			"destination_country": country if country and frappe.db.exists("Country", country) else None,
+		}
+	).insert(ignore_permissions=True)
+	return doc.name
+
+
+def ensure_supplier(name: str) -> str:
+	existing = frappe.db.exists("Supplier", {"supplier_name": name})
+	if existing:
+		return existing
+	doc = frappe.get_doc(
+		{
+			"doctype": "Supplier",
+			"supplier_name": name,
+			"supplier_group": frappe.db.get_value("Supplier Group", {}, "name"),
+		}
+	).insert(ignore_permissions=True)
+	return doc.name
+
+
+def ensure_tariff(hs_code: str | None) -> str | None:
+	"""customs_tariff_number is an india_compliance link — create the HS record
+	if it doesn't exist, but never let it break the import (best-effort)."""
+	if not hs_code or not frappe.db.exists("DocType", "Customs Tariff Number"):
+		return None
+	if frappe.db.exists("Customs Tariff Number", hs_code):
+		return hs_code
+	frappe.db.savepoint("tariff")
+	try:
+		frappe.get_doc(
+			{"doctype": "Customs Tariff Number", "tariff_number": hs_code}
+		).insert(ignore_permissions=True)
+		return hs_code
+	except Exception:
+		frappe.db.rollback(save_point="tariff")
+		return None
+
+
+def ensure_item(product: str, hs_code: str | None, uom: str) -> str:
+	existing = frappe.db.exists("Item", {"item_name": product})
+	if existing:
+		return existing
+	code = product[:140]
+	doc = frappe.get_doc(
+		{
+			"doctype": "Item",
+			"item_code": code,
+			"item_name": product,
+			"item_group": frappe.db.get_value("Item Group", {"is_group": 0}, "name"),
+			"stock_uom": ensure_uom(uom),
+			"is_stock_item": 0,
+			"is_sales_item": 1,
+			"is_purchase_item": 1,
+			"customs_tariff_number": ensure_tariff(hs_code),
+		}
+	).insert(ignore_permissions=True)
+	return doc.name
+
+
+def ensure_port(name: str, mode: str) -> str | None:
+	if _is_generic(name):
+		return None
+	if frappe.db.exists("Port", name):
+		return name
+	frappe.get_doc(
+		{
+			"doctype": "Port",
+			"port_name": name,
+			"mode": "Air" if mode == "Air" else "Sea",
+		}
+	).insert(ignore_permissions=True)
+	return name
+
+
+def ensure_cha(name: str) -> str | None:
+	if _is_generic(name):
+		return None
+	existing = frappe.db.exists("CHA", {"cha_name": name})
+	if existing:
+		return existing
+	return frappe.get_doc({"doctype": "CHA", "cha_name": name}).insert(ignore_permissions=True).name
+
+
+# ---------------------------------------------------------------- per group
+
+def _mode(group) -> str:
+	raw = (group.get("mode_raw") or "").lower()
+	return "Air" if "air" in raw else "Sea"
+
+
+def _currency_rate(group) -> tuple[str, float]:
+	rate = group.get("dollar_rate")
+	if rate and rate < 2:
+		return "INR", 1.0
+	return "USD", flt(rate) or USD_FALLBACK_RATE
+
+
+def import_group(group: dict, company: str) -> dict:
+	inv = group.get("export_invoice") or group.get("buyer_po_no")
+	if not inv:
+		return {"invoice": None, "status": "skipped", "reason": "no invoice/PO key"}
+	if frappe.db.exists("Export Realization", {"export_invoice": inv, "company": company}):
+		return {"invoice": inv, "status": "exists"}
+
+	currency, rate = _currency_rate(group)
+	customer = ensure_customer(group["buyer"], group.get("country"))
+	mode = _mode(group)
+
+	# --- sales order ---
+	txn_date = group.get("shipping_bill_date") or group.get("bl_date") or "2025-04-01"
+	so_items = []
+	for it in group["items"]:
+		if not (it.get("qty") and it.get("rate")):
+			continue
+		item_code = ensure_item(it["product"], it.get("hs_code"), it.get("uom") or "Kg")
+		so_items.append(
+			{
+				"item_code": item_code,
+				"qty": flt(it["qty"]),
+				"rate": flt(it["rate"]),
+				"uom": ensure_uom(it.get("uom") or "Kg"),
+				"conversion_factor": 1,
+				"delivery_date": add_days(txn_date, 15),
+			}
+		)
+	if not so_items:
+		return {"invoice": inv, "status": "skipped", "reason": "no priced item lines"}
+
+	so = frappe.get_doc(
+		{
+			"doctype": "Sales Order",
+			"company": company,
+			"customer": customer,
+			"order_type": "Sales",
+			"transaction_date": txn_date,
+			"delivery_date": add_days(txn_date, 15),
+			"currency": currency,
+			"conversion_rate": rate,
+			"po_no": group.get("buyer_po_no"),
+			"items": so_items,
+		}
+	)
+	so.insert(ignore_permissions=True)
+	so.submit()
+
+	# --- shipment (lines mapped to the SO rows we just created) ---
+	pol = ensure_port(group.get("port_of_loading"), mode)
+	pod = ensure_port(group.get("pod"), mode)
+	cha = ensure_cha(group.get("cha"))
+
+	ship_items = []
+	for row, it in zip(so.items, [i for i in group["items"] if i.get("qty") and i.get("rate")]):
+		ship_items.append(
+			{
+				"item_code": row.item_code,
+				"qty": row.qty,
+				"uom": row.uom,
+				"sales_order": so.name,
+				"so_detail": row.name,
+			}
+		)
+	shipment = frappe.get_doc(
+		{
+			"doctype": "Export Shipment",
+			"company": company,
+			"customer": customer,
+			"mode": mode,
+			"port_of_loading": pol,
+			"port_of_discharge": pod,
+			"final_destination": group.get("country") or group.get("pod"),
+			"cha": cha,
+			"shipping_bill_number": group.get("shipping_bill_no"),
+			"shipping_bill_date": group.get("shipping_bill_date"),
+			"egm_number": group.get("egm_no"),
+			"egm_date": group.get("egm_date"),
+			"bl_number": group.get("bl_no"),
+			"bl_date": group.get("bl_date"),
+			"items": ship_items,
+		}
+	)
+	shipment.insert(ignore_permissions=True)
+
+	# --- procurement (best-effort: only where the sheet priced the supplier) ---
+	if group.get("supplier_name"):
+		supplier = ensure_supplier(group["supplier_name"])
+		po_items = [
+			{
+				"item_code": ensure_item(it["product"], it.get("hs_code"), it.get("uom") or "Kg"),
+				"qty": flt(it["qty"]),
+				"rate": flt(it["supplier_rate"]),
+				"uom": ensure_uom(it.get("uom") or "Kg"),
+				"schedule_date": add_days(txn_date, 7),
+			}
+			for it in group["items"]
+			if it.get("qty") and it.get("supplier_rate")
+		]
+		if po_items:
+			# savepoint so a PO failure undoes only the PO, not the SO/shipment
+			frappe.db.savepoint("po")
+			try:
+				po = frappe.get_doc(
+					{
+						"doctype": "Purchase Order",
+						"company": company,
+						"supplier": supplier,
+						"transaction_date": txn_date,
+						"schedule_date": add_days(txn_date, 7),
+						"currency": currency,
+						"conversion_rate": rate,
+						"items": po_items,
+					}
+				)
+				po.insert(ignore_permissions=True)
+				po.submit()
+			except Exception:
+				# procurement is supplementary — never fail the export import on it
+				frappe.db.rollback(save_point="po")
+
+	# --- incentives ---
+	if group.get("rodtep_amt") or group.get("rodtep_pct"):
+		frappe.get_doc(
+			{
+				"doctype": "Export Incentive",
+				"company": company,
+				"scheme": "RoDTEP",
+				"shipment": shipment.name,
+				"status": "Scroll Generated" if group.get("rodtep_scroll") else "Pending",
+				"fob_value": group.get("fob_value_inr"),
+				"rate_pct": group.get("rodtep_pct"),
+				"amount": group.get("rodtep_amt"),
+				"scroll_number": group.get("rodtep_scroll"),
+			}
+		).insert(ignore_permissions=True)
+	if group.get("dbk_amt") or group.get("dbk_pct"):
+		frappe.get_doc(
+			{
+				"doctype": "Export Incentive",
+				"company": company,
+				"scheme": "Duty Drawback",
+				"shipment": shipment.name,
+				"status": "Credited" if group.get("dbk_received") else "Pending",
+				"rate_pct": group.get("dbk_pct"),
+				"amount": group.get("dbk_amt"),
+				"drawback_serial": group.get("dbk_book"),
+				"amount_received": group.get("dbk_received"),
+			}
+		).insert(ignore_permissions=True)
+
+	# --- realization (also the idempotency marker for this group) ---
+	received = flt(group.get("amount_received"))
+	frappe.get_doc(
+		{
+			"doctype": "Export Realization",
+			"company": company,
+			"export_invoice": inv,
+			"shipment": shipment.name,
+			"customer": customer,
+			"status": "Realized" if received else "Awaiting Realization",
+			"currency": currency,
+			"invoice_value": sum(flt(i.get("amount")) for i in group["items"] if i.get("amount")),
+			"ad_bank": group.get("bank"),
+			"fbc_number": group.get("fbc_no"),
+			"firc_no": group.get("irm_no"),
+			"document_submitted_date": group.get("doc_submit_date"),
+			"remittance_date": group.get("pay_received_date"),
+			"amount_received": received,
+			"amount_received_inr": flt(received * rate, 2),
+			"bank_charges": group.get("bank_charges"),
+			"oc_received": 1 if (group.get("oc_received") or "").upper().startswith("RECEIV") else 0,
+		}
+	).insert(ignore_permissions=True)
+
+	return {"invoice": inv, "status": "imported", "so": so.name, "shipment": shipment.name}
+
+
+# ---------------------------------------------------------------- entry point
+
+def run(path: str, company: str = "MN Globex", dry_run: int = 1, set_default: int = 0) -> dict:
+	"""Import the cleaned MIS JSON. dry_run rolls everything back after
+	validating against the real controllers. set_default points ExportFlow
+	Settings at the company (real runs only)."""
+	dry_run = int(dry_run)
+	with open(path) as f:
+		groups = json.load(f)
+
+	company = ensure_company(company)
+	# several export invoices legitimately share one buyer PO number — allow it
+	frappe.db.set_single_value("Selling Settings", "allow_against_multiple_purchase_orders", 1)
+	results = {"imported": 0, "exists": 0, "skipped": 0, "errors": [], "company": company}
+
+	for group in groups:
+		inv = group.get("export_invoice") or group.get("buyer_po_no")
+		# per-group savepoint: a bad group rolls back only itself, never the
+		# company or the groups already imported
+		frappe.db.savepoint("grp")
+		try:
+			r = import_group(group, company)
+			if r["status"] == "imported":
+				results["imported"] += 1
+			elif r["status"] == "exists":
+				results["exists"] += 1
+			else:
+				results["skipped"] += 1
+			# commit per group on a real run so one bad row doesn't lose the rest
+			if not dry_run:
+				frappe.db.commit()
+		except Exception as e:
+			frappe.db.rollback(save_point="grp")
+			results["errors"].append({"invoice": inv, "error": str(e)[:300]})
+
+	if dry_run:
+		frappe.db.rollback()
+	elif int(set_default):
+		frappe.db.set_single_value("ExportFlow Settings", "company", company)
+		frappe.db.commit()
+
+	results["mode"] = "dry-run (rolled back)" if dry_run else "committed"
+	frappe.logger().info(f"MIS import: {results}")
+	return results

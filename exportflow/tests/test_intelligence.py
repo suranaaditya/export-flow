@@ -1,5 +1,5 @@
 import frappe
-from frappe.utils import add_days, nowdate
+from frappe.utils import add_days, add_months, flt, getdate, nowdate
 
 try:
 	from frappe.tests import IntegrationTestCase
@@ -15,7 +15,13 @@ from exportflow.api import (
 	submit_purchase_order,
 	update_document_instance,
 )
-from exportflow.api import create_purchase_order_draft, create_shipment, get_sales_dashboard
+from exportflow.api import (
+	create_purchase_order_draft,
+	create_shipment,
+	get_finance_workspace,
+	get_sales_dashboard,
+	get_shipment_finance,
+)
 from exportflow.setup import seed_checklist_rules, seed_document_types
 from exportflow.tasks import (
 	send_compliance_alerts,
@@ -379,6 +385,86 @@ class TestIntelligence(IntegrationTestCase):
 		self.assertEqual(d["documents"], [])
 		self.assertEqual(d["pfis"], [])
 		self.assertFalse(any(d["can"].values()))
+
+	# ---------------------------------------------------------------- finance
+
+	def make_incentive(self, shipment, scheme="RoDTEP", **kw):
+		return frappe.get_doc(
+			{
+				"doctype": "Export Incentive",
+				"scheme": scheme,
+				"shipment": shipment,
+				"status": kw.get("status", "Pending"),
+				"fob_value": kw.get("fob_value"),
+				"rate_pct": kw.get("rate_pct"),
+				"amount": kw.get("amount"),
+				"scrip_date": kw.get("scrip_date"),
+			}
+		).insert(ignore_permissions=True)
+
+	def test_incentive_amount_and_scrip_expiry(self):
+		so, customer, _s = self.make_deal()
+		shp = self.make_shipment(so, customer)
+		inc = self.make_incentive(shp, fob_value=100000, rate_pct=1.5)
+		self.assertEqual(inc.amount, 1500.0, "amount = FOB × applied rate")
+
+		inc2 = self.make_incentive(
+			shp, status="Scrip Generated", amount=500, scrip_date=nowdate()
+		)
+		self.assertEqual(
+			getdate(inc2.scrip_expiry), getdate(add_months(nowdate(), 24)), "scrip valid 2 years"
+		)
+
+	def test_realization_due_date_and_overdue(self):
+		so, customer, _s = self.make_deal()
+		shp = self.make_shipment(so, customer)
+		# 500 days back so export + 15 months is safely in the past
+		frappe.db.set_value("Export Shipment", shp, "bl_date", add_days(nowdate(), -500))
+		rel = frappe.get_doc(
+			{
+				"doctype": "Export Realization",
+				"export_invoice": "MNG-TEST-1",
+				"shipment": shp,
+				"status": "Awaiting Realization",
+				"currency": "USD",
+				"invoice_value": 1000,
+			}
+		).insert(ignore_permissions=True)
+		# export date pulled from B/L; due = +15 months
+		self.assertEqual(getdate(rel.due_date), getdate(add_months(add_days(nowdate(), -500), 15)))
+		self.assertTrue(rel.is_overdue(), "past the FEMA window with no realization")
+
+	def test_finance_workspace_and_dashboard(self):
+		so, customer, supplier = self.make_deal(qty=10)
+		shp = self.make_shipment(so, customer)
+		self.make_incentive(shp, amount=2000, status="Scrip Generated")
+		self.make_incentive(shp, scheme="Duty Drawback", amount=500, status="Pending")
+
+		# the workspace is company-scoped (other tests share the company on this
+		# non-isolated test site) — assert against this shipment's own slice
+		per = get_shipment_finance(shp)
+		self.assertEqual(len(per["incentives"]), 2)
+		mine = sum(flt(i["amount"]) for i in per["incentives"])
+		self.assertEqual(mine, 2500.0)
+
+		ws = get_finance_workspace()
+		self.assertGreaterEqual(ws["kpis"]["incentive_total"], 2500.0)
+		self.assertTrue(any(i["shipment"] == shp for i in ws["incentives"]))
+
+		d = get_sales_dashboard()
+		self.assertGreaterEqual(d["kpis"]["incentive_inr"], 2500.0)
+		self.assertIn("net_margin_inr", d["kpis"])
+
+	def test_finance_company_scoped(self):
+		"""Incentives carry the shipment's company; the workspace is scoped to
+		the ExportFlow company (falls back to site default on the test site)."""
+		so, customer, _s = self.make_deal()
+		shp = self.make_shipment(so, customer)
+		inc = self.make_incentive(shp, amount=100)
+		self.assertEqual(
+			frappe.db.get_value("Export Incentive", inc.name, "company"),
+			frappe.db.get_value("Export Shipment", shp, "company"),
+		)
 
 	def test_sales_dashboard(self):
 		so, customer, supplier = self.make_deal(qty=10)
