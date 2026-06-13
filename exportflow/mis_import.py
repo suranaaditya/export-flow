@@ -267,9 +267,16 @@ def import_group(group: dict, company: str) -> dict:
 	)
 	shipment.insert(ignore_permissions=True)
 
-	# --- procurement (best-effort: only where the sheet priced the supplier) ---
-	if group.get("supplier_name"):
-		supplier = ensure_supplier(group["supplier_name"])
+	# --- procurement (best-effort) — one PO per ACTUAL supplier of each line ---
+	buckets: dict[str, list] = {}
+	for it in group["items"]:
+		if not (it.get("qty") and it.get("supplier_rate")):
+			continue
+		sup_name = it.get("supplier_name") or group.get("supplier_name")
+		if sup_name:
+			buckets.setdefault(sup_name, []).append(it)
+	for sup_name, items in buckets.items():
+		supplier = ensure_supplier(sup_name)
 		po_items = [
 			{
 				"item_code": ensure_item(it["product"], it.get("hs_code"), it.get("uom") or "Kg"),
@@ -278,30 +285,28 @@ def import_group(group: dict, company: str) -> dict:
 				"uom": ensure_uom(it.get("uom") or "Kg"),
 				"schedule_date": add_days(txn_date, 7),
 			}
-			for it in group["items"]
-			if it.get("qty") and it.get("supplier_rate")
+			for it in items
 		]
-		if po_items:
-			# savepoint so a PO failure undoes only the PO, not the SO/shipment
-			frappe.db.savepoint("po")
-			try:
-				po = frappe.get_doc(
-					{
-						"doctype": "Purchase Order",
-						"company": company,
-						"supplier": supplier,
-						"transaction_date": txn_date,
-						"schedule_date": add_days(txn_date, 7),
-						"currency": currency,
-						"conversion_rate": rate,
-						"items": po_items,
-					}
-				)
-				po.insert(ignore_permissions=True)
-				po.submit()
-			except Exception:
-				# procurement is supplementary — never fail the export import on it
-				frappe.db.rollback(save_point="po")
+		# savepoint so one supplier's PO failure undoes only that PO
+		frappe.db.savepoint("po")
+		try:
+			po = frappe.get_doc(
+				{
+					"doctype": "Purchase Order",
+					"company": company,
+					"supplier": supplier,
+					"transaction_date": txn_date,
+					"schedule_date": add_days(txn_date, 7),
+					"currency": currency,
+					"conversion_rate": rate,
+					"items": po_items,
+				}
+			)
+			po.insert(ignore_permissions=True)
+			po.submit()
+		except Exception:
+			# procurement is supplementary — never fail the export import on it
+			frappe.db.rollback(save_point="po")
 
 	# --- incentives ---
 	if group.get("rodtep_amt") or group.get("rodtep_pct"):
@@ -335,6 +340,14 @@ def import_group(group: dict, company: str) -> dict:
 
 	# --- realization (also the idempotency marker for this group) ---
 	received = flt(group.get("amount_received"))
+	invoice_value = sum(flt(i.get("amount")) for i in group["items"] if i.get("amount"))
+	if received <= 0:
+		status = "Awaiting Realization"
+	elif invoice_value and received < invoice_value * 0.98:
+		# tolerance absorbs bank-charge/FX shortfalls on otherwise-full receipts
+		status = "Partially Realized"
+	else:
+		status = "Realized"
 	frappe.get_doc(
 		{
 			"doctype": "Export Realization",
@@ -342,9 +355,10 @@ def import_group(group: dict, company: str) -> dict:
 			"export_invoice": inv,
 			"shipment": shipment.name,
 			"customer": customer,
-			"status": "Realized" if received else "Awaiting Realization",
+			"status": status,
 			"currency": currency,
-			"invoice_value": sum(flt(i.get("amount")) for i in group["items"] if i.get("amount")),
+			"conversion_rate": rate,
+			"invoice_value": invoice_value,
 			"ad_bank": group.get("bank"),
 			"fbc_number": group.get("fbc_no"),
 			"firc_no": group.get("irm_no"),
@@ -358,6 +372,40 @@ def import_group(group: dict, company: str) -> dict:
 	).insert(ignore_permissions=True)
 
 	return {"invoice": inv, "status": "imported", "so": so.name, "shipment": shipment.name}
+
+
+# ---------------------------------------------------------------- maintenance
+
+def clear_company_data(company: str) -> dict:
+	"""Delete the ExportFlow transactional docs for a company so the import can
+	be re-run cleanly. Masters (customers/items/suppliers) are left in place —
+	ensure_* is idempotent. Destructive; call deliberately."""
+	if not company or not frappe.db.exists("Company", company):
+		frappe.throw(f"Unknown company {company}")
+	counts = {}
+	# plain (non-submittable) records first
+	for dt in ("Export Realization", "Export Incentive"):
+		names = frappe.get_all(dt, filters={"company": company}, pluck="name")
+		for n in names:
+			frappe.delete_doc(dt, n, force=True, ignore_permissions=True)
+		counts[dt] = len(names)
+	# shipments: on_trash cascades their Document Instances
+	ships = frappe.get_all("Export Shipment", filters={"company": company}, pluck="name")
+	for n in ships:
+		frappe.delete_doc("Export Shipment", n, force=True, ignore_permissions=True)
+	counts["Export Shipment"] = len(ships)
+	# submittable ERPNext docs: cancel then delete
+	for dt in ("Purchase Order", "Sales Order"):
+		names = frappe.get_all(dt, filters={"company": company}, pluck="name")
+		for n in names:
+			doc = frappe.get_doc(dt, n)
+			if doc.docstatus == 1:
+				doc.flags.ignore_links = True
+				doc.cancel()
+			frappe.delete_doc(dt, n, force=True, ignore_permissions=True)
+		counts[dt] = len(names)
+	frappe.db.commit()
+	return counts
 
 
 # ---------------------------------------------------------------- entry point

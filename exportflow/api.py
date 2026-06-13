@@ -1571,12 +1571,13 @@ def get_sales_dashboard() -> dict:
 		can["incentive"] = True
 		incentives = frappe.get_all(
 			"Export Incentive",
-			filters=cf({"status": ["!=", "Cancelled"]}),
+			filters=cf({"status": ["not in", INCENTIVE_DEAD]}),
 			fields=["amount", "status"],
 			limit_page_length=0,
 		)
 		incentive_inr = sum(flt(i.amount) for i in incentives)
-		pending = sum(flt(i.amount) for i in incentives if i.status in ("Pending", "Scroll Generated"))
+		# pending = everything not yet realized (matches get_finance_workspace)
+		pending = sum(flt(i.amount) for i in incentives if i.status not in INCENTIVE_REALIZED)
 		out["kpis"]["incentive_inr"] = flt(incentive_inr, 2)
 		out["kpis"]["incentive_pending_inr"] = flt(pending, 2)
 
@@ -1586,17 +1587,25 @@ def get_sales_dashboard() -> dict:
 		rels = frappe.get_all(
 			"Export Realization",
 			filters=cf(),
-			fields=["amount_received_inr", "status", "due_date"],
+			fields=["amount_received_inr", "invoice_value", "conversion_rate", "status", "due_date"],
 			limit_page_length=0,
 		)
 		realized = sum(flt(r.amount_received_inr) for r in rels)
 		closed = ("Realized", "eBRC Closed", "Written Off", "Cancelled")
 		today = getdate(nowdate())
-		overdue = sum(
-			1 for r in rels if r.status not in closed and r.due_date and getdate(r.due_date) < today
-		)
+		overdue = 0
+		outstanding = 0.0
+		for r in rels:
+			open_row = r.status not in closed
+			if open_row and r.due_date and getdate(r.due_date) < today:
+				overdue += 1
+			if open_row:
+				# expected INR for this invoice, less what's come in — same
+				# population as the overdue count (not the SO topline)
+				expected = flt(r.invoice_value) * (flt(r.conversion_rate) or 1.0)
+				outstanding += max(0.0, expected - flt(r.amount_received_inr))
 		out["kpis"]["realized_inr"] = flt(realized, 2)
-		out["kpis"]["realization_outstanding_inr"] = flt(max(0.0, value_inr - realized), 2)
+		out["kpis"]["realization_outstanding_inr"] = flt(outstanding, 2)
 		out["kpis"]["realization_overdue"] = overdue
 
 	# net margin folds incentives into the gross figure
@@ -1677,8 +1686,13 @@ REALIZATION_FIELDS = [
 ]
 
 
+# shared incentive status semantics (keep the two finance surfaces in sync)
+INCENTIVE_REALIZED = ("Scrip Generated", "Credited", "Utilized")
+INCENTIVE_DEAD = ("Cancelled", "Not Applicable")
+
+
 def _incentive_realized(row) -> bool:
-	return row.status in ("Scrip Generated", "Credited", "Utilized")
+	return row.status in INCENTIVE_REALIZED
 
 
 @frappe.whitelist()
@@ -1714,7 +1728,7 @@ def get_finance_workspace() -> dict:
 
 	kpis = {}
 	if can_inc:
-		active = [i for i in incentives if i.status != "Cancelled"]
+		active = [i for i in incentives if i.status not in INCENTIVE_DEAD]
 		kpis["incentive_total"] = flt(sum(flt(i.amount) for i in active), 2)
 		kpis["incentive_pending"] = flt(
 			sum(flt(i.amount) for i in active if not _incentive_realized(i)), 2

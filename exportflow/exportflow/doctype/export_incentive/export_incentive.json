@@ -57,7 +57,7 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Scheme",
-   "options": "RoDTEP\nDuty Drawback",
+   "options": "\nRoDTEP\nDuty Drawback",
    "reqd": 1
   },
   {

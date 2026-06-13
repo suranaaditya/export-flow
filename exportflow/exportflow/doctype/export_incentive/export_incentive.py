@@ -34,11 +34,27 @@ class ExportIncentive(Document):
 				self.shipping_bill_no, self.shipping_bill_date = sb
 
 	def compute_amount(self):
-		"""FOB × applied rate, unless the user pinned an explicit amount (the
-		scroll value can differ from the formula due to per-unit caps)."""
-		if not self.amount and self.fob_value and self.rate_pct:
-			self.amount = flt(flt(self.fob_value) * flt(self.rate_pct) / 100.0, 2)
+		"""FOB × applied rate. Recomputes when the basis changes so a corrected
+		rate flows through, but leaves a scroll-pinned override (amount typed
+		while basis unchanged) alone. A non-earning claim carries no amount."""
+		if self.status in ("Not Applicable", "Cancelled"):
+			return
+		if not (self.fob_value and self.rate_pct):
+			return
+		formula = flt(flt(self.fob_value) * flt(self.rate_pct) / 100.0, 2)
+		if not self.amount:
+			self.amount = formula
+			return
+		before = self.get_doc_before_save()
+		if before and (flt(before.fob_value) != flt(self.fob_value) or flt(before.rate_pct) != flt(self.rate_pct)):
+			prev = flt(flt(before.fob_value) * flt(before.rate_pct) / 100.0, 2)
+			if flt(self.amount) == prev:  # was formula-driven, not a manual override
+				self.amount = formula
 
 	def set_scrip_expiry(self):
-		if self.scheme == "RoDTEP" and self.scrip_date and not self.scrip_expiry:
+		"""RoDTEP scrips are valid 2 years; recompute when the scrip date is
+		corrected (keep a deliberate manual expiry otherwise)."""
+		if self.scheme != "RoDTEP" or not self.scrip_date:
+			return
+		if self.is_new() or self.has_value_changed("scrip_date") or not self.scrip_expiry:
 			self.scrip_expiry = add_years(getdate(self.scrip_date), 2)

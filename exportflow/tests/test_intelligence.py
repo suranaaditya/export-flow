@@ -125,7 +125,8 @@ class TestIntelligence(IntegrationTestCase):
 		self.assertFalse(alerted(add_days(deadline, -20)))
 		self.assertTrue(alerted(add_days(deadline, -7)))
 		self.assertTrue(alerted(deadline), "deadline day alerts")
-		self.assertTrue(alerted(add_days(deadline, 5)), "overdue nags daily")
+		self.assertFalse(alerted(add_days(deadline, 5)), "overdue does not nag every day")
+		self.assertTrue(alerted(add_days(deadline, 7)), "overdue nags weekly")
 
 	def test_gst_alert_stops_after_export(self):
 		so, customer, po_name = self.make_scheme_po()
@@ -165,7 +166,8 @@ class TestIntelligence(IntegrationTestCase):
 
 		self.assertFalse(alerted(add_days(due, -10)))
 		self.assertTrue(alerted(add_days(due, -3)))
-		self.assertTrue(alerted(add_days(due, 1)), "overdue nags daily")
+		self.assertFalse(alerted(add_days(due, 1)), "overdue does not nag every day")
+		self.assertTrue(alerted(add_days(due, 7)), "overdue nags weekly")
 
 		update_document_instance(manual, {"status": "Sent/Filed"})
 		self.assertFalse(alerted(add_days(due, -3)), "a filed document stops alerting")
@@ -194,7 +196,8 @@ class TestIntelligence(IntegrationTestCase):
 		self.assertFalse(alerted(add_days(expiry, -90)))
 		self.assertTrue(alerted(add_days(expiry, -60)))
 		self.assertTrue(alerted(add_days(expiry, -7)))
-		self.assertTrue(alerted(add_days(expiry, 3)), "overdue nags daily")
+		self.assertFalse(alerted(add_days(expiry, 3)), "overdue does not nag every day")
+		self.assertTrue(alerted(add_days(expiry, 7)), "overdue nags weekly")
 
 		rec.status = "Archived"
 		rec.save(ignore_permissions=True)
@@ -454,6 +457,50 @@ class TestIntelligence(IntegrationTestCase):
 		d = get_sales_dashboard()
 		self.assertGreaterEqual(d["kpis"]["incentive_inr"], 2500.0)
 		self.assertIn("net_margin_inr", d["kpis"])
+
+	def test_incentive_recompute_and_not_applicable(self):
+		so, customer, _s = self.make_deal()
+		shp = self.make_shipment(so, customer)
+		inc = self.make_incentive(shp, fob_value=100000, rate_pct=1.0)
+		self.assertEqual(inc.amount, 1000.0)
+		# correcting the rate flows through (formula-driven amount, not pinned)
+		inc.rate_pct = 0.5
+		inc.save(ignore_permissions=True)
+		self.assertEqual(inc.amount, 500.0, "amount tracks a corrected rate")
+		# a Not Applicable claim must not count as earned incentive
+		na = self.make_incentive(shp, fob_value=200000, rate_pct=1.0, status="Not Applicable")
+		ws = get_shipment_finance(shp)
+		na_row = next(r for r in ws["incentives"] if r["name"] == na.name)
+		live = next(r for r in ws["incentives"] if r["name"] == inc.name)
+		mine_total = sum(
+			flt(r["amount"]) for r in ws["incentives"] if r["name"] in (inc.name, na.name)
+			and r["status"] != "Not Applicable"
+		)
+		self.assertEqual(mine_total, 500.0, "only the live incentive counts")
+		self.assertEqual(na_row["status"], "Not Applicable")
+		self.assertTrue(live)
+
+	def test_realization_due_recompute_on_export_date_change(self):
+		so, customer, _s = self.make_deal()
+		shp = self.make_shipment(so, customer)
+		rel = frappe.get_doc(
+			{
+				"doctype": "Export Realization",
+				"export_invoice": f"MNG-RC-{_suffix()}",
+				"shipment": shp,
+				"status": "Awaiting Realization",
+				"currency": "USD",
+				"export_date": add_days(nowdate(), -10),
+			}
+		).insert(ignore_permissions=True)
+		first = getdate(rel.due_date)
+		rel.export_date = add_days(nowdate(), -40)
+		rel.save(ignore_permissions=True)
+		self.assertEqual(
+			getdate(rel.due_date), getdate(add_months(add_days(nowdate(), -40), 15)),
+			"due date follows a corrected export date",
+		)
+		self.assertNotEqual(getdate(rel.due_date), first)
 
 	def test_finance_company_scoped(self):
 		"""Incentives carry the shipment's company; the workspace is scoped to

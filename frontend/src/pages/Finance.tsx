@@ -44,6 +44,8 @@ export function Finance() {
 	const kpis = d?.kpis ?? {};
 	const canIncW = d?.can.incentive_write;
 	const canRelW = d?.can.realization_write;
+	const loading = isLoading || !d;
+	const dash = (s: string) => (loading ? '—' : s);
 
 	return (
 		<main>
@@ -57,10 +59,10 @@ export function Finance() {
 			</div>
 
 			<div className="kpis">
-				<Kpi icon="shield" label="Incentives earned" value={inr(kpis.incentive_total)} detail={kpis.incentive_pending ? `${inr(kpis.incentive_pending)} pending` : 'RoDTEP + drawback'} tone={kpis.incentive_pending ? 'warn' : undefined} />
-				<Kpi icon="banknote" label="Proceeds realized" value={inr(kpis.realized)} detail={`${kpis.open_count ?? 0} still open`} />
-				<Kpi icon="warning" label="Overdue" value={String(kpis.overdue_count ?? 0)} detail="past FEMA window" tone={kpis.overdue_count ? 'bad' : undefined} />
-				<Kpi icon="file-text" label="Realizations" value={String(d?.realizations.length ?? 0)} detail="export invoices tracked" />
+				<Kpi icon="shield" label="Incentives earned" value={inr(kpis.incentive_total)} detail={dash(kpis.incentive_pending ? `${inr(kpis.incentive_pending)} pending` : 'RoDTEP + drawback')} tone={kpis.incentive_pending ? 'warn' : undefined} />
+				<Kpi icon="banknote" label="Proceeds realized" value={inr(kpis.realized)} detail={dash(`${kpis.open_count ?? 0} still open`)} />
+				<Kpi icon="warning" label="Overdue" value={loading ? '—' : String(kpis.overdue_count ?? 0)} detail="past FEMA window" tone={kpis.overdue_count ? 'bad' : undefined} />
+				<Kpi icon="file-text" label="Realizations" value={loading ? '—' : String(d?.realizations.length ?? 0)} detail="export invoices tracked" />
 			</div>
 
 			{error ? (
@@ -120,12 +122,12 @@ export function Finance() {
 								<tbody>
 									{d.realizations.map((r) => (
 										<tr key={r.name} onClick={canRelW ? () => setRelModal(r) : undefined}>
-											<td className="c1">{r.export_invoice ?? r.name}</td>
+											<td className="id">{r.export_invoice ?? r.name}</td>
 											<td>{r.shipment ? <span className="id id-sm">{r.shipment}</span> : <span className="dim">—</span>}</td>
 											<td className="num">{inr(r.amount_received_inr)}</td>
 											<td className="dim">{r.due_date ? fmtDate(r.due_date) : '—'}</td>
 											<td className="dim">{r.ebrc_number ?? '—'}</td>
-											<td><Tag tone={realizationTone(r)}>{r.overdue ? `Overdue · ${r.status}` : r.status}</Tag></td>
+											<td><Tag tone={realizationTone(r)}>{r.overdue && r.status !== 'Overdue' ? `Overdue · ${r.status}` : r.status}</Tag></td>
 										</tr>
 									))}
 								</tbody>
@@ -192,6 +194,8 @@ function IncentiveModal({ record, onClose, onSaved }: { record: IncentiveRow | n
 			amount_received: Number(form.amount_received) || 0,
 			remarks: form.remarks,
 		};
+		// leave amount unset (auto-compute) only when truly blank; a typed 0 sticks
+		if (form.amount.trim() === '') (payload as Record<string, unknown>).amount = null;
 		try {
 			if (isNew) await createDoc('Export Incentive', payload);
 			else await updateDoc('Export Incentive', record.name, payload);
@@ -275,7 +279,9 @@ function RealizationModal({ record, onClose, onSaved }: { record: RealizationRow
 		fbc_number: record?.fbc_number ?? '',
 		firc_no: record?.firc_no ?? '',
 		remittance_date: record?.remittance_date ?? '',
+		amount_received: record?.amount_received != null ? String(record.amount_received) : '',
 		amount_received_inr: record?.amount_received_inr != null ? String(record.amount_received_inr) : '',
+		bank_charges: record?.bank_charges != null ? String(record.bank_charges) : '',
 		ebrc_number: record?.ebrc_number ?? '',
 		ebrc_date: record?.ebrc_date ?? '',
 		remarks: record?.remarks ?? '',
@@ -298,7 +304,9 @@ function RealizationModal({ record, onClose, onSaved }: { record: RealizationRow
 			fbc_number: form.fbc_number,
 			firc_no: form.firc_no,
 			remittance_date: form.remittance_date || null,
+			amount_received: Number(form.amount_received) || 0,
 			amount_received_inr: Number(form.amount_received_inr) || 0,
+			bank_charges: Number(form.bank_charges) || 0,
 			ebrc_number: form.ebrc_number,
 			ebrc_date: form.ebrc_date || null,
 			remarks: form.remarks,
@@ -318,12 +326,16 @@ function RealizationModal({ record, onClose, onSaved }: { record: RealizationRow
 				<Field label="Export invoice"><TextInput mono value={form.export_invoice} onChange={(v) => set('export_invoice', v)} /></Field>
 				<Field label="Status"><SelectInput value={form.status} onChange={(v) => set('status', v as RealizationStatus)} options={REALIZATION_STATUSES.map((s) => ({ value: s }))} /></Field>
 				<Field label="Shipment"><TextInput mono value={form.shipment} onChange={(v) => set('shipment', v)} placeholder="SHP-…" /></Field>
+				<Field label="Currency" hint="INR uses the 18-month FEMA window"><SelectInput value={form.currency} onChange={(v) => set('currency', v)} options={[{ value: '' }, { value: 'USD' }, { value: 'EUR' }, { value: 'INR' }]} /></Field>
+				<Field label="Invoice value (FCY)"><TextInput type="number" mono value={form.invoice_value} onChange={(v) => set('invoice_value', v)} /></Field>
 				<Field label="Export date" hint="Starts the FEMA clock"><TextInput type="date" value={form.export_date} onChange={(v) => set('export_date', v)} /></Field>
 				<Field label="AD bank"><TextInput value={form.ad_bank} onChange={(v) => set('ad_bank', v)} /></Field>
 				<Field label="FBC / FIBCD no"><TextInput mono value={form.fbc_number} onChange={(v) => set('fbc_number', v)} /></Field>
 				<Field label="FIRC / IRM no"><TextInput mono value={form.firc_no} onChange={(v) => set('firc_no', v)} /></Field>
 				<Field label="Remittance date"><TextInput type="date" value={form.remittance_date} onChange={(v) => set('remittance_date', v)} /></Field>
+				<Field label="Amount received (FCY)"><TextInput type="number" mono value={form.amount_received} onChange={(v) => set('amount_received', v)} /></Field>
 				<Field label="Amount received (INR)"><TextInput type="number" mono value={form.amount_received_inr} onChange={(v) => set('amount_received_inr', v)} /></Field>
+				<Field label="Bank charges (FCY)"><TextInput type="number" mono value={form.bank_charges} onChange={(v) => set('bank_charges', v)} /></Field>
 				<Field label="eBRC number"><TextInput mono value={form.ebrc_number} onChange={(v) => set('ebrc_number', v)} /></Field>
 				<Field label="eBRC date"><TextInput type="date" value={form.ebrc_date} onChange={(v) => set('ebrc_date', v)} /></Field>
 				<div className="span2"><Field label="Remarks"><TextArea value={form.remarks} onChange={(v) => set('remarks', v)} rows={2} /></Field></div>

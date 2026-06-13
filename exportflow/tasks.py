@@ -72,6 +72,14 @@ def send_email_digest(alerts: list[dict]) -> dict | None:
 	return digest
 
 
+def _should_alert(days_left: int, thresholds: set[int]) -> bool:
+	"""Fire on a threshold day before due, and — once overdue — weekly rather
+	than every single day (a FEMA realization can sit overdue for months)."""
+	if days_left in thresholds:
+		return True
+	return days_left <= 0 and (-days_left) % 7 == 0
+
+
 def _when(days_left: int) -> str:
 	if days_left > 0:
 		return f"in {days_left} day{'s' if days_left != 1 else ''}"
@@ -101,7 +109,7 @@ def send_gst_alerts(today=None) -> list[dict]:
 			if _po_fully_exported(po.name):
 				continue
 			days_left = (getdate(po.gst_export_deadline) - today).days
-			if days_left in GST_ALERT_DAYS or days_left <= 0:
+			if _should_alert(days_left, GST_ALERT_DAYS):
 				subject = f"GST 90-day clock: {po.name} export window closes {_when(days_left)}"
 				body = (
 					f"Purchase Order {po.name} ({po.supplier_name}"
@@ -195,7 +203,7 @@ def send_document_due_alerts(today=None) -> list[dict]:
 	for row in rows:
 		try:
 			days_left = (getdate(row.due_date) - today).days
-			if days_left in DOC_DUE_ALERT_DAYS or days_left <= 0:
+			if _should_alert(days_left, DOC_DUE_ALERT_DAYS):
 				where = f" on {row.shipment}" if row.shipment else ""
 				# per-PO packs share type+shipment — the PO disambiguates
 				if row.purchase_order:
@@ -232,7 +240,7 @@ def send_compliance_alerts(today=None) -> list[dict]:
 	for row in rows:
 		try:
 			days_left = (getdate(row.expiry_date) - today).days
-			if days_left in COMPLIANCE_ALERT_DAYS or days_left <= 0:
+			if _should_alert(days_left, COMPLIANCE_ALERT_DAYS):
 				subject = f"Compliance renewal: {row.title} expires {_when(days_left)}"
 				body = (
 					f"{row.compliance_type} — {row.title}"
@@ -323,7 +331,7 @@ def send_realization_alerts(today=None) -> list[dict]:
 	):
 		try:
 			days_left = (getdate(r.due_date) - today).days
-			if days_left in REALIZATION_ALERT_DAYS or days_left <= 0:
+			if _should_alert(days_left, REALIZATION_ALERT_DAYS):
 				inv = r.export_invoice or r.name
 				subject = f"Export proceeds: {inv} realization due {_when(days_left)}"
 				body = (
