@@ -108,6 +108,7 @@ export function AppShell() {
 					<img className="dx-l" src={BRAND + 'dux-logo.png'} alt="DUX Digitech" />
 					<img className="dx-w" src={BRAND + 'dux-logo-white.png'} alt="DUX Digitech" />
 				</div>
+				{/* credit block is intentionally non-interactive */}
 				<div className="sfoot">
 					<button
 						className="icbtn collapse-btn"

@@ -44,14 +44,13 @@ body::before { content: ""; position: fixed; inset: 0; background: var(--ambient
 .snav a.on { color: var(--iris); background: var(--iris-tint) }
 .snav a.on svg { color: var(--iris) }
 .snav .push { margin-top: auto }
-/* agency credit — subtle, theme-aware DUX wordmark at the foot of the rail */
-.duxcredit { display: flex; align-items: center; gap: 7px; padding: 14px 8px 2px; text-decoration: none; opacity: .65; transition: opacity .18s var(--ease) }
-.duxcredit:hover { opacity: 1 }
-.duxcredit .dxby { font-size: 9px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--fg-3) }
-.duxcredit img { height: 15px; width: auto; display: block }
+/* agency credit — a tidy, theme-aware "Built by DUX" block at the foot of the rail */
+.duxcredit { display: flex; flex-direction: column; align-items: flex-start; gap: 7px; margin: 10px 2px 8px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--hairline); background: var(--surface-3); text-decoration: none; transition: border-color .18s var(--ease), background .18s var(--ease) }
+.duxcredit:hover { border-color: var(--iris-soft); background: var(--row-hover) }
+.duxcredit .dxby { font-size: 9.5px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--fg-3) }
+.duxcredit img { max-height: 30px; max-width: 100%; width: auto; display: block }
 .duxcredit img.dx-l { display: var(--mark-light) } .duxcredit img.dx-w { display: var(--mark-white) }
-.sidebar.collapsed .duxcredit { justify-content: center; padding: 14px 0 2px }
-.sidebar.collapsed .duxcredit .dxby { display: none }
+.sidebar.collapsed .duxcredit { display: none }
 .sfoot { display: flex; align-items: center; gap: 10px; padding: 12px 6px 0; border-top: 1px solid var(--hairline) }
 .sfoot .usr { margin-left: auto }
 .content { flex: 1; min-width: 0 }
