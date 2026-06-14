@@ -1434,6 +1434,17 @@ def create_shipment(payload) -> dict:
 			"etd": payload.get("etd") or None,
 			"eta": payload.get("eta") or None,
 			"letter_of_credit": payload.get("letter_of_credit") or None,
+			"gst_export_mode": payload.get("gst_export_mode") or None,
+			"igst_rate": flt(payload.get("igst_rate")) or None,
+			"inr_rate": flt(payload.get("inr_rate")) or None,
+			"freight_amount": flt(payload.get("freight_amount")) or None,
+			"insurance_amount": flt(payload.get("insurance_amount")) or None,
+			"buyer_order_no": payload.get("buyer_order_no"),
+			"buyer_order_date": payload.get("buyer_order_date") or None,
+			"consignee_to_order": 1 if payload.get("consignee_to_order") else 0,
+			"consignee_name": payload.get("consignee_name"),
+			"consignee_address": payload.get("consignee_address"),
+			"notify_party": payload.get("notify_party"),
 			"items": [
 				{
 					"item_code": row.get("item_code"),
@@ -1448,10 +1459,33 @@ def create_shipment(payload) -> dict:
 				}
 				for row in items
 			],
+			"packs": _pack_rows(payload.get("packs")),
 		}
 	)
 	doc.insert()
 	return {"name": doc.name}
+
+
+def _pack_rows(packs) -> list[dict]:
+	"""Normalise an incoming packs payload into Export Shipment Pack child rows."""
+	out = []
+	for p in packs or []:
+		if not p.get("item_code"):
+			continue
+		out.append(
+			{
+				"item_code": p.get("item_code"),
+				"batch_no": p.get("batch_no"),
+				"marks": p.get("marks"),
+				"num_packages": cint(p.get("num_packages")),
+				"pack_type": p.get("pack_type"),
+				"net_per": flt(p.get("net_per")),
+				"tare_per": flt(p.get("tare_per")),
+				"mfg_date": p.get("mfg_date") or None,
+				"exp_date": p.get("exp_date") or None,
+			}
+		)
+	return out
 
 
 @frappe.whitelist()
@@ -1595,6 +1629,17 @@ def get_shipment_detail(name: str) -> dict:
 				"awb_date",
 				"letter_of_credit",
 				"notes",
+				"gst_export_mode",
+				"igst_rate",
+				"inr_rate",
+				"freight_amount",
+				"insurance_amount",
+				"buyer_order_no",
+				"buyer_order_date",
+				"consignee_to_order",
+				"consignee_name",
+				"consignee_address",
+				"notify_party",
 				"mtt_ad_bank",
 				"mtt_same_ad_bank",
 				"mtt_import_supplier",
@@ -1618,6 +1663,24 @@ def get_shipment_detail(name: str) -> dict:
 			for m in doc.milestones
 		],
 		"items": items,
+		"packs": [
+			{
+				f: p.get(f)
+				for f in (
+					"name",
+					"item_code",
+					"batch_no",
+					"marks",
+					"num_packages",
+					"pack_type",
+					"net_per",
+					"tare_per",
+					"mfg_date",
+					"exp_date",
+				)
+			}
+			for p in doc.packs
+		],
 		"lc": lc,
 		"sales_orders": sorted({row.sales_order for row in doc.items}),
 		# Export Shipment is not submittable — editing is plain write permission
@@ -1639,8 +1702,20 @@ SHIPMENT_EDITABLE = {
 	"eta",
 	"letter_of_credit",
 	"notes",
+	# commercial / invoice terms (drive the redesigned prints)
+	"gst_export_mode",
+	"igst_rate",
+	"inr_rate",
+	"freight_amount",
+	"insurance_amount",
+	"buyer_order_no",
+	"buyer_order_date",
+	"consignee_to_order",
+	"consignee_name",
+	"consignee_address",
+	"notify_party",
 }
-SHIPMENT_DATE_FIELDS = {"etd", "eta"}
+SHIPMENT_DATE_FIELDS = {"etd", "eta", "buyer_order_date"}
 
 
 @frappe.whitelist()
@@ -1672,6 +1747,10 @@ def update_shipment(name: str, payload) -> dict:
 				row.batch_no = p.get("batch_no")
 			if "pack_description" in p:
 				row.pack_description = p.get("pack_description")
+
+	# packs are a flat editor — replace wholesale when the key is present
+	if "packs" in payload:
+		doc.set("packs", _pack_rows(payload["packs"]))
 
 	doc.save()
 	return {"name": doc.name}

@@ -715,6 +715,17 @@ export interface ShipmentDetailData {
 		awb_date: string | null;
 		letter_of_credit: string | null;
 		notes: string | null;
+		gst_export_mode: string | null;
+		igst_rate: number | null;
+		inr_rate: number | null;
+		freight_amount: number | null;
+		insurance_amount: number | null;
+		buyer_order_no: string | null;
+		buyer_order_date: string | null;
+		consignee_to_order: 0 | 1;
+		consignee_name: string | null;
+		consignee_address: string | null;
+		notify_party: string | null;
 		mtt_ad_bank: string | null;
 		mtt_same_ad_bank: 0 | 1;
 		mtt_import_supplier: string | null;
@@ -728,6 +739,7 @@ export interface ShipmentDetailData {
 	};
 	milestones: ShipmentMilestoneRow[];
 	items: ShipmentItemRow[];
+	packs: ShipmentPack[];
 	lc: {
 		name: string;
 		lc_number: string;
@@ -739,6 +751,23 @@ export interface ShipmentDetailData {
 	sales_orders: string[];
 	can: DocCan;
 }
+
+/** Per-batch packing detail row (Export Shipment Pack child). net/tare/gross
+ *  totals = num_packages × per-package weight, computed at print time. */
+export interface ShipmentPack {
+	name?: string;
+	item_code: string;
+	batch_no: string | null;
+	marks: string | null;
+	num_packages: number | null;
+	pack_type: string | null;
+	net_per: number | null;
+	tare_per: number | null;
+	mfg_date: string | null;
+	exp_date: string | null;
+}
+
+export const GST_EXPORT_MODES = ['Under LUT (without IGST)', 'On payment of IGST'] as const;
 
 // ---- Phase 4: documents (exportflow.api) ----
 

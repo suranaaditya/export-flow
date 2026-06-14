@@ -389,6 +389,12 @@ interface ExporterProfile {
 	scomet_text: string;
 	mtt_completion_months: string;
 	mtt_outlay_months: string;
+	bank_account_no: string;
+	bank_name: string;
+	bank_branch_address: string;
+	bank_ifsc: string;
+	bank_swift: string;
+	bank_correspondent: string;
 }
 
 const EMPTY_PROFILE: ExporterProfile = {
@@ -402,6 +408,12 @@ const EMPTY_PROFILE: ExporterProfile = {
 	scomet_text: '',
 	mtt_completion_months: '',
 	mtt_outlay_months: '',
+	bank_account_no: '',
+	bank_name: '',
+	bank_branch_address: '',
+	bank_ifsc: '',
+	bank_swift: '',
+	bank_correspondent: '',
 };
 
 /** Exporter identity printed on every §5.2 document (IEC, GSTIN, LUT…). */
@@ -610,6 +622,29 @@ function ExporterProfilePanel({ canEdit }: { canEdit: boolean }) {
 								onChange={(v) => set('signatory_designation', v)}
 							/>
 						</Field>
+						<div className="span2 fdivider">Bank details · for invoice remittance</div>
+						<Field label="Bank name">
+							<TextInput value={form.bank_name} onChange={(v) => set('bank_name', v)} />
+						</Field>
+						<Field label="Account number">
+							<TextInput mono value={form.bank_account_no} onChange={(v) => set('bank_account_no', v)} />
+						</Field>
+						<Field label="IFSC code">
+							<TextInput mono value={form.bank_ifsc} onChange={(v) => set('bank_ifsc', v)} />
+						</Field>
+						<Field label="SWIFT code">
+							<TextInput mono value={form.bank_swift} onChange={(v) => set('bank_swift', v)} />
+						</Field>
+						<div className="span2">
+							<Field label="Branch" hint="Branch name / address">
+								<TextInput value={form.bank_branch_address} onChange={(v) => set('bank_branch_address', v)} />
+							</Field>
+						</div>
+						<div className="span2">
+							<Field label="Correspondent bank" hint="Intermediary bank & routing, for inward foreign remittance">
+								<TextArea value={form.bank_correspondent} onChange={(v) => set('bank_correspondent', v)} rows={2} />
+							</Field>
+						</div>
 						<div className="span2">
 							<Field label="SCOMET declaration override" hint="Leave blank for the standard wording">
 								<TextArea value={form.scomet_text} onChange={(v) => set('scomet_text', v)} rows={2} />

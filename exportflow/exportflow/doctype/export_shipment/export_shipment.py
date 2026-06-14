@@ -54,10 +54,26 @@ class ExportShipment(Document):
 		self.apply_merchanting_cha()
 		self.seed_milestones()
 		self.validate_items()
+		self.validate_packs()
 		self.apply_mtt_import_facts()
 		self.validate_lc()
 		self.validate_milestone_blockers()
 		self.set_current_milestone()
+
+	def validate_packs(self):
+		"""Every packing-detail row must reference one of this shipment's own line
+		items — otherwise the invoice / packing-list weight rollup silently drops
+		it (the rollup is keyed by line item_code)."""
+		if not self.get("packs"):
+			return
+		line_items = {row.item_code for row in self.items}
+		for p in self.packs:
+			if p.item_code and p.item_code not in line_items:
+				frappe.throw(
+					_("Packing row references {0}, which is not a line item on this shipment.").format(
+						frappe.bold(p.item_code)
+					)
+				)
 
 	def classify_pos(self) -> tuple[bool, bool]:
 		"""(has_merchanting_line, has_india_export_line) across the sourcing POs.

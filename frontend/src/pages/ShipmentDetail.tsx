@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
 	useFrappeGetCall,
 	useFrappeGetDoc,
@@ -14,6 +14,7 @@ import { Card, CHead, EmptyMsg, Facts, LRow, Modal, Tag } from '@/components/ui'
 import { CheckInput, Field, SearchSelect, SelectInput, TextArea, TextInput } from '@/components/form';
 import {
 	API,
+	GST_EXPORT_MODES,
 	THIRD_COUNTRY_CHA,
 	TRADE_TYPES,
 	incentiveTone,
@@ -29,6 +30,7 @@ import {
 	type MttOutlay,
 	type RealizationRow,
 	type ShipmentDetailData,
+	type ShipmentPack,
 	type ShipmentFinanceData,
 	type ShipmentFinanceSeed,
 } from '@/lib/api';
@@ -92,7 +94,7 @@ export function ShipmentDetail() {
 		);
 	}
 
-	const { shipment, milestones, items, lc, sales_orders, can, mtt_outlay } = detail;
+	const { shipment, milestones, items, packs, lc, sales_orders, can, mtt_outlay } = detail;
 	const isAir = shipment.mode === 'Air';
 	const merchanting = isMerchanting(shipment.trade_type);
 
@@ -339,6 +341,14 @@ export function ShipmentDetail() {
 							</tbody>
 						</table>
 					</Card>
+
+					<PackingCard
+						id={id}
+						items={items}
+						packs={packs}
+						canEdit={can.write}
+						onSaved={() => mutate()}
+					/>
 
 					<DocumentChecklist shipment={id} />
 				</div>
@@ -1176,6 +1186,222 @@ const SHIP_LINE_GRID = '1.8fr 110px 1fr 1fr';
 
 /** Edit a shipment's deal/routing header + existing line qty/batch/pack.
  *  Voyage/customs live in Update voyage; MTT lives in its own card. */
+const kg = (n: number) => (n ? n.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '0');
+
+/** Per-batch packing detail — drum ranges, quantities, mfg/exp and net/tare
+ *  weights that itemise the invoice and packing list. Grouped by item at print. */
+function PackingCard({
+	id,
+	items,
+	packs,
+	canEdit,
+	onSaved,
+}: {
+	id: string;
+	items: ShipmentDetailData['items'];
+	packs: ShipmentPack[];
+	canEdit: boolean;
+	onSaved: () => void;
+}) {
+	const [editing, setEditing] = useState(false);
+	const itemName = (code: string) => items.find((i) => i.item_code === code)?.item_name ?? code;
+	const num = (p: ShipmentPack) => Number(p.num_packages) || 0;
+	const net = packs.reduce((s, p) => s + num(p) * (Number(p.net_per) || 0), 0);
+	const tare = packs.reduce((s, p) => s + num(p) * (Number(p.tare_per) || 0), 0);
+	const totalPkgs = packs.reduce((s, p) => s + num(p), 0);
+
+	return (
+		<Card>
+			<CHead
+				icon="package"
+				title="Packing detail"
+				count={packs.length ? `${totalPkgs} ${totalPkgs === 1 ? 'pkg' : 'pkgs'}` : undefined}
+				action={
+					canEdit ? (
+						<a href="#" onClick={(e) => { e.preventDefault(); setEditing(true); }}>Edit packing</a>
+					) : undefined
+				}
+			/>
+			{packs.length === 0 ? (
+				<EmptyMsg
+					title="No packing detail yet"
+					text={canEdit ? 'Add batches, drum ranges and net/tare weights — they appear on the invoice and packing list.' : undefined}
+				/>
+			) : (
+				<>
+					{packs.map((p, i) => (
+						<LRow
+							key={p.name ?? i}
+							icon="box"
+							t1={
+								<span>
+									{itemName(p.item_code)}
+									{p.batch_no ? <span className="data"> · {p.batch_no}</span> : null}
+								</span>
+							}
+							t2={`${p.num_packages ?? '—'} ${p.pack_type || 'pkgs'}${p.marks ? ` (nos ${p.marks})` : ''}${p.mfg_date ? ` · Mfg ${fmtDate(p.mfg_date)}` : ''}${p.exp_date ? ` · Exp ${fmtDate(p.exp_date)}` : ''}`}
+							right={<span className="num">{kg(num(p) * (Number(p.net_per) || 0))} kg</span>}
+						/>
+					))}
+					<div className="ptot">
+						Net <b>{kg(net)}</b> · Tare <b>{kg(tare)}</b> · Gross <b>{kg(net + tare)}</b> kg
+					</div>
+				</>
+			)}
+			{editing && (
+				<PackingModal
+					id={id}
+					items={items}
+					packs={packs}
+					onClose={() => setEditing(false)}
+					onSaved={() => { onSaved(); setEditing(false); }}
+				/>
+			)}
+		</Card>
+	);
+}
+
+type PackEdit = {
+	_uid: string;
+	item_code: string;
+	batch_no: string;
+	marks: string;
+	num_packages: string;
+	pack_type: string;
+	net_per: string;
+	tare_per: string;
+	mfg_date: string;
+	exp_date: string;
+};
+
+function PackingModal({
+	id,
+	items,
+	packs,
+	onClose,
+	onSaved,
+}: {
+	id: string;
+	items: ShipmentDetailData['items'];
+	packs: ShipmentPack[];
+	onClose: () => void;
+	onSaved: () => void;
+}) {
+	const { call: update, loading: saving } = useFrappePostCall(API.updateShipment);
+	const [err, setErr] = useState<string | null>(null);
+	const s = (v: number | string | null | undefined) => (v != null ? String(v) : '');
+	const [rows, setRows] = useState<PackEdit[]>(() =>
+		packs.map((p, i) => ({
+			_uid: p.name ?? `seed-${i}`,
+			item_code: p.item_code,
+			batch_no: p.batch_no ?? '',
+			marks: p.marks ?? '',
+			num_packages: s(p.num_packages),
+			pack_type: p.pack_type ?? '',
+			net_per: s(p.net_per),
+			tare_per: s(p.tare_per),
+			mfg_date: p.mfg_date ?? '',
+			exp_date: p.exp_date ?? '',
+		})),
+	);
+	const uidRef = useRef(0);
+	const itemOpts = [...new Map(items.map((i) => [i.item_code, i.item_name])).entries()].map(
+		([value, label]) => ({ value, label: label || value }),
+	);
+	const setRow = (i: number, patch: Partial<PackEdit>) =>
+		setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+	const addRow = () =>
+		setRows((rs) => [
+			...rs,
+			{ _uid: `new-${uidRef.current++}`, item_code: itemOpts[0]?.value ?? '', batch_no: '', marks: '', num_packages: '', pack_type: '', net_per: '', tare_per: '', mfg_date: '', exp_date: '' },
+		]);
+
+	async function onSave() {
+		setErr(null);
+		try {
+			await update({
+				name: id,
+				payload: {
+					packs: rows
+						.filter((r) => r.item_code)
+						.map((r) => ({
+							item_code: r.item_code,
+							batch_no: r.batch_no,
+							marks: r.marks,
+							num_packages: Number(r.num_packages) || 0,
+							pack_type: r.pack_type,
+							net_per: Number(r.net_per) || 0,
+							tare_per: Number(r.tare_per) || 0,
+							mfg_date: r.mfg_date || null,
+							exp_date: r.exp_date || null,
+						})),
+				},
+			});
+			onSaved();
+		} catch (e) {
+			setErr(parseServerError(e));
+		}
+	}
+
+	return (
+		<Modal title="Packing detail" icon="package" onClose={onClose}>
+			<div className="sub" style={{ padding: '4px 18px 0' }}>
+				One row per batch / package group. Net &amp; tare are per package; the totals (net / tare /
+				gross) are computed for the invoice and packing list.
+			</div>
+			<div className="packlist">
+				{rows.map((r, i) => (
+					<div className="packrow" key={r._uid}>
+						<div className="formgrid">
+							<Field label="Item">
+								<SearchSelect value={r.item_code} onChange={(v) => setRow(i, { item_code: v })} options={itemOpts} placeholder="Item…" />
+							</Field>
+							<Field label="Batch / lot no">
+								<TextInput mono value={r.batch_no} onChange={(v) => setRow(i, { batch_no: v })} />
+							</Field>
+							<Field label="Packages">
+								<TextInput type="number" mono value={r.num_packages} onChange={(v) => setRow(i, { num_packages: v })} />
+							</Field>
+							<Field label="Pack type" hint="e.g. HDPE Drums">
+								<TextInput value={r.pack_type} onChange={(v) => setRow(i, { pack_type: v })} />
+							</Field>
+							<Field label="Pkg nos" hint="e.g. 1-10">
+								<TextInput value={r.marks} onChange={(v) => setRow(i, { marks: v })} />
+							</Field>
+							<Field label="Net / pkg (kg)">
+								<TextInput type="number" mono value={r.net_per} onChange={(v) => setRow(i, { net_per: v })} />
+							</Field>
+							<Field label="Tare / pkg (kg)">
+								<TextInput type="number" mono value={r.tare_per} onChange={(v) => setRow(i, { tare_per: v })} />
+							</Field>
+							<Field label="Mfg date">
+								<TextInput type="date" value={r.mfg_date} onChange={(v) => setRow(i, { mfg_date: v })} />
+							</Field>
+							<Field label="Exp date">
+								<TextInput type="date" value={r.exp_date} onChange={(v) => setRow(i, { exp_date: v })} />
+							</Field>
+						</div>
+						<button type="button" className="xrow" onClick={() => setRows((rs) => rs.filter((_, idx) => idx !== i))}>
+							<Icon name="close" size={13} /> Remove batch
+						</button>
+					</div>
+				))}
+				<button type="button" className="btn" onClick={addRow}>
+					<Icon name="plus" size={14} /> Add batch / pack
+				</button>
+			</div>
+			<div className="formfoot">
+				{err && <span className="ferr">{err}</span>}
+				<span className="spacer" />
+				<button type="button" className="btn" onClick={onClose}>Cancel</button>
+				<button type="button" className="btn primary" disabled={saving} onClick={() => void onSave()}>
+					{saving ? 'Saving…' : 'Save packing'}
+				</button>
+			</div>
+		</Modal>
+	);
+}
+
 function EditShipmentModal({
 	id,
 	shipment,
@@ -1201,6 +1427,18 @@ function EditShipmentModal({
 		final_destination: shipment.final_destination ?? '',
 		letter_of_credit: shipment.letter_of_credit ?? '',
 		notes: shipment.notes ?? '',
+		// commercial / invoice terms (drive the prints)
+		gst_export_mode: shipment.gst_export_mode ?? 'Under LUT (without IGST)',
+		igst_rate: shipment.igst_rate != null ? String(shipment.igst_rate) : '18',
+		inr_rate: shipment.inr_rate != null ? String(shipment.inr_rate) : '',
+		freight_amount: shipment.freight_amount != null ? String(shipment.freight_amount) : '',
+		insurance_amount: shipment.insurance_amount != null ? String(shipment.insurance_amount) : '',
+		buyer_order_no: shipment.buyer_order_no ?? '',
+		buyer_order_date: shipment.buyer_order_date ?? '',
+		consignee_to_order: !!shipment.consignee_to_order,
+		consignee_name: shipment.consignee_name ?? '',
+		consignee_address: shipment.consignee_address ?? '',
+		notify_party: shipment.notify_party ?? '',
 	}));
 	const [lines, setLines] = useState<ShipmentLineEdit[]>(() =>
 		items.map((it) => ({
@@ -1255,6 +1493,10 @@ function EditShipmentModal({
 	async function onSave() {
 		setErr(null);
 		const orNull = (v: string) => v || null;
+		// only persist fields the active mode actually uses, so the stored row
+		// can't disagree with the trade type / GST mode / consignee choice
+		const merch = isMerchanting(form.trade_type);
+		const igstMode = !merch && form.gst_export_mode === 'On payment of IGST';
 		try {
 			await update({
 				name: id,
@@ -1268,6 +1510,17 @@ function EditShipmentModal({
 					final_destination: form.final_destination,
 					letter_of_credit: orNull(form.letter_of_credit),
 					notes: form.notes,
+					gst_export_mode: merch ? null : form.gst_export_mode,
+					igst_rate: igstMode ? Number(form.igst_rate) || 0 : 0,
+					inr_rate: igstMode ? Number(form.inr_rate) || 0 : 0,
+					freight_amount: Number(form.freight_amount) || 0,
+					insurance_amount: Number(form.insurance_amount) || 0,
+					buyer_order_no: form.buyer_order_no,
+					buyer_order_date: orNull(form.buyer_order_date),
+					consignee_to_order: form.consignee_to_order ? 1 : 0,
+					consignee_name: form.consignee_to_order ? null : form.consignee_name,
+					consignee_address: form.consignee_to_order ? null : form.consignee_address,
+					notify_party: form.notify_party,
 					items: lines.map((l) => ({
 						name: l.name,
 						qty: Number(l.qty),
@@ -1346,6 +1599,61 @@ function EditShipmentModal({
 						placeholder="Search LCs…"
 					/>
 				</Field>
+
+				<div className="span2 fdivider">Invoice &amp; terms</div>
+				{!isMerchanting(form.trade_type) && (
+					<Field label="GST export mode" hint="Drives the invoice declaration">
+						<SelectInput
+							value={form.gst_export_mode}
+							onChange={(v) => set('gst_export_mode', v)}
+							options={GST_EXPORT_MODES.map((m) => ({ value: m }))}
+						/>
+					</Field>
+				)}
+				{!isMerchanting(form.trade_type) && form.gst_export_mode === 'On payment of IGST' && (
+					<Field label="IGST rate %">
+						<TextInput type="number" mono value={form.igst_rate} onChange={(v) => set('igst_rate', v)} />
+					</Field>
+				)}
+				{!isMerchanting(form.trade_type) && form.gst_export_mode === 'On payment of IGST' && (
+					<Field label="INR conversion rate" hint="For the INR taxable value on the invoice">
+						<TextInput type="number" mono value={form.inr_rate} onChange={(v) => set('inr_rate', v)} />
+					</Field>
+				)}
+				<Field label="Freight" hint="Deal currency — adds to the CFR/CIF total">
+					<TextInput type="number" mono value={form.freight_amount} onChange={(v) => set('freight_amount', v)} />
+				</Field>
+				<Field label="Insurance" hint="Deal currency — adds to the CIF total">
+					<TextInput type="number" mono value={form.insurance_amount} onChange={(v) => set('insurance_amount', v)} />
+				</Field>
+				<Field label="Buyer's order no">
+					<TextInput value={form.buyer_order_no} onChange={(v) => set('buyer_order_no', v)} />
+				</Field>
+				<Field label="Buyer's order date">
+					<TextInput type="date" value={form.buyer_order_date} onChange={(v) => set('buyer_order_date', v)} />
+				</Field>
+				<div className="span2">
+					<CheckInput
+						label='Consignee "to order" (negotiable B/L)'
+						checked={form.consignee_to_order}
+						onChange={(v) => set('consignee_to_order', v)}
+					/>
+				</div>
+				{!form.consignee_to_order && (
+					<Field label="Consignee name" hint="Leave blank to use the buyer">
+						<TextInput value={form.consignee_name} onChange={(v) => set('consignee_name', v)} />
+					</Field>
+				)}
+				{!form.consignee_to_order && (
+					<Field label="Consignee address">
+						<TextArea value={form.consignee_address} onChange={(v) => set('consignee_address', v)} rows={2} />
+					</Field>
+				)}
+				<div className="span2">
+					<Field label="Notify party" hint="Shown on the shipping instruction / carrier document">
+						<TextArea value={form.notify_party} onChange={(v) => set('notify_party', v)} rows={2} />
+					</Field>
+				</div>
 				<div className="span2">
 					<Field label="Notes">
 						<TextArea value={form.notes} onChange={(v) => set('notes', v)} rows={2} />

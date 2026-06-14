@@ -12,6 +12,7 @@ from exportflow.api import (
 	create_purchase_order,
 	create_purchase_order_draft,
 	create_shipment,
+	get_shipment_detail,
 	preview_purchase_order,
 	get_shippable_lines,
 	get_so_procurement,
@@ -500,6 +501,64 @@ class TestLogistics(IntegrationTestCase):
 		self.assertEqual(doc.final_destination, "Durban yard")
 		self.assertEqual(flt(doc.items[0].qty), 50.0)
 		self.assertEqual(doc.items[0].batch_no, "B-1")
+
+	def test_update_shipment_commercial_fields_and_packs(self):
+		so, customer, _s1, _s2 = self.setup_deal(qty_a=100)
+		shp = self.make_test_shipment(so, customer, qty=60)
+		item = frappe.db.get_value("Export Shipment Item", {"parent": shp["name"]}, "item_code")
+		update_shipment(
+			shp["name"],
+			{
+				"gst_export_mode": "On payment of IGST",
+				"igst_rate": 18,
+				"inr_rate": 89.6,
+				"freight_amount": 100,
+				"insurance_amount": 50,
+				"buyer_order_no": "PO-9",
+				"consignee_to_order": 1,
+				"notify_party": "Notify Co.",
+				"packs": [
+					{
+						"item_code": item,
+						"batch_no": "CH-1",
+						"marks": "1-10",
+						"num_packages": 30,
+						"pack_type": "HDPE Drums",
+						"net_per": 25,
+						"tare_per": 2.4,
+						"mfg_date": "2025-12-01",
+						"exp_date": "2030-11-01",
+					}
+				],
+			},
+		)
+		doc = frappe.get_doc("Export Shipment", shp["name"])
+		self.assertEqual(doc.gst_export_mode, "On payment of IGST")
+		self.assertEqual(flt(doc.freight_amount), 100.0)
+		self.assertEqual(doc.consignee_to_order, 1)
+		self.assertEqual(doc.notify_party, "Notify Co.")
+		self.assertEqual(len(doc.packs), 1)
+		self.assertEqual(doc.packs[0].batch_no, "CH-1")
+		self.assertEqual(doc.packs[0].num_packages, 30)
+		self.assertEqual(flt(doc.packs[0].net_per), 25.0)
+		# get_shipment_detail surfaces packs + the new fields back to the edit form
+		detail = get_shipment_detail(shp["name"])
+		self.assertEqual(len(detail["packs"]), 1)
+		self.assertEqual(detail["packs"][0]["pack_type"], "HDPE Drums")
+		self.assertEqual(detail["shipment"]["gst_export_mode"], "On payment of IGST")
+		# replacing with an empty packs list clears them
+		update_shipment(shp["name"], {"packs": []})
+		self.assertEqual(len(frappe.get_doc("Export Shipment", shp["name"]).packs), 0)
+
+	def test_pack_rejects_item_not_on_shipment(self):
+		so, customer, _s1, _s2 = self.setup_deal(qty_a=100)
+		shp = self.make_test_shipment(so, customer, qty=60)
+		stray = make_plain_item(f"_Test EF L Stray {_suffix()}")
+		with self.assertRaises(frappe.ValidationError):
+			update_shipment(
+				shp["name"],
+				{"packs": [{"item_code": stray, "num_packages": 1, "net_per": 10}]},
+			)
 
 	def test_shipment_rejects_foreign_so_line(self):
 		so, customer, _s1, _s2 = self.setup_deal(qty_a=10)
