@@ -34,6 +34,8 @@ export function PurchaseOrderDetail() {
 	const { call: amendDoc, loading: amending } = useFrappePostCall<{ message: { name: string } }>(
 		API.amendDoc,
 	);
+	const { call: closeOrder, loading: closing } = useFrappePostCall(API.closeOrder);
+	const { call: reopenOrder, loading: reopening } = useFrappePostCall(API.reopenOrder);
 	const { updateDoc, loading: savingInvoice } = useFrappeUpdateDoc<POInvoiceWritable>();
 	const [actionErr, setActionErr] = useState<string | null>(null);
 	const [invoiceErr, setInvoiceErr] = useState<string | null>(null);
@@ -67,6 +69,26 @@ export function PurchaseOrderDetail() {
 		try {
 			const r = await amendDoc({ doctype: 'Purchase Order', name: id });
 			navigate('/purchases/' + r.message.name + '/edit');
+		} catch (e) {
+			setActionErr(parseServerError(e));
+		}
+	}
+
+	async function onCloseOrder() {
+		setActionErr(null);
+		try {
+			await closeOrder({ doctype: 'Purchase Order', name: id });
+			await mutate();
+		} catch (e) {
+			setActionErr(parseServerError(e));
+		}
+	}
+
+	async function onReopenOrder() {
+		setActionErr(null);
+		try {
+			await reopenOrder({ doctype: 'Purchase Order', name: id });
+			await mutate();
 		} catch (e) {
 			setActionErr(parseServerError(e));
 		}
@@ -160,6 +182,16 @@ export function PurchaseOrderDetail() {
 				{can.amend && (
 					<button className="btn" disabled={amending} onClick={() => void onAmend()}>
 						<Icon name="refresh" size={15} /> {amending ? 'Amending…' : 'Amend'}
+					</button>
+				)}
+				{can.close && (
+					<button className="btn" disabled={closing} onClick={() => void onCloseOrder()}>
+						<Icon name="lock" size={15} /> {closing ? 'Closing…' : 'Close'}
+					</button>
+				)}
+				{can.reopen && (
+					<button className="btn" disabled={reopening} onClick={() => void onReopenOrder()}>
+						<Icon name="unlock" size={15} /> {reopening ? 'Reopening…' : 'Re-open'}
 					</button>
 				)}
 				{po.docstatus === 0 && can.submit && (

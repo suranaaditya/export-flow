@@ -8,6 +8,7 @@ import {
 } from 'frappe-react-sdk';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { DocumentChecklist } from '@/components/DocumentChecklist';
+import { IncentiveModal, RealizationModal } from '@/components/financeModals';
 import { Icon } from '@/components/Icon';
 import { Card, CHead, EmptyMsg, Facts, LRow, Modal, Tag } from '@/components/ui';
 import { CheckInput, Field, SearchSelect, SelectInput, TextArea, TextInput } from '@/components/form';
@@ -27,6 +28,7 @@ import {
 	type MttOutlay,
 	type ShipmentDetailData,
 	type ShipmentFinanceData,
+	type ShipmentFinanceSeed,
 } from '@/lib/api';
 import { daysUntil, fmtDate, fmtMoney } from '@/lib/format';
 
@@ -427,26 +429,71 @@ export function ShipmentDetail() {
 	);
 }
 
-/** Incentives + realization attached to this shipment (read-only summary;
- *  full editing lives on the Finance screen). */
+/** Incentives + realization attached to this shipment, with inline "Add"
+ *  actions that open the finance modals pre-seeded from the shipment + SO.
+ *  Full editing also lives on the Finance screen. */
 function ShipmentFinanceCard({ shipment, merchanting }: { shipment: string; merchanting: boolean }) {
-	const { data } = useFrappeGetCall<{ message: ShipmentFinanceData }>(API.shipmentFinance, {
+	const { data, mutate } = useFrappeGetCall<{ message: ShipmentFinanceData }>(API.shipmentFinance, {
 		shipment,
 	});
+	// seed values (export value / currency / date) for the create modals; light
+	// query that settles before the user clicks, so the modal opens pre-filled
+	const seedQ = useFrappeGetCall<{ message: ShipmentFinanceSeed }>(API.shipmentFinanceSeed, {
+		shipment,
+	});
+	const [modal, setModal] = useState<'incentive' | 'realization' | null>(null);
+
 	const fin = data?.message;
-	if (!fin || (fin.incentives.length === 0 && fin.realizations.length === 0)) return null;
+	if (!fin) return null;
+	const canRel = fin.can.realization_write;
+	// incentives (RoDTEP / drawback) never apply to merchanting trades
+	const canInc = fin.can.incentive_write && !merchanting;
+	const hasContent = fin.incentives.length > 0 || fin.realizations.length > 0;
+	if (!hasContent && !canRel && !canInc) return null;
+
+	const seed = seedQ.data?.message;
+	const seedSettled = seedQ.data !== undefined || !!seedQ.error;
+	// a shipment spanning SOs in different currencies has no single FCY invoice
+	// value to pre-fill — tell the user to set it by hand
+	const currencyConflict = canRel && !!seed?.currency_conflict;
+
+	// link actions inherit the `.chead a` style (iris + hover underline); href="#"
+	// keeps them keyboard-focusable, matching the Finance screen's create links
+	const actions = (
+		<span style={{ display: 'inline-flex', gap: 14, alignItems: 'center' }}>
+			{seedSettled && canRel && (
+				<a href="#" onClick={(e) => { e.preventDefault(); setModal('realization'); }}>Add realization</a>
+			)}
+			{seedSettled && canInc && (
+				<a href="#" onClick={(e) => { e.preventDefault(); setModal('incentive'); }}>Add incentive</a>
+			)}
+			<Link to="/finance">Open finance</Link>
+		</span>
+	);
 
 	return (
 		<Card>
 			<CHead
 				icon="banknote"
 				title={merchanting ? 'Bank realization' : 'Incentives & realization'}
-				action={
-					<Link to="/finance" style={{ fontSize: '12.5px', color: 'var(--iris)', textDecoration: 'none', fontWeight: 500 }}>
-						Open finance
-					</Link>
-				}
+				action={actions}
 			/>
+			{currencyConflict && (
+				<div className="sub" style={{ padding: '10px 18px 0' }}>
+					This shipment spans multiple currencies — set the currency and invoice value
+					when adding a realization.
+				</div>
+			)}
+			{!hasContent && (
+				<EmptyMsg
+					title="No finance records yet"
+					text={
+						merchanting
+							? 'Track export proceeds (FIRC → eBRC) for this trade.'
+							: 'Add a RoDTEP / drawback incentive or a bank realization for this shipment.'
+					}
+				/>
+			)}
 			{fin.incentives.map((i) => (
 				<LRow
 					key={i.name}
@@ -472,6 +519,35 @@ function ShipmentFinanceCard({ shipment, merchanting }: { shipment: string; merc
 					right={<Tag tone={realizationTone(r)}>{r.overdue ? 'Overdue' : r.status}</Tag>}
 				/>
 			))}
+			{modal === 'realization' && (
+				<RealizationModal
+					record={null}
+					seed={{
+						shipment,
+						currency: seed?.currency ?? null,
+						invoice_value: seed?.invoice_value ?? null,
+						export_date: seed?.export_date ?? null,
+					}}
+					lockShipment
+					onClose={() => setModal(null)}
+					onSaved={() => {
+						setModal(null);
+						void mutate();
+					}}
+				/>
+			)}
+			{modal === 'incentive' && (
+				<IncentiveModal
+					record={null}
+					seed={{ shipment, fob_value: seed?.fob_value_inr ?? null }}
+					lockShipment
+					onClose={() => setModal(null)}
+					onSaved={() => {
+						setModal(null);
+						void mutate();
+					}}
+				/>
+			)}
 		</Card>
 	);
 }

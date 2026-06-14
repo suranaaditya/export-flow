@@ -16,11 +16,18 @@ from exportflow.api import (
 	update_document_instance,
 )
 from exportflow.api import (
+	close_order,
+	create_export_sales_order,
 	create_purchase_order_draft,
 	create_shipment,
 	get_finance_workspace,
+	get_po_detail,
 	get_sales_dashboard,
 	get_shipment_finance,
+	get_shipment_finance_seed,
+	get_so_money_summary,
+	reopen_order,
+	submit_sales_order,
 )
 from exportflow.setup import seed_checklist_rules, seed_document_types
 from exportflow.tasks import (
@@ -578,3 +585,133 @@ class TestIntelligence(IntegrationTestCase):
 		self.assertTrue(
 			any(r["currency"] == pfi.currency and r["amount"] >= 5000 for r in d["kpis"]["receivable"])
 		)
+
+	# ------------------------------------------------ #4(a) finance-from-shipment
+
+	def test_shipment_finance_seed(self):
+		"""Export value = Σ(shipped qty × SO line rate): FCY for the realization
+		invoice value, company currency for the incentive FOB basis. Currency and
+		export date come straight from the SO and the B/L."""
+		so, customer, _s = self.make_deal(qty=10)  # EUR rate 12, conversion 83
+		shp = self.make_shipment(so, customer, qty=8)
+		frappe.db.set_value("Export Shipment", shp, "bl_date", "2026-01-15")
+
+		seed = get_shipment_finance_seed(shp)
+		self.assertEqual(seed["currency"], so.currency)
+		self.assertFalse(seed["currency_conflict"])
+		self.assertEqual(flt(seed["invoice_value"]), 96.0, "8 × 12 in the deal currency")
+		self.assertEqual(flt(seed["fob_value_inr"]), 7968.0, "8 × (12 × 83) in company currency")
+		self.assertEqual(seed["customer"], customer)
+		self.assertEqual(str(seed["export_date"]), "2026-01-15")
+		self.assertFalse(seed["merchanting"])
+
+	def test_shipment_finance_seed_currency_conflict(self):
+		"""A shipment spanning two SOs in different currencies cannot offer one
+		FCY invoice value — currency/value blank, but the company-currency FOB
+		(base_rate) still aggregates."""
+		sfx = _suffix()
+		item = make_plain_item(f"_Test EF Seed {sfx}")
+		customer = make_customer(f"_Test EF Seed Cust {sfx}")
+		company_currency = frappe.db.get_value("Company", self.company, "default_currency")
+		alt = "EUR" if company_currency != "EUR" else "GBP"
+
+		def mk(currency, rate):
+			r = create_export_sales_order(
+				{
+					"customer": customer,
+					"currency": currency,
+					"conversion_rate": 1 if currency == company_currency else 83,
+					"delivery_date": add_days(nowdate(), 30),
+					"items": [{"item_code": item, "qty": 5, "rate": rate}],
+				}
+			)
+			submit_sales_order(r["name"])
+			return frappe.get_doc("Sales Order", r["name"])
+
+		so_alt = mk(alt, 10)  # base_rate = 10 × 83 = 830
+		so_home = mk(company_currency, 20)  # base_rate = 20 × 1 = 20
+		shp = create_shipment(
+			{
+				"customer": customer,
+				"mode": "Sea",
+				"items": [
+					{
+						"item_code": item,
+						"qty": 5,
+						"uom": so_alt.items[0].uom,
+						"sales_order": so_alt.name,
+						"so_detail": so_alt.items[0].name,
+					},
+					{
+						"item_code": item,
+						"qty": 5,
+						"uom": so_home.items[0].uom,
+						"sales_order": so_home.name,
+						"so_detail": so_home.items[0].name,
+					},
+				],
+			}
+		)["name"]
+
+		seed = get_shipment_finance_seed(shp)
+		self.assertTrue(seed["currency_conflict"])
+		self.assertIsNone(seed["currency"])
+		self.assertIsNone(seed["invoice_value"])
+		self.assertEqual(flt(seed["fob_value_inr"]), 4250.0, "5×830 + 5×20")
+
+	# ------------------------------------------------------ #4(d) order closing
+
+	def test_close_and_reopen_sales_order(self):
+		so, _customer, _s = self.make_deal()
+		self.assertEqual(so.docstatus, 1)
+
+		res = close_order("Sales Order", so.name)
+		self.assertEqual(res["status"], "Closed")
+		summ = get_so_money_summary(so.name)
+		self.assertFalse(summ["can"]["close"], "already closed")
+		self.assertTrue(summ["can"]["reopen"])
+
+		# closing again is a no-op, not an error
+		self.assertEqual(close_order("Sales Order", so.name)["status"], "Closed")
+
+		res2 = reopen_order("Sales Order", so.name)
+		self.assertNotEqual(res2["status"], "Closed", "reopen recomputes the real status")
+		summ2 = get_so_money_summary(so.name)
+		self.assertTrue(summ2["can"]["close"])
+		self.assertFalse(summ2["can"]["reopen"])
+
+	def test_close_and_reopen_purchase_order(self):
+		so, _customer, supplier = self.make_deal(qty=10)
+		result = create_purchase_order(
+			so.name, [{"so_detail": so.items[0].name, "supplier": supplier, "qty": 10, "rate": 9}]
+		)
+		po_name = result["purchase_orders"][0]["name"]
+		submit_purchase_order(po_name)
+
+		self.assertEqual(close_order("Purchase Order", po_name)["status"], "Closed")
+		det = get_po_detail(po_name)
+		self.assertTrue(det["can"]["reopen"])
+		self.assertFalse(det["can"]["close"])
+
+		reopen_order("Purchase Order", po_name)
+		self.assertNotEqual(
+			frappe.db.get_value("Purchase Order", po_name, "status"), "Closed"
+		)
+
+	def test_close_rejects_unsubmitted_and_unknown(self):
+		sfx = _suffix()
+		item = make_plain_item(f"_Test EF Close {sfx}")
+		customer = make_customer(f"_Test EF Close Cust {sfx}")
+		draft = create_export_sales_order(
+			{
+				"customer": customer,
+				"currency": "EUR",
+				"conversion_rate": 83,
+				"delivery_date": add_days(nowdate(), 30),
+				"items": [{"item_code": item, "qty": 5, "rate": 10}],
+			}
+		)
+		with self.assertRaises(frappe.ValidationError):
+			close_order("Sales Order", draft["name"])  # still a draft
+		with self.assertRaises(frappe.ValidationError):
+			close_order("Export Shipment", "anything")  # not a closeable doctype

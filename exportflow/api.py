@@ -91,7 +91,7 @@ def get_so_money_summary(sales_order: str) -> dict:
 			fields=["item_code", "item_name", "qty", "uom", "rate", "amount"],
 			order_by="idx asc",
 		),
-		"can": _doc_can("Sales Order", sales_order),
+		"can": _doc_can("Sales Order", sales_order, status=so.status),
 	}
 
 
@@ -336,13 +336,18 @@ def submit_sales_order(name: str) -> dict:
 
 # ---------------------------------------------------------------- edit / amend
 
-def _doc_can(doctype: str, name: str, *, amendable: bool = True) -> dict:
+# orders whose lifecycle can be Closed / Re-opened (ERPNext update_status)
+CLOSEABLE_DOCTYPES = ("Sales Order", "Purchase Order")
+
+
+def _doc_can(doctype: str, name: str, *, amendable: bool = True, status: str | None = None) -> dict:
 	"""Edit affordances the detail screens gate on — straight from the user's
 	ERPNext role permissions. `amend` is offered only for a submitted doc the
-	user may amend; `edit` means a draft the user may write."""
+	user may amend; `edit` means a draft the user may write. For closeable orders
+	(SO/PO) `close`/`reopen` reflect the status (pass it in to skip a re-query)."""
 	docstatus = cint(frappe.db.get_value(doctype, name, "docstatus"))
 	can_write = bool(frappe.has_permission(doctype, "write", doc=name))
-	return {
+	out = {
 		"docstatus": docstatus,
 		"write": can_write,
 		"edit": can_write and docstatus == 0,
@@ -352,6 +357,39 @@ def _doc_can(doctype: str, name: str, *, amendable: bool = True) -> dict:
 			amendable and docstatus == 1 and frappe.has_permission(doctype, "amend", doc=name)
 		),
 	}
+	if doctype in CLOSEABLE_DOCTYPES:
+		st = status if status is not None else frappe.db.get_value(doctype, name, "status")
+		out["close"] = bool(can_write and docstatus == 1 and st not in ("Closed", "Cancelled"))
+		out["reopen"] = bool(can_write and st == "Closed")
+	return out
+
+
+@frappe.whitelist()
+def close_order(doctype: str, name: str) -> dict:
+	"""Close a submitted Sales/Purchase Order — stops further billing/delivery
+	without cancelling it (ERPNext update_status). Re-openable later."""
+	if doctype not in CLOSEABLE_DOCTYPES:
+		frappe.throw(_("{0} cannot be closed here").format(doctype))
+	doc = frappe.get_doc(doctype, name)
+	doc.check_permission("write")
+	if doc.docstatus != 1:
+		frappe.throw(_("Only a submitted order can be closed"))
+	if doc.status != "Closed":
+		doc.update_status("Closed")
+	return {"name": name, "status": frappe.db.get_value(doctype, name, "status")}
+
+
+@frappe.whitelist()
+def reopen_order(doctype: str, name: str) -> dict:
+	"""Re-open a Closed Sales/Purchase Order. ERPNext's update_status('Draft') is
+	the documented re-open sentinel — it recomputes the real lifecycle status."""
+	if doctype not in CLOSEABLE_DOCTYPES:
+		frappe.throw(_("{0} cannot be reopened here").format(doctype))
+	doc = frappe.get_doc(doctype, name)
+	doc.check_permission("write")
+	if doc.status == "Closed":
+		doc.update_status("Draft")
+	return {"name": name, "status": frappe.db.get_value(doctype, name, "status")}
 
 
 @frappe.whitelist()
@@ -1081,7 +1119,7 @@ def get_po_detail(name: str) -> dict:
 		"items": items,
 		"extra_charges": extra_charges,
 		"shipments": shipments,
-		"can": _doc_can("Purchase Order", name),
+		"can": _doc_can("Purchase Order", name, status=po.status),
 	}
 
 
@@ -2163,6 +2201,71 @@ def get_shipment_finance(shipment: str) -> dict:
 			"incentive_write": bool(frappe.has_permission("Export Incentive", "create")),
 			"realization_write": bool(frappe.has_permission("Export Realization", "create")),
 		},
+	}
+
+
+@frappe.whitelist()
+def get_shipment_finance_seed(shipment: str) -> dict:
+	"""Pre-fill values for creating an incentive or a realization straight from
+	the shipment finance card. The export value is Σ(shipped qty × SO line rate)
+	over THIS shipment's lines — surfaced both in the deal currency (the
+	realization invoice value) and in INR (the incentive FOB basis). Customer,
+	export date and the FEMA due date are derived by the document controllers on
+	save; export_date is previewed here only so the form shows it. Currency is
+	returned only when every line's sales order shares one (else the user picks)."""
+	frappe.has_permission("Export Shipment", "read", doc=shipment, throw=True)
+	shp = frappe.db.get_value(
+		"Export Shipment",
+		shipment,
+		["customer", "customer_name", "mode", "bl_date", "awb_date", "trade_type"],
+		as_dict=True,
+	)
+	if not shp:
+		frappe.throw(_("Shipment {0} not found").format(shipment))
+
+	from exportflow.mtt import is_merchanting
+
+	rows = frappe.get_all(
+		"Export Shipment Item",
+		filters={"parent": shipment},
+		fields=["qty", "so_detail", "sales_order"],
+	)
+	currencies: set[str] = set()
+	so_currency: dict[str, str | None] = {}
+	fcy = inr = 0.0
+	for r in rows:
+		# so_detail/sales_order are reqd and validate_items guarantees they
+		# resolve, so the defensive skips below never fire for a saved shipment
+		if not r.so_detail:
+			continue
+		line = frappe.db.get_value(
+			"Sales Order Item", r.so_detail, ["rate", "base_rate"], as_dict=True
+		)
+		if not line:
+			continue
+		fcy += flt(r.qty) * flt(line.rate)
+		inr += flt(r.qty) * flt(line.base_rate)
+		if r.sales_order:
+			if r.sales_order not in so_currency:
+				so_currency[r.sales_order] = frappe.db.get_value(
+					"Sales Order", r.sales_order, "currency"
+				)
+			if so_currency[r.sales_order]:
+				currencies.add(so_currency[r.sales_order])
+
+	homogeneous = len(currencies) == 1
+	export_date = shp.awb_date if shp.mode == "Air" else shp.bl_date
+	return {
+		"shipment": shipment,
+		"customer": shp.customer,
+		"customer_name": shp.customer_name,
+		"merchanting": is_merchanting(shp.trade_type),
+		"currency": next(iter(currencies)) if homogeneous else None,
+		"currency_conflict": len(currencies) > 1,
+		# FCY total is only meaningful within a single currency
+		"invoice_value": flt(fcy, 2) if homogeneous else None,
+		"fob_value_inr": flt(inr, 2),
+		"export_date": str(export_date) if export_date else None,
 	}
 
 

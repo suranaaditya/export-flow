@@ -71,6 +71,8 @@ export interface DocCan {
 	submit: boolean;
 	cancel: boolean;
 	amend: boolean; // submitted doc the user may amend
+	close?: boolean; // closeable orders (SO/PO): submitted & not yet closed
+	reopen?: boolean; // closeable orders (SO/PO): currently closed
 }
 
 export interface SOItemLine {
@@ -158,11 +160,14 @@ export const API = {
 	compliancePermissions: 'exportflow.api.get_compliance_permissions',
 	financeWorkspace: 'exportflow.api.get_finance_workspace',
 	shipmentFinance: 'exportflow.api.get_shipment_finance',
+	shipmentFinanceSeed: 'exportflow.api.get_shipment_finance_seed',
 	soForEdit: 'exportflow.api.get_sales_order_for_edit',
 	updateSo: 'exportflow.api.update_sales_order',
 	updatePo: 'exportflow.api.update_purchase_order_doc',
 	updateShipment: 'exportflow.api.update_shipment',
 	amendDoc: 'exportflow.api.amend_document',
+	closeOrder: 'exportflow.api.close_order',
+	reopenOrder: 'exportflow.api.reopen_order',
 	companyLogo: 'exportflow.api.get_company_logo',
 } as const;
 
@@ -326,6 +331,21 @@ export interface ShipmentFinanceData {
 	realizations: RealizationRow[];
 	mtt: MTTBlock | null;
 	can: { incentive_write: boolean; realization_write: boolean };
+}
+
+/** Pre-fill values for creating an incentive/realization from a shipment.
+ *  Export value = Σ(shipped qty × SO line rate): FCY for the realization
+ *  invoice value, INR for the incentive FOB basis. */
+export interface ShipmentFinanceSeed {
+	shipment: string;
+	customer: string | null;
+	customer_name: string | null;
+	merchanting: boolean;
+	currency: string | null;
+	currency_conflict: boolean;
+	invoice_value: number | null;
+	fob_value_inr: number;
+	export_date: string | null;
 }
 
 /** Incentive status → chip tone. */

@@ -46,6 +46,8 @@ export function SalesOrderDetail() {
 	const { call: amendDoc, loading: amending } = useFrappePostCall<{ message: { name: string } }>(
 		API.amendDoc,
 	);
+	const { call: closeOrder, loading: closing } = useFrappePostCall(API.closeOrder);
+	const { call: reopenOrder, loading: reopening } = useFrappePostCall(API.reopenOrder);
 	const [actionErr, setActionErr] = useState<string | null>(null);
 
 	async function onAmend() {
@@ -53,6 +55,26 @@ export function SalesOrderDetail() {
 		try {
 			const r = await amendDoc({ doctype: 'Sales Order', name: id });
 			navigate('/sales-orders/' + r.message.name + '/edit');
+		} catch (e) {
+			setActionErr(parseServerError(e));
+		}
+	}
+
+	async function onCloseOrder() {
+		setActionErr(null);
+		try {
+			await closeOrder({ doctype: 'Sales Order', name: id });
+			await mutate();
+		} catch (e) {
+			setActionErr(parseServerError(e));
+		}
+	}
+
+	async function onReopenOrder() {
+		setActionErr(null);
+		try {
+			await reopenOrder({ doctype: 'Sales Order', name: id });
+			await mutate();
 		} catch (e) {
 			setActionErr(parseServerError(e));
 		}
@@ -242,6 +264,16 @@ export function SalesOrderDetail() {
 						{can.amend && (
 							<button className="btn" disabled={amending} onClick={() => void onAmend()}>
 								<Icon name="refresh" size={15} /> {amending ? 'Amending…' : 'Amend'}
+							</button>
+						)}
+						{can.close && (
+							<button className="btn" disabled={closing} onClick={() => void onCloseOrder()}>
+								<Icon name="lock" size={15} /> {closing ? 'Closing…' : 'Close'}
+							</button>
+						)}
+						{can.reopen && (
+							<button className="btn" disabled={reopening} onClick={() => void onReopenOrder()}>
+								<Icon name="unlock" size={15} /> {reopening ? 'Reopening…' : 'Re-open'}
 							</button>
 						)}
 						<button className="btn" onClick={() => navigate('/lc/new?so=' + id)}>
