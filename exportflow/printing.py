@@ -32,6 +32,41 @@ def _supplier_gstin(supplier: str) -> str | None:
 	return frappe.db.get_value("Supplier", supplier, "gstin")
 
 
+def party_address(party_type: str, party: str) -> str | None:
+	"""Default address of a party as clean multi-line PLAIN text — for the PO / SO
+	print blocks. get_address_display returns <br>-joined HTML, which | striptags
+	would collapse to one run-on line; we flatten the <br>s to real newlines so the
+	template can render it with `| e` inside white-space:pre-wrap, exactly like the
+	free-text exporter address."""
+	import re
+	from html import unescape
+
+	html = _address_display(party_type, party)
+	if not html:
+		return None
+	text = re.sub(r"<br\s*/?>", "\n", html, flags=re.IGNORECASE)
+	text = re.sub(r"<[^>]+>", "", text)
+	lines = [ln.strip().rstrip(",").strip() for ln in unescape(text).splitlines()]
+	return "\n".join(ln for ln in lines if ln) or None
+
+
+def exporter_profile():
+	"""The exporter's identity (ExportFlow Settings + company) for the PO / SO
+	print blocks — the same details the shipment documents show. Registered as a
+	jinja method."""
+	settings = frappe.get_single("ExportFlow Settings")
+	company = exportflow_company()
+	return frappe._dict(
+		company_name=frappe.db.get_value("Company", company, "company_name") or company,
+		address=settings.exporter_address,
+		gstin=settings.gstin,
+		iec=settings.iec_number,
+		lut=settings.lut_number,
+		signatory_name=settings.signatory_name,
+		signatory_designation=settings.signatory_designation,
+	)
+
+
 def document_print_context(name: str):
 	"""Everything the ExportFlow shipment print formats render."""
 	inst = frappe.get_doc("Document Instance", name)

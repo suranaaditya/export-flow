@@ -10,6 +10,8 @@ import {
 	lcTone,
 	parseServerError,
 	pfiTone,
+	printPdfUrl,
+	printPreviewUrl,
 	soTone,
 	urgencyTone,
 	type SOProcurement,
@@ -204,6 +206,24 @@ export function SalesOrderDetail() {
 					<Tag tone={soTone(so.status)}>{so.status}</Tag>
 				</span>
 				<span className="spacer" />
+				<a
+					className="btn"
+					href={printPreviewUrl('Sales Order', id, 'ExportFlow Sales Order')}
+					target="_blank"
+					rel="noreferrer"
+					style={{ textDecoration: 'none' }}
+				>
+					<Icon name="file-text" size={15} /> Print
+				</a>
+				<a
+					className="btn"
+					href={printPdfUrl('Sales Order', id, 'ExportFlow Sales Order')}
+					target="_blank"
+					rel="noreferrer"
+					style={{ textDecoration: 'none' }}
+				>
+					<Icon name="download" size={15} /> PDF
+				</a>
 				{so.docstatus === 0 ? (
 					<>
 						{can.edit && (

@@ -387,7 +387,127 @@ COVERING_SCHEDULE = (
 )
 
 
-def write_format(folder: str, name: str, html: str):
+SALES_ORDER = """{%- set ex = exporter_profile() -%}
+{%- set cust_addr = party_address("Customer", doc.customer) -%}
+{%- set dest = frappe.db.get_value("Customer", doc.customer, "destination_country") -%}
+<style>
+  .ef-so { font-family: Helvetica, Arial, sans-serif; font-size: 12px; color: #1a2030; line-height: 1.5; }
+  .ef-so h1 { font-size: 20px; letter-spacing: .14em; margin: 0 0 2px; }
+  .ef-so .muted { color: #586273; }
+  .ef-so .mono { font-family: Menlo, Consolas, monospace; }
+  .ef-so .head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #1a2030; padding-bottom: 10px; margin-bottom: 14px; }
+  .ef-so table.meta { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
+  .ef-so table.meta td { vertical-align: top; padding: 0 8px 0 0; width: 50%; }
+  .ef-so .blk { border: 1px solid #dcdfe6; padding: 9px 11px; min-height: 86px; }
+  .ef-so .blk .lbl { font-size: 9.5px; text-transform: uppercase; letter-spacing: .08em; color: #586273; margin-bottom: 4px; }
+  .ef-so table.kv { width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 12px; }
+  .ef-so table.kv td { padding: 2px 8px 2px 0; }
+  .ef-so table.kv td.k { color: #586273; white-space: nowrap; width: 120px; }
+  .ef-so table.items { width: 100%; border-collapse: collapse; margin: 6px 0 0; }
+  .ef-so table.items th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; border-top: 1px solid #1a2030; border-bottom: 1px solid #1a2030; padding: 6px 8px; }
+  .ef-so table.items td { border-bottom: 1px solid #e7e9ee; padding: 6px 8px; vertical-align: top; }
+  .ef-so table.items .r { text-align: right; }
+  .ef-so table.totals { width: 45%; margin-left: auto; margin-top: 8px; border-collapse: collapse; }
+  .ef-so table.totals td { padding: 3px 8px; }
+  .ef-so table.totals .r { text-align: right; }
+  .ef-so table.totals .grand td { font-weight: bold; font-size: 14px; border-top: 2px solid #1a2030; }
+  .ef-so .terms { margin-top: 16px; white-space: pre-wrap; }
+  .ef-so .terms .lbl { font-size: 9.5px; text-transform: uppercase; letter-spacing: .08em; color: #586273; margin-bottom: 4px; }
+  .ef-so .foot { margin-top: 26px; display: flex; justify-content: space-between; align-items: flex-end; }
+  .ef-so .sig { margin-top: 50px; border-top: 1px solid #1a2030; width: 220px; padding-top: 4px; font-size: 10.5px; }
+</style>
+<div class="ef-so">
+  <div class="head">
+    <div>
+      <h1>SALES ORDER</h1>
+      <div class="muted">Export order confirmation</div>
+    </div>
+    <div style="text-align:right">
+      <div class="mono" style="font-size:14px"><b>{{ doc.name }}</b></div>
+      <div class="muted">Date: <span class="mono">{{ frappe.utils.formatdate(doc.transaction_date, "dd MMM yyyy") }}</span></div>
+      {% if doc.delivery_date %}<div class="muted">Delivery by: <span class="mono">{{ frappe.utils.formatdate(doc.delivery_date, "dd MMM yyyy") }}</span></div>{% endif %}
+      {% if doc.docstatus == 0 %}<div class="muted"><b>DRAFT</b></div>{% endif %}
+    </div>
+  </div>
+
+  <table class="meta"><tr>
+    <td><div class="blk">
+      <div class="lbl">Exporter / Seller</div>
+      <b>{{ ex.company_name }}</b><br>
+      {% if ex.address %}<span class="muted" style="white-space:pre-wrap">{{ ex.address | e }}</span><br>{% endif %}
+      {% if ex.gstin %}GSTIN: <span class="mono">{{ ex.gstin }}</span><br>{% endif %}
+      {% if ex.iec %}IEC: <span class="mono">{{ ex.iec }}</span>{% endif %}
+    </div></td>
+    <td><div class="blk">
+      <div class="lbl">Customer / Buyer</div>
+      <b>{{ doc.customer_name or doc.customer }}</b><br>
+      {% if cust_addr %}<span class="muted" style="white-space:pre-wrap">{{ cust_addr | e }}</span><br>{% endif %}
+      {% if dest %}<span class="muted">Country of final destination:</span> {{ dest }}{% endif %}
+    </div></td>
+  </tr></table>
+
+  <table class="kv">
+    <tr>
+      <td class="k">Currency</td><td class="mono">{{ doc.currency }}</td>
+      <td class="k">Incoterm</td><td>{% if doc.incoterm %}{{ doc.incoterm }}{% if doc.named_place %} · {{ doc.named_place }}{% endif %}{% else %}—{% endif %}</td>
+    </tr>
+    {% if doc.po_no or doc.payment_terms_template %}
+    <tr>
+      <td class="k">Buyer's ref</td><td class="mono">{{ doc.po_no or "—" }}</td>
+      <td class="k">Payment terms</td><td>{{ doc.payment_terms_template or "—" }}</td>
+    </tr>
+    {% endif %}
+  </table>
+
+  <table class="items">
+    <thead><tr><th style="width:26px">#</th><th>Description</th><th>HSN</th><th class="r">Qty</th><th class="r">Rate</th><th class="r">Amount ({{ doc.currency }})</th></tr></thead>
+    <tbody>
+    {% for row in doc.items %}
+      <tr>
+        <td class="mono">{{ loop.index }}</td>
+        <td><b>{{ row.item_name }}</b>{% if row.item_code != row.item_name %}<br><span class="muted mono" style="font-size:10px">{{ row.item_code }}</span>{% endif %}</td>
+        <td class="mono">{{ row.get("gst_hsn_code") or "" }}</td>
+        <td class="r mono">{{ frappe.utils.flt(row.qty) }} {{ row.uom or "" }}</td>
+        <td class="r mono">{{ frappe.utils.fmt_money(row.rate, currency=doc.currency) }}</td>
+        <td class="r mono">{{ frappe.utils.fmt_money(row.amount, currency=doc.currency) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  <table class="totals">
+    <tr><td class="muted">Net total</td><td class="r mono">{{ frappe.utils.fmt_money(doc.net_total, currency=doc.currency) }}</td></tr>
+    {% for tax in doc.taxes %}
+    <tr><td class="muted">{{ tax.description }}{% if tax.rate %} @ {{ frappe.utils.flt(tax.rate) }}%{% endif %}</td><td class="r mono">{{ frappe.utils.fmt_money(tax.base_tax_amount_after_discount_amount or tax.tax_amount, currency=doc.currency) }}</td></tr>
+    {% endfor %}
+    <tr class="grand"><td>Grand total</td><td class="r mono">{{ frappe.utils.fmt_money(doc.grand_total, currency=doc.currency) }}</td></tr>
+    <tr><td colspan="2" class="muted" style="font-size:10.5px">{{ frappe.utils.money_in_words(doc.grand_total, doc.currency) }}</td></tr>
+  </table>
+
+  {% if doc.terms %}
+  <div class="terms">
+    <div class="lbl">Terms &amp; conditions{% if doc.tc_name %} · {{ doc.tc_name }}{% endif %}</div>{{ doc.terms | striptags }}
+  </div>
+  {% endif %}
+
+  <div class="foot">
+    <div class="muted" style="font-size:10.5px">This sales order is system generated by ExportFlow.</div>
+    <div>
+      <div class="muted" style="font-size:10.5px">For {{ ex.company_name }}</div>
+      <div class="sig">{% if ex.signatory_name %}{{ ex.signatory_name }}{% if ex.signatory_designation %} · {{ ex.signatory_designation }}{% endif %}<br>{% endif %}Authorised signatory</div>
+    </div>
+  </div>
+</div>
+"""
+
+
+def write_format(
+	folder: str,
+	name: str,
+	html: str,
+	doc_type: str = "Document Instance",
+	modified: str = "2026-06-12 12:30:00.000000",
+):
 	payload = {
 		"absolute_value": 0,
 		"align_labels_right": 0,
@@ -396,7 +516,7 @@ def write_format(folder: str, name: str, html: str):
 		"custom_format": 1,
 		"default_print_language": "en",
 		"disabled": 0,
-		"doc_type": "Document Instance",
+		"doc_type": doc_type,
 		"docstatus": 0,
 		"doctype": "Print Format",
 		"font_size": 12,
@@ -409,7 +529,7 @@ def write_format(folder: str, name: str, html: str):
 		"margin_top": 15.0,
 		# bump on every edit — frappe only re-syncs a standard print format
 		# when the file's modified stamp is newer than the DB record
-		"modified": "2026-06-12 12:30:00.000000",
+		"modified": modified,
 		"modified_by": "Administrator",
 		"module": "ExportFlow",
 		"name": name,
@@ -435,3 +555,10 @@ if __name__ == "__main__":
 	write_format("exportflow_shipping_instruction", "ExportFlow Shipping Instruction", SHIPPING_INSTRUCTION)
 	write_format("exportflow_bill_of_exchange", "ExportFlow Bill of Exchange", BILL_OF_EXCHANGE)
 	write_format("exportflow_covering_schedule", "ExportFlow Covering Schedule", COVERING_SCHEDULE)
+	write_format(
+		"exportflow_sales_order",
+		"ExportFlow Sales Order",
+		SALES_ORDER,
+		doc_type="Sales Order",
+		modified="2026-06-14 13:00:00.000000",
+	)

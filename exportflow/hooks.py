@@ -68,6 +68,8 @@ doc_events = {
 jinja = {
 	"methods": [
 		"exportflow.printing.document_print_context",
+		"exportflow.printing.party_address",
+		"exportflow.printing.exporter_profile",
 	],
 }
 
