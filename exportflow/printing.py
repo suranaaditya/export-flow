@@ -32,6 +32,30 @@ def _supplier_gstin(supplier: str) -> str | None:
 	return frappe.db.get_value("Supplier", supplier, "gstin")
 
 
+def _logo_data_uri() -> str | None:
+	"""The company logo as a base64 data URI, read straight from the File content.
+	Embedding it avoids depending on the web server serving /files (which is
+	misconfigured on this multi-tenant bench) and is what lets wkhtmltopdf render
+	the logo inline in the PDF."""
+	url = frappe.db.get_single_value("ExportFlow Settings", "company_logo")
+	if not url:
+		return None
+	try:
+		import base64
+		import mimetypes
+
+		names = frappe.get_all("File", filters={"file_url": url}, pluck="name", limit=1)
+		if not names:
+			return None
+		content = frappe.get_doc("File", names[0]).get_content()
+		if isinstance(content, str):
+			content = content.encode()
+		mime = mimetypes.guess_type(url)[0] or "image/png"
+		return f"data:{mime};base64,{base64.b64encode(content).decode()}"
+	except Exception:
+		return None
+
+
 def party_address(party_type: str, party: str) -> str | None:
 	"""Default address of a party as clean multi-line PLAIN text — for the PO / SO
 	print blocks. get_address_display returns <br>-joined HTML, which | striptags
@@ -64,7 +88,7 @@ def exporter_profile():
 		lut=settings.lut_number,
 		signatory_name=settings.signatory_name,
 		signatory_designation=settings.signatory_designation,
-		logo=frappe.utils.get_url(settings.company_logo) if settings.company_logo else None,
+		logo=_logo_data_uri(),
 	)
 
 
@@ -205,7 +229,7 @@ def document_print_context(name: str):
 		instance=inst,
 		shipment=shipment,
 		company_name=company_name,
-		logo=frappe.utils.get_url(settings.company_logo) if settings.company_logo else None,
+		logo=_logo_data_uri(),
 		exporter_address=settings.exporter_address,
 		iec_number=settings.iec_number,
 		gstin=settings.gstin,

@@ -2523,3 +2523,13 @@ def pfi_set_status(name: str, action: str):
 	else:
 		frappe.throw(_("Unknown action {0}").format(action))
 	return doc.status
+
+
+@frappe.whitelist()
+def get_company_logo() -> dict:
+	"""The company logo as a base64 data URI — for the nav bar and the Settings
+	preview. Embedded (not a /files URL) because the web server's /files route is
+	misconfigured on this multi-tenant bench."""
+	from exportflow.printing import _logo_data_uri
+
+	return {"logo": _logo_data_uri()}

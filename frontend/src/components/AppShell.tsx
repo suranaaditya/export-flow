@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { useFrappeAuth, useFrappeGetDoc } from 'frappe-react-sdk';
+import { useFrappeAuth, useFrappeGetCall } from 'frappe-react-sdk';
 import { NavLink, Outlet } from 'react-router-dom';
 import { Icon, type IconName } from '@/components/Icon';
+import { API } from '@/lib/api';
 import { useTheme } from '@/lib/theme';
 
 const NAV_ITEMS: { to: string; label: string; icon: IconName }[] = [
@@ -38,11 +39,8 @@ function getInitialCollapsed(): boolean {
 export function AppShell() {
 	const { toggle } = useTheme();
 	const { currentUser } = useFrappeAuth();
-	const settings = useFrappeGetDoc<{ company_logo?: string | null }>(
-		'ExportFlow Settings',
-		'ExportFlow Settings',
-	);
-	const logo = settings.data?.company_logo || null;
+	const logoResult = useFrappeGetCall<{ message: { logo: string | null } }>(API.companyLogo, {});
+	const logo = logoResult.data?.message?.logo || null;
 	const [collapsed, setCollapsed] = useState(getInitialCollapsed);
 
 	useEffect(() => {

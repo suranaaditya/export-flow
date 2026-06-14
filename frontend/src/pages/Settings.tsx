@@ -411,6 +411,9 @@ function ExporterProfilePanel({ canEdit }: { canEdit: boolean }) {
 	>('ExportFlow Settings', 'ExportFlow Settings');
 	const { updateDoc, loading: saving } = useFrappeUpdateDoc();
 	const { upload, loading: logoBusy } = useFrappeFileUpload();
+	// the logo is shown as an embedded data URI (the /files web route is broken on
+	// this bench), so the preview is fetched rather than built from the file_url
+	const logoUri = useFrappeGetCall<{ message: { logo: string | null } }>(API.companyLogo, {});
 	const [form, setForm] = useState<ExporterProfile>(EMPTY_PROFILE);
 	const [autoCha, setAutoCha] = useState(false);
 	const [logo, setLogo] = useState<string | null>(null);
@@ -444,6 +447,7 @@ function ExporterProfilePanel({ canEdit }: { canEdit: boolean }) {
 			await updateDoc('ExportFlow Settings', 'ExportFlow Settings', { company_logo: res.file_url });
 			setLogo(res.file_url);
 			mutate();
+			logoUri.mutate();
 		} catch (e) {
 			setErr(parseServerError(e));
 		}
@@ -455,6 +459,7 @@ function ExporterProfilePanel({ canEdit }: { canEdit: boolean }) {
 			await updateDoc('ExportFlow Settings', 'ExportFlow Settings', { company_logo: null });
 			setLogo(null);
 			mutate();
+			logoUri.mutate();
 		} catch (e) {
 			setErr(parseServerError(e));
 		}
@@ -501,14 +506,14 @@ function ExporterProfilePanel({ canEdit }: { canEdit: boolean }) {
 								hint="Shown in the top-left nav and on every print's exporter block"
 							>
 								<div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-									{logo ? (
+									{logoUri.data?.message?.logo ? (
 										<img
-											src={logo}
+											src={logoUri.data.message.logo}
 											alt=""
 											style={{ maxHeight: 40, maxWidth: 160, borderRadius: 4, border: '1px solid var(--hairline)' }}
 										/>
 									) : (
-										<span className="dim">No logo set</span>
+										<span className="dim">{logo ? 'Loading…' : 'No logo set'}</span>
 									)}
 									{canEdit && (
 										<>

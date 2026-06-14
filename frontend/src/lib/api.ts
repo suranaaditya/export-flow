@@ -163,6 +163,7 @@ export const API = {
 	updatePo: 'exportflow.api.update_purchase_order_doc',
 	updateShipment: 'exportflow.api.update_shipment',
 	amendDoc: 'exportflow.api.amend_document',
+	companyLogo: 'exportflow.api.get_company_logo',
 } as const;
 
 // ---- Phase 6: export incentives + bank realization ----
