@@ -2532,4 +2532,7 @@ def get_company_logo() -> dict:
 	misconfigured on this multi-tenant bench."""
 	from exportflow.printing import _logo_data_uri
 
-	return {"logo": _logo_data_uri()}
+	return {
+		"logo": _logo_data_uri(),
+		"nav_height": cint(frappe.db.get_single_value("ExportFlow Settings", "logo_nav_height")) or 28,
+	}

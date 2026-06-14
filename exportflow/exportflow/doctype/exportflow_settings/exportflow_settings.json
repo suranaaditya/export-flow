@@ -8,6 +8,7 @@
   "company",
   "cb_efs_company",
   "company_logo",
+  "logo_nav_height",
   "section_exporter",
   "iec_number",
   "gstin",
@@ -54,6 +55,14 @@
    "fieldname": "company_logo",
    "fieldtype": "Attach Image",
    "label": "Company Logo"
+  },
+  {
+   "default": "28",
+   "description": "Height of the logo in the top-left navigation, in pixels.",
+   "fieldname": "logo_nav_height",
+   "fieldtype": "Int",
+   "label": "Nav Logo Height (px)",
+   "non_negative": 1
   },
   {
    "description": "Printed on every export document (§5.2)",
@@ -187,7 +196,7 @@
  "index_web_pages_for_search": 0,
  "issingle": 1,
  "links": [],
- "modified": "2026-06-14 14:00:00.000000",
+ "modified": "2026-06-14 16:00:00.000000",
  "modified_by": "Administrator",
  "module": "ExportFlow",
  "name": "ExportFlow Settings",

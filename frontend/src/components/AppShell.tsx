@@ -39,8 +39,12 @@ function getInitialCollapsed(): boolean {
 export function AppShell() {
 	const { toggle } = useTheme();
 	const { currentUser } = useFrappeAuth();
-	const logoResult = useFrappeGetCall<{ message: { logo: string | null } }>(API.companyLogo, {});
+	const logoResult = useFrappeGetCall<{ message: { logo: string | null; nav_height: number } }>(
+		API.companyLogo,
+		{},
+	);
 	const logo = logoResult.data?.message?.logo || null;
+	const navHeight = logoResult.data?.message?.nav_height || 28;
 	const [collapsed, setCollapsed] = useState(getInitialCollapsed);
 
 	useEffect(() => {
@@ -58,7 +62,12 @@ export function AppShell() {
 			<aside className={collapsed ? 'sidebar collapsed' : 'sidebar'}>
 				<div className="brand">
 					{logo ? (
-						<img className="cologo" src={logo} alt="" />
+						<img
+							className="cologo"
+							src={logo}
+							alt=""
+							style={collapsed ? undefined : { maxHeight: navHeight }}
+						/>
 					) : (
 						<>
 							<img className="mk-l" src={BRAND + 'dux-mark.png'} alt="" />
@@ -94,6 +103,11 @@ export function AppShell() {
 						<span className="lbl">Settings</span>
 					</NavLink>
 				</nav>
+				<div className="duxcredit" title="Built by DUX Digitech">
+					<span className="dxby">Built by</span>
+					<img className="dx-l" src={BRAND + 'dux-logo.png'} alt="DUX Digitech" />
+					<img className="dx-w" src={BRAND + 'dux-logo-white.png'} alt="DUX Digitech" />
+				</div>
 				<div className="sfoot">
 					<button
 						className="icbtn collapse-btn"

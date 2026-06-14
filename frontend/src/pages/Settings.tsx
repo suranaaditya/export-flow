@@ -407,7 +407,11 @@ const EMPTY_PROFILE: ExporterProfile = {
 /** Exporter identity printed on every §5.2 document (IEC, GSTIN, LUT…). */
 function ExporterProfilePanel({ canEdit }: { canEdit: boolean }) {
 	const { data, error, isLoading, mutate } = useFrappeGetDoc<
-		Partial<ExporterProfile> & { auto_cha_third_country?: 0 | 1; company_logo?: string | null }
+		Partial<ExporterProfile> & {
+			auto_cha_third_country?: 0 | 1;
+			company_logo?: string | null;
+			logo_nav_height?: number;
+		}
 	>('ExportFlow Settings', 'ExportFlow Settings');
 	const { updateDoc, loading: saving } = useFrappeUpdateDoc();
 	const { upload, loading: logoBusy } = useFrappeFileUpload();
@@ -416,6 +420,7 @@ function ExporterProfilePanel({ canEdit }: { canEdit: boolean }) {
 	const logoUri = useFrappeGetCall<{ message: { logo: string | null } }>(API.companyLogo, {});
 	const [form, setForm] = useState<ExporterProfile>(EMPTY_PROFILE);
 	const [autoCha, setAutoCha] = useState(false);
+	const [navHeight, setNavHeight] = useState(28);
 	const [logo, setLogo] = useState<string | null>(null);
 	const [seeded, setSeeded] = useState(false);
 	const [err, setErr] = useState<string | null>(null);
@@ -432,6 +437,7 @@ function ExporterProfilePanel({ canEdit }: { canEdit: boolean }) {
 		}));
 		setAutoCha(!!data.auto_cha_third_country);
 		setLogo(data.company_logo ?? null);
+		setNavHeight(Number(data.logo_nav_height) || 28);
 		setSeeded(true);
 	}, [data, seeded]);
 
@@ -480,9 +486,11 @@ function ExporterProfilePanel({ canEdit }: { canEdit: boolean }) {
 				mtt_completion_months: Number(form.mtt_completion_months) || 9,
 				mtt_outlay_months: Number(form.mtt_outlay_months) || 4,
 				auto_cha_third_country: autoCha ? 1 : 0,
+				logo_nav_height: navHeight || 28,
 			});
 			setSavedTick(true);
 			mutate();
+			logoUri.mutate();
 		} catch (e) {
 			setErr(parseServerError(e));
 		}
@@ -510,7 +518,7 @@ function ExporterProfilePanel({ canEdit }: { canEdit: boolean }) {
 										<img
 											src={logoUri.data.message.logo}
 											alt=""
-											style={{ maxHeight: 40, maxWidth: 160, borderRadius: 4, border: '1px solid var(--hairline)' }}
+											style={{ height: navHeight, maxWidth: 220, borderRadius: 4, border: '1px solid var(--hairline)' }}
 										/>
 									) : (
 										<span className="dim">{logo ? 'Loading…' : 'No logo set'}</span>
@@ -539,6 +547,27 @@ function ExporterProfilePanel({ canEdit }: { canEdit: boolean }) {
 										</>
 									)}
 								</div>
+								{logo && canEdit && (
+									<div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
+										<span className="dim" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+											Nav size
+										</span>
+										<input
+											type="range"
+											min={18}
+											max={56}
+											value={navHeight}
+											onChange={(e) => {
+												setSavedTick(false);
+												setNavHeight(Number(e.target.value));
+											}}
+											style={{ flex: 1, maxWidth: 240, accentColor: 'var(--iris)' }}
+										/>
+										<span className="mono dim" style={{ fontSize: 12, width: 38 }}>
+											{navHeight}px
+										</span>
+									</div>
+								)}
 							</Field>
 						</div>
 						<Field label="IEC number">
