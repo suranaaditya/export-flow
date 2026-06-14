@@ -50,6 +50,7 @@ class ExportShipment(Document):
 			from exportflow.mtt import DEFAULT_TRADE_TYPE
 
 			self.trade_type = DEFAULT_TRADE_TYPE
+		self.derive_trade_type_from_pos()
 		self.apply_merchanting_cha()
 		self.seed_milestones()
 		self.validate_items()
@@ -57,6 +58,50 @@ class ExportShipment(Document):
 		self.validate_lc()
 		self.validate_milestone_blockers()
 		self.set_current_milestone()
+
+	def classify_pos(self) -> tuple[bool, bool]:
+		"""(has_merchanting_line, has_india_export_line) across the sourcing POs.
+		The India leg is the LOGICAL COMPLEMENT of the foreign check used to build
+		merchanting POs — a domestic supplier with a blank country (common from the
+		MIS import, where domestic-ness is keyed off GST category) still counts as
+		India, so an export line is never silently swept into a merchanting shipment."""
+		from exportflow.api import _supplier_is_foreign
+
+		mtt = india = False
+		for row in self.items:
+			po_name, _po_detail = self._effective_po(row)
+			if not po_name:
+				continue
+			info = frappe.db.get_value(
+				"Purchase Order", po_name, ["merchanting_trade", "supplier"], as_dict=True
+			)
+			if not info:
+				continue
+			if info.merchanting_trade:
+				mtt = True
+			elif not _supplier_is_foreign(info.supplier):
+				india = True
+		return mtt, india
+
+	def derive_trade_type_from_pos(self):
+		"""A shipment's trade type follows its sourcing POs. If any line is bought
+		on a merchanting (third-country) PO it IS a merchanting shipment — and it
+		can never mix with goods exported from India, since the two load at
+		different ports (one foreign, one Indian). Enforced (authoritative) when a
+		flagged PO is present; a shipment with no flagged PO is left untouched so
+		MIS-imported / manually-set merchanting shipments are not disturbed."""
+		from exportflow.mtt import MERCHANTING
+
+		mtt, india = self.classify_pos()
+		if mtt and india:
+			frappe.throw(
+				_(
+					"This shipment mixes a third-country / merchanting purchase with goods "
+					"exported from India — they load at different ports and must ship separately."
+				)
+			)
+		if mtt:
+			self.trade_type = MERCHANTING
 
 	def apply_merchanting_cha(self):
 		"""Optional rule (ExportFlow Settings): a merchanting trade has no Indian

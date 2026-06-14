@@ -162,10 +162,11 @@ export function PurchaseOrderDetail() {
 			<div className="titlebar">
 				<h1>{po.name}</h1>
 				<span className="who">· {po.supplier_name}</span>
-				<span style={{ marginTop: 9 }}>
+				<span style={{ marginTop: 9, display: 'inline-flex', gap: 6 }}>
 					<Tag tone={poTone(po.status, po.docstatus)}>
 						{po.docstatus === 0 ? 'Draft' : po.status}
 					</Tag>
+					{po.merchanting_trade ? <Tag tone="pend">Merchanting</Tag> : null}
 				</span>
 				<span className="spacer" />
 				<a className="btn" href={printPreviewUrl('Purchase Order', id, 'ExportFlow Purchase Order')} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>

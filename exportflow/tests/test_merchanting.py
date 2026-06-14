@@ -6,7 +6,12 @@ try:
 except ImportError:  # frappe < 16
 	from frappe.tests.utils import FrappeTestCase as IntegrationTestCase
 
-from exportflow.api import create_shipment, get_shipment_finance, set_shipment_milestone
+from exportflow.api import (
+	create_purchase_order_draft,
+	create_shipment,
+	get_shipment_finance,
+	set_shipment_milestone,
+)
 from exportflow.mtt import EXPORT_FROM_INDIA, MERCHANTING, clocks, is_merchanting
 from exportflow.setup import seed_checklist_rules, seed_document_types
 from exportflow.tests.test_dropship import _suffix, make_customer, make_supplier
@@ -561,3 +566,393 @@ class TestMerchanting(IntegrationTestCase):
 		self.assertTrue(block["outlay_open"])
 		self.assertEqual(block["net_fx_profit_inr"], 200.0)
 		self.assertTrue(block["same_ad_bank"])
+
+
+class TestMultiCurrencyAndPoMtt(IntegrationTestCase):
+	"""Multi-currency POs + PO-driven merchanting (foreign supplier → MTT flag +
+	SO link → shipment auto-detects merchanting, mixing blocked)."""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls.company = frappe.db.get_single_value("Global Defaults", "default_company")
+		seed_document_types()
+		seed_checklist_rules()
+
+	def _foreign_supplier(self):
+		return frappe.get_doc(
+			{
+				"doctype": "Supplier",
+				"supplier_name": f"_Test EF Foreign {_suffix()}",
+				"supplier_group": frappe.db.get_value("Supplier Group", {}, "name"),
+				"country": "China",
+				"gst_category": "Overseas",
+				"default_currency": "USD",
+			}
+		).insert(ignore_permissions=True).name
+
+	def _deal(self, items):
+		sfx = _suffix()
+		customer = make_customer(f"_Test EF MC Cust {sfx}")
+		return book_deal(self.company, customer, items), customer
+
+	def test_multi_currency_po_converts_to_inr(self):
+		item = make_plain_item(f"_Test EF MC Item {_suffix()}")
+		so, _c = self._deal([{"item_code": item, "qty": 10, "rate": 12}])
+		supplier = self._foreign_supplier()
+		company_currency = frappe.db.get_value("Company", self.company, "default_currency")
+		alt = "EUR" if company_currency != "EUR" else "GBP"
+		res = create_purchase_order_draft(
+			{
+				"supplier": supplier,
+				"currency": alt,
+				"conversion_rate": 83,
+				"items": [
+					{
+						"item_code": item,
+						"qty": 10,
+						"rate": 100,
+						"sales_order": so.name,
+						"so_detail": so.items[0].name,
+					}
+				],
+			}
+		)
+		po = frappe.get_doc("Purchase Order", res["name"])
+		self.assertEqual(po.currency, alt)
+		self.assertEqual(flt(po.conversion_rate), 83.0)
+		self.assertEqual(flt(po.items[0].base_rate), 8300.0, "rate × conversion → company-currency base_rate")
+
+	def test_mtt_po_requires_foreign_supplier(self):
+		item = make_plain_item(f"_Test EF MC Item {_suffix()}")
+		so, _c = self._deal([{"item_code": item, "qty": 10, "rate": 12}])
+		domestic = make_supplier(f"_Test EF Dom {_suffix()}")
+		with self.assertRaises(frappe.ValidationError):
+			create_purchase_order_draft(
+				{
+					"supplier": domestic,
+					"merchanting_trade": 1,
+					"items": [
+						{
+							"item_code": item,
+							"qty": 10,
+							"rate": 100,
+							"sales_order": so.name,
+							"so_detail": so.items[0].name,
+						}
+					],
+				}
+			)
+
+	def test_mtt_po_requires_so_link(self):
+		free = make_plain_item(f"_Test EF Free {_suffix()}")
+		foreign = self._foreign_supplier()
+		with self.assertRaises(frappe.ValidationError):
+			create_purchase_order_draft(
+				{
+					"supplier": foreign,
+					"merchanting_trade": 1,
+					"currency": "USD",
+					"conversion_rate": 83,
+					"items": [{"item_code": free, "qty": 5, "rate": 100}],
+				}
+			)
+
+	def test_mtt_po_sets_flag_and_drops_domestic_scheme(self):
+		item = make_plain_item(f"_Test EF MC Item {_suffix()}")
+		so, _c = self._deal([{"item_code": item, "qty": 10, "rate": 12}])
+		foreign = self._foreign_supplier()
+		res = create_purchase_order_draft(
+			{
+				"supplier": foreign,
+				"merchanting_trade": 1,
+				"merchant_export_scheme": 1,
+				"currency": "USD",
+				"conversion_rate": 83,
+				"items": [
+					{
+						"item_code": item,
+						"qty": 10,
+						"rate": 100,
+						"sales_order": so.name,
+						"so_detail": so.items[0].name,
+					}
+				],
+			}
+		)
+		po = frappe.get_doc("Purchase Order", res["name"])
+		self.assertEqual(po.merchanting_trade, 1)
+		self.assertEqual(po.merchant_export_scheme, 0, "MTT can't use the 0.1% domestic scheme")
+		# overseas supplier → no GST autofills on the PO
+		self.assertEqual(flt(po.total_taxes_and_charges), 0.0)
+
+	def test_shipment_enforces_merchanting_from_po(self):
+		item = make_plain_item(f"_Test EF MC Item {_suffix()}")
+		so, customer = self._deal([{"item_code": item, "qty": 10, "rate": 12}])
+		foreign = self._foreign_supplier()
+		create_purchase_order_draft(
+			{
+				"supplier": foreign,
+				"merchanting_trade": 1,
+				"currency": "USD",
+				"conversion_rate": 83,
+				"submit": 1,
+				"items": [
+					{
+						"item_code": item,
+						"qty": 10,
+						"rate": 100,
+						"sales_order": so.name,
+						"so_detail": so.items[0].name,
+					}
+				],
+			}
+		)
+		# booked as Export-from-India, but every line is bought on an MTT PO
+		shp = create_shipment(
+			{
+				"customer": customer,
+				"mode": "Sea",
+				"trade_type": EXPORT_FROM_INDIA,
+				"items": [
+					{
+						"item_code": item,
+						"qty": 10,
+						"uom": so.items[0].uom,
+						"sales_order": so.name,
+						"so_detail": so.items[0].name,
+					}
+				],
+			}
+		)["name"]
+		self.assertEqual(
+			frappe.db.get_value("Export Shipment", shp, "trade_type"),
+			MERCHANTING,
+			"trade type is enforced from the sourcing POs",
+		)
+
+	def test_shipment_blocks_mtt_india_mix(self):
+		sfx = _suffix()
+		item_a = make_plain_item(f"_Test EF Mix A {sfx}")
+		item_b = make_plain_item(f"_Test EF Mix B {sfx}")
+		so, customer = self._deal(
+			[{"item_code": item_a, "qty": 10, "rate": 12}, {"item_code": item_b, "qty": 10, "rate": 12}]
+		)
+		foreign = self._foreign_supplier()
+		domestic = make_supplier(f"_Test EF Mix Dom {sfx}")
+		create_purchase_order_draft(
+			{
+				"supplier": foreign,
+				"merchanting_trade": 1,
+				"currency": "USD",
+				"conversion_rate": 83,
+				"submit": 1,
+				"items": [
+					{
+						"item_code": item_a,
+						"qty": 10,
+						"rate": 100,
+						"sales_order": so.name,
+						"so_detail": so.items[0].name,
+					}
+				],
+			}
+		)
+		create_purchase_order_draft(
+			{
+				"supplier": domestic,
+				"currency": "INR",
+				"conversion_rate": 1,
+				"submit": 1,
+				"items": [
+					{
+						"item_code": item_b,
+						"qty": 10,
+						"rate": 50,
+						"sales_order": so.name,
+						"so_detail": so.items[1].name,
+					}
+				],
+			}
+		)
+		with self.assertRaises(frappe.ValidationError):
+			create_shipment(
+				{
+					"customer": customer,
+					"mode": "Sea",
+					"items": [
+						{
+							"item_code": item_a,
+							"qty": 10,
+							"uom": so.items[0].uom,
+							"sales_order": so.name,
+							"so_detail": so.items[0].name,
+						},
+						{
+							"item_code": item_b,
+							"qty": 10,
+							"uom": so.items[1].uom,
+							"sales_order": so.name,
+							"so_detail": so.items[1].name,
+						},
+					],
+				}
+			)
+
+	def test_shipment_blocks_mtt_mix_with_null_country_domestic(self):
+		# a domestic supplier with NO country (as MIS import / desk can produce)
+		# must still count as the India leg — the mix is blocked, not coerced
+		sfx = _suffix()
+		item_a = make_plain_item(f"_Test EF NC A {sfx}")
+		item_b = make_plain_item(f"_Test EF NC B {sfx}")
+		so, customer = self._deal(
+			[{"item_code": item_a, "qty": 10, "rate": 12}, {"item_code": item_b, "qty": 10, "rate": 12}]
+		)
+		foreign = self._foreign_supplier()
+		domestic = frappe.get_doc(
+			{
+				"doctype": "Supplier",
+				"supplier_name": f"_Test EF NC Dom {sfx}",
+				"supplier_group": frappe.db.get_value("Supplier Group", {}, "name"),
+			}
+		).insert(ignore_permissions=True).name
+		frappe.db.set_value("Supplier", domestic, "country", None, update_modified=False)
+		create_purchase_order_draft(
+			{
+				"supplier": foreign,
+				"merchanting_trade": 1,
+				"currency": "USD",
+				"conversion_rate": 83,
+				"submit": 1,
+				"items": [
+					{
+						"item_code": item_a,
+						"qty": 10,
+						"rate": 100,
+						"sales_order": so.name,
+						"so_detail": so.items[0].name,
+					}
+				],
+			}
+		)
+		create_purchase_order_draft(
+			{
+				"supplier": domestic,
+				"submit": 1,
+				"items": [
+					{
+						"item_code": item_b,
+						"qty": 10,
+						"rate": 50,
+						"sales_order": so.name,
+						"so_detail": so.items[1].name,
+					}
+				],
+			}
+		)
+		with self.assertRaises(frappe.ValidationError):
+			create_shipment(
+				{
+					"customer": customer,
+					"mode": "Sea",
+					"items": [
+						{
+							"item_code": item_a,
+							"qty": 10,
+							"uom": so.items[0].uom,
+							"sales_order": so.name,
+							"so_detail": so.items[0].name,
+						},
+						{
+							"item_code": item_b,
+							"qty": 10,
+							"uom": so.items[1].uom,
+							"sales_order": so.name,
+							"so_detail": so.items[1].name,
+						},
+					],
+				}
+			)
+
+	def test_mtt_po_drops_scheme_even_when_supplier_defaults_it(self):
+		# before_insert must not re-enable the 0.1% domestic scheme on an MTT PO
+		# just because the (foreign) supplier carries default_merchant_export_scheme
+		item = make_plain_item(f"_Test EF FS Item {_suffix()}")
+		so, _c = self._deal([{"item_code": item, "qty": 10, "rate": 12}])
+		foreign = frappe.get_doc(
+			{
+				"doctype": "Supplier",
+				"supplier_name": f"_Test EF FS Sup {_suffix()}",
+				"supplier_group": frappe.db.get_value("Supplier Group", {}, "name"),
+				"country": "China",
+				"default_merchant_export_scheme": 1,
+			}
+		).insert(ignore_permissions=True).name
+		res = create_purchase_order_draft(
+			{
+				"supplier": foreign,
+				"merchanting_trade": 1,
+				"currency": "USD",
+				"conversion_rate": 83,
+				"items": [
+					{
+						"item_code": item,
+						"qty": 10,
+						"rate": 100,
+						"sales_order": so.name,
+						"so_detail": so.items[0].name,
+					}
+				],
+			}
+		)
+		po = frappe.get_doc("Purchase Order", res["name"])
+		self.assertEqual(po.merchanting_trade, 1)
+		self.assertEqual(po.merchant_export_scheme, 0)
+
+	def test_shipment_before_mtt_po_flips_on_submit(self):
+		# book the shipment BEFORE its merchanting PO exists -> stays export; once
+		# the MTT PO submits and links backfill, the shipment flips to merchanting
+		item = make_plain_item(f"_Test EF SB Item {_suffix()}")
+		so, customer = self._deal([{"item_code": item, "qty": 10, "rate": 12}])
+		shp = create_shipment(
+			{
+				"customer": customer,
+				"mode": "Sea",
+				"items": [
+					{
+						"item_code": item,
+						"qty": 10,
+						"uom": so.items[0].uom,
+						"sales_order": so.name,
+						"so_detail": so.items[0].name,
+					}
+				],
+			}
+		)["name"]
+		self.assertEqual(
+			frappe.db.get_value("Export Shipment", shp, "trade_type"), EXPORT_FROM_INDIA
+		)
+		foreign = self._foreign_supplier()
+		create_purchase_order_draft(
+			{
+				"supplier": foreign,
+				"merchanting_trade": 1,
+				"currency": "USD",
+				"conversion_rate": 83,
+				"submit": 1,
+				"items": [
+					{
+						"item_code": item,
+						"qty": 10,
+						"rate": 100,
+						"sales_order": so.name,
+						"so_detail": so.items[0].name,
+					}
+				],
+			}
+		)
+		self.assertEqual(
+			frappe.db.get_value("Export Shipment", shp, "trade_type"),
+			MERCHANTING,
+			"PO on_submit re-derives the booked-first shipment's trade type",
+		)

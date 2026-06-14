@@ -199,5 +199,16 @@
   "no_copy": 1,
   "description": "Supplier invoice date + 90 days — the shipment must be exported (shipped on board / departed) by this date",
   "module": "ExportFlow"
+ },
+ {
+  "doctype": "Custom Field",
+  "name": "Purchase Order-merchanting_trade",
+  "dt": "Purchase Order",
+  "fieldname": "merchanting_trade",
+  "fieldtype": "Check",
+  "label": "Third-country / merchanting trade",
+  "insert_after": "gst_export_deadline",
+  "description": "Goods bought overseas and shipped directly to a foreign buyer without entering India (FEMA merchanting). GST is nil; must be linked to the export sales order.",
+  "module": "ExportFlow"
  }
 ]

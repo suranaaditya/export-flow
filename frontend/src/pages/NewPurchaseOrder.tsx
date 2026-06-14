@@ -75,6 +75,11 @@ export function NewPurchaseOrder() {
 	const [err, setErr] = useState<string | null>(null);
 	const [quickCreate, setQuickCreate] = useState<'supplier' | 'item' | 'terms' | null>(null);
 	const [preview, setPreview] = useState<POTotals | null>(null);
+	const [currency, setCurrency] = useState('');
+	const [convRate, setConvRate] = useState('');
+	const [rateTouched, setRateTouched] = useState(false);
+	const [merchanting, setMerchanting] = useState(false);
+	const companyCurrency = ctx?.company_currency ?? '';
 
 	// default the taxes template once the context arrives (creates only — an
 	// edit prefills the order's own template)
@@ -87,12 +92,20 @@ export function NewPurchaseOrder() {
 
 	// prefill from the existing PO when editing (seed exactly once)
 	const seeded = useRef(false);
+	const seededCurrency = useRef<string | null>(null);
+	const seededRate = useRef<string>('');
 	useEffect(() => {
 		if (!isEdit || seeded.current) return;
 		const d = editResult.data?.message;
 		if (!d) return;
 		setSupplier(d.po.supplier ?? '');
 		setMes(d.po.merchant_export_scheme === 1);
+		setMerchanting(!!d.po.merchanting_trade);
+		seededCurrency.current = d.po.currency ?? '';
+		seededRate.current = d.po.conversion_rate != null ? String(d.po.conversion_rate) : '';
+		setCurrency(d.po.currency ?? '');
+		setConvRate(seededRate.current);
+		setRateTouched(true); // keep the order's booked rate, don't auto-suggest over it
 		setOrderDate(d.po.transaction_date ?? todayISO());
 		setRequiredBy(d.po.schedule_date ?? '');
 		setTcName(d.po.tc_name ?? '');
@@ -127,6 +140,34 @@ export function NewPurchaseOrder() {
 		{ sales_order: soPick },
 		soPick ? undefined : null,
 	);
+	// suggest the day's BUYING exchange rate when the PO currency changes; a
+	// manual edit (rateTouched) or returning to the edited PO's booked currency
+	// is preserved
+	const rateResult = useFrappeGetCall<{ message: number }>(
+		API.poExchangeRate,
+		{ currency },
+		currency ? undefined : null,
+	);
+	useEffect(() => {
+		if (isEdit && seededCurrency.current !== null && currency === seededCurrency.current) {
+			setConvRate(seededRate.current);
+			setRateTouched(true);
+			return;
+		}
+		setRateTouched(false);
+	}, [currency, isEdit]);
+	useEffect(() => {
+		const suggested = rateResult.data?.message;
+		if (!rateTouched && suggested && suggested > 0) setConvRate(String(suggested));
+	}, [rateResult.data, rateTouched]);
+
+	const isCompanyCurrency = !currency || currency === companyCurrency;
+	// align with the backend: a supplier is foreign only when its country is set
+	// and not India (a blank country is treated as domestic)
+	const supplierIsForeign = !!ctx?.suppliers.find(
+		(x) => x.name === supplier && !!x.country && x.country !== 'India',
+	);
+
 	const { call: fetchTerms } = useFrappePostCall<{ message: string }>(API.termsText);
 	const { call: fetchItemInfo } = useFrappePostCall<{ message: { stock_uom: string; item_name: string } }>(
 		API.itemInfo,
@@ -145,7 +186,10 @@ export function NewPurchaseOrder() {
 			supplier,
 			transaction_date: orderDate,
 			schedule_date: requiredBy || null,
-			merchant_export_scheme: mes ? 1 : 0,
+			currency: currency || null,
+			conversion_rate: isCompanyCurrency ? 1 : Number(convRate) || 0,
+			merchant_export_scheme: merchanting ? 0 : mes ? 1 : 0,
+			merchanting_trade: merchanting ? 1 : 0,
 			taxes_template: taxesTemplate || null,
 			extra_charges: charges
 				.filter((c) => c.account_head && Number(c.amount) > 0)
@@ -172,6 +216,9 @@ export function NewPurchaseOrder() {
 		supplier,
 		taxesTemplate,
 		charges,
+		currency,
+		convRate,
+		merchanting,
 		rows: rows.map((r) => [r.item_code, r.qty, r.rate]),
 	});
 	const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -197,7 +244,12 @@ export function NewPurchaseOrder() {
 	function onSupplier(v: string) {
 		setSupplier(v);
 		const s = ctx?.suppliers.find((x) => x.name === v);
-		setMes(!!s?.default_merchant_export_scheme);
+		const foreign = !!s && !!s.country && s.country !== 'India';
+		setMes(!foreign && !!s?.default_merchant_export_scheme);
+		if (!foreign) setMerchanting(false); // MTT is overseas-only
+		// prefill the PO currency from the supplier's default (foreign → its own)
+		setCurrency(s?.default_currency || (foreign ? 'USD' : companyCurrency));
+		setRateTouched(false);
 	}
 
 	async function onTemplate(v: string) {
@@ -273,10 +325,13 @@ export function NewPurchaseOrder() {
 		() => rows.reduce((sum, r) => sum + (Number(r.qty) || 0) * (Number(r.rate) || 0), 0),
 		[rows],
 	);
-	const currency = ctx?.company_currency;
 
 	async function onSave(submit: boolean) {
 		if (!supplier) return setErr('Pick the supplier.');
+		if (!isCompanyCurrency && (!convRate || Number(convRate) <= 0))
+			return setErr('Set the exchange rate.');
+		if (merchanting && !rows.some((r) => r.so_detail))
+			return setErr('A merchanting purchase must pull its lines from a sales order.');
 		if (rows.length === 0) return setErr('Add at least one item.');
 		for (const [i, r] of rows.entries()) {
 			if (!r.qty || Number(r.qty) <= 0) return setErr(`Row ${i + 1}: quantity is required.`);
@@ -370,8 +425,38 @@ export function NewPurchaseOrder() {
 							/>
 						</Field>
 						<div style={{ paddingTop: 22 }}>
-							<CheckInput checked={mes} onChange={setMes} label="Merchant export scheme (0.1% GST)" />
+							{supplierIsForeign ? (
+								<CheckInput
+									checked={merchanting}
+									onChange={setMerchanting}
+									label="Third-country / merchanting trade"
+								/>
+							) : (
+								<CheckInput checked={mes} onChange={setMes} label="Merchant export scheme (0.1% GST)" />
+							)}
 						</div>
+						<Field label="Currency">
+							<SearchSelect
+								value={currency}
+								onChange={setCurrency}
+								options={(ctx?.currencies ?? []).map((c) => ({ value: c }))}
+								placeholder="Currency…"
+							/>
+						</Field>
+						{!isCompanyCurrency ? (
+							<Field label={`Exchange rate → ${companyCurrency}`} hint="Day rate suggested; editable">
+								<TextInput
+									type="number"
+									value={convRate}
+									onChange={(v) => {
+										setConvRate(v);
+										setRateTouched(true);
+									}}
+								/>
+							</Field>
+						) : (
+							<div />
+						)}
 						<Field label="Order date">
 							<TextInput type="date" value={orderDate} onChange={setOrderDate} />
 						</Field>
@@ -379,6 +464,12 @@ export function NewPurchaseOrder() {
 							<TextInput type="date" value={requiredBy} onChange={setRequiredBy} />
 						</Field>
 					</div>
+					{merchanting && (
+						<div className="c2" style={{ padding: '0 18px 12px' }}>
+							Merchanting: goods ship directly from the overseas supplier to the buyer (never
+							entering India) — 0 GST, and the order must be linked to its sales order below.
+						</div>
+					)}
 
 					{/* ---- items ---- */}
 					<div className="reqhead" style={{ borderTop: '1px solid var(--hairline)', gridTemplateColumns: GRID }}>

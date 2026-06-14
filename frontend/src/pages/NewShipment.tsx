@@ -193,6 +193,29 @@ export function NewShipment() {
 		}));
 	};
 
+	// the trade type follows the sourcing POs, mirroring the backend exactly: a
+	// shipment is merchanting when ANY ticked line is bought on a merchanting PO
+	// and NONE is an India-export leg; it can't mix the two (different ports).
+	const checkedLines = lines.filter((l) => selectedSos.includes(l.sales_order) && selFor(l).checked);
+	const hasMtt = checkedLines.some((l) => l.merchanting);
+	const hasIndia = checkedLines.some((l) => l.india);
+	const mttSourced = hasMtt && !hasIndia;
+	const mttMixed = hasMtt && hasIndia;
+	// drive the trade type both ways: lock to merchanting when MTT-sourced, and
+	// revert an auto-set value when the selection changes (a deliberate manual
+	// choice — e.g. an MTT shipment booked before its PO — is left alone)
+	const autoSetMtt = useRef(false);
+	useEffect(() => {
+		if (mttSourced) {
+			setTradeType(TRADE_TYPES[1]);
+			autoSetMtt.current = true;
+		} else if (autoSetMtt.current) {
+			setTradeType(TRADE_TYPES[0]);
+			autoSetMtt.current = false;
+		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [mttSourced]);
+
 	/** Tick (pre-select) every shippable sub-row belonging to these sales orders. */
 	function tickLinesFor(soList: string[]) {
 		const wanted = new Set(soList);
@@ -339,6 +362,10 @@ export function NewShipment() {
 			(l) => selectedSos.includes(l.sales_order) && selFor(l).checked,
 		);
 		if (checked.length === 0) return setErr('Tick at least one line to ship.');
+		if (mttMixed)
+			return setErr(
+				'A shipment can’t mix merchanting (third-country) goods with goods exported from India — they load at different ports. Ship them separately.',
+			);
 		for (const l of checked) {
 			const q = Number(selFor(l).qty);
 			if (!q || q <= 0) return setErr(`${l.item_name}: quantity to ship is required.`);
@@ -516,15 +543,18 @@ export function NewShipment() {
 						<Field
 							label="Trade type"
 							hint={
-								isMerchanting(tradeType)
-									? 'Goods ship A→B without entering India — no shipping bill, eBRC or RoDTEP'
-									: 'Standard export from India'
+								mttSourced
+									? 'Set automatically — every line is bought on a merchanting (third-country) PO'
+									: isMerchanting(tradeType)
+										? 'Goods ship A→B without entering India — no shipping bill, eBRC or RoDTEP'
+										: 'Standard export from India'
 							}
 						>
 							<SelectInput
 								value={tradeType}
 								onChange={setTradeType}
 								options={TRADE_TYPES.map((t) => ({ value: t }))}
+								disabled={mttSourced}
 							/>
 						</Field>
 						<Field label="Incoterm">

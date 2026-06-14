@@ -339,6 +339,24 @@ def get_exchange_rate_to_company(currency: str) -> float:
 
 
 @frappe.whitelist()
+def get_po_exchange_rate(currency: str) -> float:
+	"""Buying exchange rate from the PO currency to the company currency (0 when
+	unavailable — the form keeps the field manual). Foreign suppliers buy in
+	their own currency; base amounts stay in INR via this rate."""
+	frappe.has_permission("Purchase Order", "create", throw=True)
+	company = exportflow_company()
+	company_currency = frappe.db.get_value("Company", company, "default_currency")
+	if not currency or currency == company_currency:
+		return 1.0
+	try:
+		from erpnext.setup.utils import get_exchange_rate
+
+		return flt(get_exchange_rate(currency, company_currency, args="for_buying"))
+	except Exception:
+		return 0.0
+
+
+@frappe.whitelist()
 def create_export_sales_order(deal) -> dict:
 	"""Build the native Sales Order from the ExportFlow deal form.
 
@@ -792,7 +810,7 @@ def get_new_po_context() -> dict:
 		"suppliers": frappe.get_all(
 			"Supplier",
 			filters={"disabled": 0},
-			fields=["name", "supplier_name", "default_merchant_export_scheme"],
+			fields=["name", "supplier_name", "default_merchant_export_scheme", "default_currency", "country"],
 			order_by="modified desc",
 			limit_page_length=200,
 		),
@@ -837,6 +855,9 @@ def get_new_po_context() -> dict:
 		),
 		"countries": frappe.get_all("Country", pluck="name", order_by="name asc", limit_page_length=300),
 		"item_tax_templates": _item_tax_templates(company),
+		"currencies": frappe.get_all(
+			"Currency", filters={"enabled": 1}, pluck="name", order_by="name asc"
+		),
 	}
 
 
@@ -844,6 +865,18 @@ def get_new_po_context() -> dict:
 def get_terms_text(template: str) -> str:
 	frappe.has_permission("Terms and Conditions", "read", throw=True)
 	return frappe.db.get_value("Terms and Conditions", template, "terms") or ""
+
+
+def _supplier_is_foreign(supplier: str) -> bool:
+	"""A supplier outside India (the import leg of a merchanting trade buys
+	overseas). Country is authoritative; gst_category Overseas is the fallback
+	(only checked where india_compliance has added that field)."""
+	country = frappe.db.get_value("Supplier", supplier, "country")
+	if country and country != "India":
+		return True
+	if frappe.get_meta("Supplier").has_field("gst_category"):
+		return frappe.db.get_value("Supplier", supplier, "gst_category") == "Overseas"
+	return False
 
 
 def _build_po_doc(podata, validate_remaining: bool = True, target=None, exclude_po: str | None = None):
@@ -946,30 +979,50 @@ def _build_po_doc(podata, validate_remaining: bool = True, target=None, exclude_
 			}
 		)
 
+	# currency — buying can be in the supplier's currency (foreign suppliers),
+	# base_rate (INR) is still derived via the rate so outlay/margin are unaffected
+	company = exportflow_company()
+	company_currency = frappe.db.get_value("Company", company, "default_currency")
+	currency = podata.get("currency") or company_currency
+	conversion_rate = 1.0 if currency == company_currency else flt(podata.get("conversion_rate"))
+	if conversion_rate <= 0:
+		frappe.throw(_("Exchange rate must be greater than zero"))
+
+	# third-country / merchanting purchase: the import leg must be overseas and
+	# linked to the export sales order; the domestic 0.1% scheme can't apply, and
+	# GST is naturally nil for an overseas supplier
+	merchanting = bool(podata.get("merchanting_trade"))
+	if merchanting:
+		if not _supplier_is_foreign(supplier):
+			frappe.throw(_("A merchanting (third-country) purchase needs an overseas supplier."))
+		if not any(row.get("so_detail") for row in items):
+			frappe.throw(
+				_("A merchanting purchase must be linked to a sales order — pull its lines.")
+			)
+
 	header = {
 		"supplier": supplier,
 		"transaction_date": podata.get("transaction_date") or frappe.utils.nowdate(),
 		"schedule_date": schedule_date,
-		"conversion_rate": 1,
-		"merchant_export_scheme": 1 if podata.get("merchant_export_scheme") else 0,
+		"currency": currency,
+		"conversion_rate": conversion_rate,
+		"merchant_export_scheme": 0 if merchanting else (1 if podata.get("merchant_export_scheme") else 0),
+		"merchanting_trade": 1 if merchanting else 0,
 		"taxes_and_charges": taxes_template or None,
 		"tc_name": podata.get("tc_name") or None,
 		"terms": podata.get("terms"),
 	}
 	if target is not None:
-		# editing an existing draft — keep its name/company/currency, replace
-		# the header fields, lines and taxes
+		# editing an existing draft — keep its name, replace header/lines/taxes
 		target.update(header)
 		target.set("items", po_rows)
 		target.set("taxes", taxes)
 		return target
 
-	company = exportflow_company()
 	return frappe.get_doc(
 		{
 			"doctype": "Purchase Order",
 			"company": company,
-			"currency": frappe.db.get_value("Company", company, "default_currency"),
 			"items": po_rows,
 			"taxes": taxes,
 			**header,
@@ -1216,8 +1269,10 @@ def get_po_detail(name: str) -> dict:
 			"status": po.status,
 			"docstatus": po.docstatus,
 			"currency": po.currency,
+			"conversion_rate": po.conversion_rate,
 			"grand_total": po.grand_total,
 			"merchant_export_scheme": po.merchant_export_scheme,
+			"merchanting_trade": po.get("merchanting_trade"),
 			"supplier_invoice_no": po.supplier_invoice_no,
 			"supplier_invoice_date": po.supplier_invoice_date,
 			"gst_export_deadline": po.gst_export_deadline,
@@ -1304,7 +1359,7 @@ def get_shippable_lines(customer: str) -> list[dict]:
 		# (and carry their GST clocks) against the right PO
 		po_rows = frappe.db.sql(
 			"""SELECT poi.name AS po_detail, poi.parent AS purchase_order, poi.qty AS po_qty,
-			          po.supplier
+			          po.supplier, po.merchanting_trade
 			   FROM `tabPurchase Order Item` poi
 			   JOIN `tabPurchase Order` po ON po.name = poi.parent
 			   WHERE poi.sales_order_item = %s AND po.docstatus = 1
@@ -1331,6 +1386,10 @@ def get_shippable_lines(customer: str) -> list[dict]:
 			sub["purchase_order"] = po_row.purchase_order
 			sub["po_detail"] = po_row.po_detail
 			sub["supplier"] = po_row.supplier
+			sub["merchanting"] = bool(po_row.merchanting_trade)
+			# the India-export leg = a sourcing PO whose supplier isn't overseas;
+			# lets the shipment form mirror the backend's mix block exactly
+			sub["india"] = not _supplier_is_foreign(po_row.supplier)
 			out.append(sub)
 			left = flt(left - po_capacity, 3)
 			emitted = True
@@ -1340,6 +1399,8 @@ def get_shippable_lines(customer: str) -> list[dict]:
 			sub["purchase_order"] = None
 			sub["po_detail"] = None
 			sub["supplier"] = None
+			sub["merchanting"] = False
+			sub["india"] = False
 			out.append(sub)
 	return out
 

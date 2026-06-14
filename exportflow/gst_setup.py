@@ -147,6 +147,13 @@ def _ensure_company_gst(plan, dry):
 		plan, "MN Globex - Indore", COMPANY_GSTIN, COMPANY_STATE,
 		"412-A City Center, 570 M.G. Road, Indore 452001", "Company", COMPANY, True, dry,
 	)
+	# an exporter sells to overseas customers — india_compliance rejects the
+	# Overseas GST category on transactions unless this is enabled (once the
+	# company is GST-registered the validation kicks in)
+	if not frappe.db.get_single_value("GST Settings", "enable_overseas_transactions"):
+		_log(plan, "  enable GST Settings.enable_overseas_transactions (exporter sells overseas)")
+		if not dry:
+			frappe.db.set_single_value("GST Settings", "enable_overseas_transactions", 1)
 
 
 def _clean_orphan_gst_settings(plan, dry):

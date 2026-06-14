@@ -7,6 +7,12 @@ GST_EXPORT_WINDOW_DAYS = 90
 
 
 def before_insert(doc, method=None):
+	# A third-country / merchanting purchase can NEVER use the 0.1% domestic
+	# scheme — guard this before the supplier-default logic below, which would
+	# otherwise re-enable it from the supplier's default.
+	if doc.get("merchanting_trade"):
+		doc.merchant_export_scheme = 0
+		return
 	# Default the scheme from the supplier on NEW POs only. Amendments must
 	# keep whatever the user had chosen on the original (an unchecked box on
 	# an amended PO would otherwise silently flip back to the supplier
@@ -22,16 +28,45 @@ def before_insert(doc, method=None):
 
 
 def validate(doc, method=None):
+	# the domestic 0.1% scheme and merchanting are mutually exclusive — re-assert
+	# on every save/amend/Update-Items path, not just insert
+	if doc.get("merchanting_trade"):
+		doc.merchant_export_scheme = 0
 	set_gst_export_deadline(doc)
 
 
 def on_submit(doc, method=None):
 	backfill_shipment_links(doc)
 	shipments = _linked_shipments(doc)
+	# a shipment booked BEFORE its merchanting PO existed is still "Export from
+	# India"; now that the PO is submitted and its line links are backfilled,
+	# re-derive the trade type so the checklist / outlay / FEMA basis follow
+	_resync_trade_types(shipments)
 	_resync_mtt_outlay(shipments)
 	from exportflow.checklist import rebuild_for_shipments
 
 	rebuild_for_shipments(shipments)
+
+
+def _resync_trade_types(shipments: list[str]):
+	"""Flip a linked shipment to merchanting when every now-sourced PO is a
+	merchanting (third-country) PO and none is a domestic-India leg. db_set only
+	— the caller re-syncs the outlay and rebuilds the checklist, which read the
+	updated trade_type. Per-shipment guarded so it never blocks the PO submit."""
+	from exportflow.mtt import MERCHANTING, is_merchanting
+
+	for name in shipments:
+		if is_merchanting(frappe.db.get_value("Export Shipment", name, "trade_type")):
+			continue
+		try:
+			shp = frappe.get_doc("Export Shipment", name)
+			mtt, india = shp.classify_pos()
+			if mtt and not india:
+				frappe.db.set_value(
+					"Export Shipment", name, "trade_type", MERCHANTING, update_modified=False
+				)
+		except Exception:
+			frappe.log_error(title="MTT trade-type resync failed", message=name)
 
 
 def on_update_after_submit(doc, method=None):

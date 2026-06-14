@@ -150,6 +150,7 @@ export const API = {
 	termsText: 'exportflow.api.get_terms_text',
 	createPoDraft: 'exportflow.api.create_purchase_order_draft',
 	previewPo: 'exportflow.api.preview_purchase_order',
+	poExchangeRate: 'exportflow.api.get_po_exchange_rate',
 	shipmentDocuments: 'exportflow.api.get_shipment_documents',
 	documentsWorkspace: 'exportflow.api.get_documents_workspace',
 	addDocInstance: 'exportflow.api.add_document_instance',
@@ -470,7 +471,13 @@ export interface DashboardData {
 export interface NewPOContext {
 	company: string;
 	company_currency: string;
-	suppliers: { name: string; supplier_name: string; default_merchant_export_scheme: 0 | 1 }[];
+	suppliers: {
+		name: string;
+		supplier_name: string;
+		default_merchant_export_scheme: 0 | 1;
+		default_currency: string | null;
+		country: string | null;
+	}[];
 	items: { name: string; item_name: string; stock_uom: string }[];
 	terms_templates: string[];
 	taxes_templates: { name: string; is_default: 0 | 1 }[];
@@ -479,6 +486,7 @@ export interface NewPOContext {
 	uoms: string[];
 	countries: string[];
 	item_tax_templates: string[];
+	currencies: string[];
 }
 
 export interface POTaxRow {
@@ -566,6 +574,8 @@ export interface POListRow {
 export interface PODetailData {
 	po: Omit<POListRow, 'sales_orders'> & {
 		schedule_date: string | null;
+		conversion_rate: number | null;
+		merchanting_trade: 0 | 1 | null;
 		taxes_and_charges: string | null;
 		tc_name: string | null;
 		terms: string | null;
@@ -600,6 +610,8 @@ export interface ShippableLine {
 	purchase_order: string | null;
 	po_detail: string | null;
 	supplier: string | null;
+	merchanting: boolean;
+	india: boolean;
 }
 
 export interface ShipmentListRow {
