@@ -304,3 +304,49 @@ class TestDropShipFlow(IntegrationTestCase):
 		self.assertEqual(
 			amended.merchant_export_scheme, 0, "Amendment must keep the user's unchecked scheme"
 		)
+
+	def test_shipment_marks_fully_shipped_po_delivered(self):
+		"""Booking shipments that cumulatively cover a drop-ship PO flips it to
+		Delivered (and advances the SO) — a partial shipment leaves it open."""
+		from exportflow.api import create_shipment
+
+		sfx = _suffix()
+		supplier = make_supplier(f"_Test EF AD Sup {sfx}")
+		item = make_dropship_item(f"_Test EF AD Item {sfx}", supplier, self.company)
+		customer = make_customer(f"_Test EF AD Cust {sfx}")
+		so = make_dropship_so(customer, self.company, [{"item_code": item, "qty": 100}])
+		po = make_purchase_order(so.name, selected_items=[{"item_code": item, "supplier": supplier}])[0]
+		po.items[0].rate = 50
+		po.save(ignore_permissions=True)
+		po.submit()
+
+		row, po_row = so.items[0], po.items[0]
+
+		def ship(qty):
+			create_shipment(
+				{
+					"customer": customer,
+					"mode": "Sea",
+					"items": [
+						{
+							"item_code": item,
+							"qty": qty,
+							"uom": row.uom,
+							"sales_order": so.name,
+							"so_detail": row.name,
+							"purchase_order": po.name,
+							"po_detail": po_row.name,
+						}
+					],
+				}
+			)
+
+		ship(40)  # partial — PO stays open
+		po.reload()
+		self.assertNotEqual(po.status, "Delivered", "a partly-shipped PO must stay open")
+
+		ship(60)  # now fully covered (40 + 60 = 100)
+		po.reload()
+		self.assertEqual(po.status, "Delivered", "a fully-shipped PO must flip to Delivered")
+		so.reload()
+		self.assertEqual(so.per_delivered, 100, "the SO must show fully delivered")

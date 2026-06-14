@@ -48,6 +48,8 @@ doc_events = {
 		"on_update": [
 			"exportflow.checklist.on_shipment_update",
 			"exportflow.exportflow.doctype.export_realization.export_realization.resync_due_dates_for_shipment",
+			# a fully-shipped drop-ship PO is delivered — flip its status so the SO advances
+			"exportflow.overrides.purchase_order.mark_covered_pos_delivered",
 		],
 		"on_trash": "exportflow.checklist.on_shipment_trash",
 	},

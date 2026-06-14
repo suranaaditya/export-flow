@@ -59,6 +59,53 @@ def on_cancel(doc, method=None):
 	rebuild_for_shipments(shipments)
 
 
+def mark_covered_pos_delivered(doc, method=None):
+	"""Export Shipment on_update hook: once the cumulative shipped quantity (across
+	ALL shipments) covers a linked drop-ship PO's full ordered qty, mark that PO
+	'Delivered' — the supplier has delivered everything to the port of shipment.
+	Only fully-covered POs flip (a partly-shipped PO stays open). Idempotent; a
+	failure to flip one PO never blocks the shipment save."""
+	from erpnext.buying.doctype.purchase_order.purchase_order import update_status
+
+	for po_name in {row.purchase_order for row in doc.items if row.purchase_order}:
+		try:
+			if _po_fully_shipped(po_name):
+				update_status("Delivered", po_name)
+		except Exception:
+			frappe.log_error(
+				title="ExportFlow auto-deliver PO",
+				message=f"shipment {doc.name} → PO {po_name}\n{frappe.get_traceback()}",
+			)
+
+
+def _po_fully_shipped(po_name: str) -> bool:
+	"""A submitted, not-yet-closed drop-ship PO whose every line's cumulative
+	shipped qty (across all shipments) reaches its ordered qty."""
+	po = frappe.db.get_value(
+		"Purchase Order", po_name, ["docstatus", "status"], as_dict=True
+	)
+	if not po or po.docstatus != 1 or po.status in ("Delivered", "Closed", "Cancelled"):
+		return False
+	lines = frappe.get_all(
+		"Purchase Order Item",
+		filters={"parent": po_name},
+		fields=["name", "qty", "delivered_by_supplier"],
+	)
+	# only drop-ship POs auto-deliver, and only when every line is fully shipped
+	if not lines or not all(line.delivered_by_supplier for line in lines):
+		return False
+	for line in lines:
+		shipped = flt(
+			frappe.db.sql(
+				"SELECT COALESCE(SUM(qty), 0) FROM `tabExport Shipment Item` WHERE po_detail = %s",
+				(line.name,),
+			)[0][0]
+		)
+		if shipped + 1e-6 < flt(line.qty):
+			return False
+	return True
+
+
 def _resync_mtt_outlay(shipments: list[str]):
 	"""Keep an auto merchanting shipment's stored import outlay (and single
 	supplier) in step with its linked POs as those POs are submitted, amended or
