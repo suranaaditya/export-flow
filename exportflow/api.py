@@ -1038,6 +1038,10 @@ def _po_item_tax_breakup(po) -> list[dict]:
 	from erpnext.controllers.taxes_and_totals import get_itemised_tax
 
 	try:
+		# a saved/reloaded PO has no runtime item_wise_tax_detail on its tax rows,
+		# so get_itemised_tax would raise — recompute in memory (no save) first so
+		# the per-item breakup is available on the detail view, not just the preview
+		po.run_method("calculate_taxes_and_totals")
 		itemised = get_itemised_tax(po)  # {item_code: {tax_desc: {tax_amount, ...}}}
 	except Exception:
 		itemised = {}

@@ -276,6 +276,36 @@ export function PurchaseOrderDetail() {
 						/>
 					</Card>
 
+					{detail.totals.by_item.some((b) => b.tax > 0) && (
+						<Card>
+							<CHead
+								icon="banknote"
+								title="Tax by item"
+								count={`${detail.totals.by_item.filter((b) => b.tax > 0).length}`}
+							/>
+							<table>
+								<thead>
+									<tr>
+										<th>Item</th>
+										<th>Taxable</th>
+										<th>Tax</th>
+									</tr>
+								</thead>
+								<tbody>
+									{detail.totals.by_item
+										.filter((b) => b.tax > 0)
+										.map((b) => (
+											<tr key={b.item_code}>
+												<td>{b.item_name || b.item_code}</td>
+												<td className="num">{fmtMoney(b.net, po.currency)}</td>
+												<td className="num">{fmtMoney(b.tax, po.currency)}</td>
+											</tr>
+										))}
+								</tbody>
+							</table>
+						</Card>
+					)}
+
 					<Card>
 						<CHead icon="ship" title="Shipments" count={shipments.length} />
 						{shipments.length === 0 ? (

@@ -5,7 +5,13 @@ try:
 except ImportError:  # frappe < 16
 	from frappe.tests.utils import FrappeTestCase as IntegrationTestCase
 
-from exportflow.api import create_item, preview_purchase_order, update_item
+from exportflow.api import (
+	create_item,
+	create_purchase_order_draft,
+	get_po_detail,
+	preview_purchase_order,
+	update_item,
+)
 from exportflow.tests.test_dropship import _suffix, make_supplier
 
 
@@ -117,6 +123,30 @@ class TestItemTax(IntegrationTestCase):
 		self.assertEqual(
 			len(frappe.get_all("Item Tax", filters={"parent": item.name})), 2, "desk rows survive"
 		)
+
+	def test_saved_po_per_item_tax_breakup(self):
+		# get_po_detail's per-item breakup must work for a SAVED (reloaded) PO, not
+		# only the live preview — and reflect each item's rate override
+		ptc = self._ptc_template(6)
+		itt = self._item_tax_template(2)  # overrides the same tax head to 2%
+		sfx = _suffix()
+		supplier = make_supplier(f"_Test EF SB Sup {sfx}")
+		a = create_item({"item_name": f"_Test EF SB A {sfx}", "item_tax_template": itt.name})["name"]
+		b = create_item({"item_name": f"_Test EF SB B {sfx}"})["name"]
+		res = create_purchase_order_draft(
+			{
+				"supplier": supplier,
+				"taxes_template": ptc.name,
+				"items": [
+					{"item_code": a, "qty": 10, "rate": 100},
+					{"item_code": b, "qty": 10, "rate": 100},
+				],
+			}
+		)
+		det = get_po_detail(res["name"])
+		by = {r["item_code"]: r for r in det["totals"]["by_item"]}
+		self.assertAlmostEqual(by[a]["tax"], 20.0, places=1, msg="2% override on the saved PO")
+		self.assertAlmostEqual(by[b]["tax"], 60.0, places=1, msg="6% template rate")
 
 	def test_gst_hsn_code_skipped_without_india_compliance(self):
 		# erptest has no gst_hsn_code field — passing it must not raise
