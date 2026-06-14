@@ -24,6 +24,7 @@ import {
 	urgencyLabel,
 	urgencyTone,
 	type MTTBlock,
+	type MttOutlay,
 	type ShipmentDetailData,
 	type ShipmentFinanceData,
 } from '@/lib/api';
@@ -87,7 +88,7 @@ export function ShipmentDetail() {
 		);
 	}
 
-	const { shipment, milestones, items, lc, sales_orders, can } = detail;
+	const { shipment, milestones, items, lc, sales_orders, can, mtt_outlay } = detail;
 	const isAir = shipment.mode === 'Air';
 	const merchanting = isMerchanting(shipment.trade_type);
 
@@ -383,7 +384,12 @@ export function ShipmentDetail() {
 					</Card>
 
 					{merchanting && (
-						<MTTComplianceCard shipment={shipment} canEdit={can.write} onSaved={() => mutate()} />
+						<MTTComplianceCard
+						shipment={shipment}
+						outlay={mtt_outlay}
+						canEdit={can.write}
+						onSaved={() => mutate()}
+					/>
 					)}
 					<ShipmentFinanceCard shipment={id} merchanting={merchanting} />
 				</div>
@@ -699,10 +705,12 @@ const MTT_PMS_OPTIONS = [{ value: '' }, { value: 'Open' }, { value: 'Closed' }, 
  *  RBI clocks, same-AD-bank confirmation, net-FX profit and EDPMS/IDPMS. */
 function MTTComplianceCard({
 	shipment,
+	outlay,
 	canEdit,
 	onSaved,
 }: {
 	shipment: ShipmentDoc;
+	outlay: MttOutlay | null;
 	canEdit: boolean;
 	onSaved: () => void;
 }) {
@@ -772,8 +780,22 @@ function MTTComplianceCard({
 		if (mtt.import_value_inr != null)
 			rows.push({
 				k: 'Import outlay',
-				v: <span className="num">{fmtMoney(mtt.import_value_inr, 'INR')}</span>,
+				v: (
+					<span>
+						<span className="num">{fmtMoney(mtt.import_value_inr, 'INR')}</span>{' '}
+						{shipment.mtt_import_value_auto ? <Tag tone="ok">auto from POs</Tag> : null}
+					</span>
+				),
 				data: true,
+			});
+		if (shipment.mtt_import_value_auto && outlay && outlay.uncosted_lines > 0)
+			rows.push({
+				k: '',
+				v: (
+					<span style={{ color: 'var(--fg-3)', fontSize: '12px' }}>
+						{outlay.uncosted_lines} line(s) have no PO yet — not counted in the outlay
+					</span>
+				),
 			});
 		if (shipment.mtt_import_supplier)
 			rows.push({ k: 'Import supplier', v: shipment.mtt_import_supplier });
@@ -810,6 +832,7 @@ function MTTComplianceCard({
 			{editing && (
 				<MTTEditModal
 					shipment={shipment}
+					outlay={outlay}
 					onClose={() => setEditing(false)}
 					onSaved={() => {
 						setEditing(false);
@@ -826,6 +849,7 @@ interface MTTForm {
 	mtt_ad_bank: string;
 	mtt_same_ad_bank: boolean;
 	mtt_import_supplier: string;
+	mtt_import_value_auto: boolean;
 	mtt_import_value_inr: string;
 	mtt_commencement_date: string;
 	mtt_import_payment_date: string;
@@ -836,10 +860,12 @@ interface MTTForm {
 
 function MTTEditModal({
 	shipment,
+	outlay,
 	onClose,
 	onSaved,
 }: {
 	shipment: ShipmentDoc;
+	outlay: MttOutlay | null;
 	onClose: () => void;
 	onSaved: () => void;
 }) {
@@ -854,6 +880,7 @@ function MTTEditModal({
 		mtt_ad_bank: shipment.mtt_ad_bank ?? '',
 		mtt_same_ad_bank: !!shipment.mtt_same_ad_bank,
 		mtt_import_supplier: shipment.mtt_import_supplier ?? '',
+		mtt_import_value_auto: !!shipment.mtt_import_value_auto,
 		mtt_import_value_inr:
 			shipment.mtt_import_value_inr != null ? String(shipment.mtt_import_value_inr) : '',
 		mtt_commencement_date: shipment.mtt_commencement_date ?? '',
@@ -863,6 +890,17 @@ function MTTEditModal({
 		mtt_edpms_status: shipment.mtt_edpms_status ?? '',
 	}));
 	const set = <K extends keyof MTTForm>(k: K, v: MTTForm[K]) => setForm((f) => ({ ...f, [k]: v }));
+	const supplierName = (name: string) =>
+		suppliers.data?.find((s) => s.name === name)?.supplier_name ?? name;
+	const auto = form.mtt_import_value_auto;
+	// toggling auto OFF seeds the now-editable fields from what was shown under auto
+	const toggleAuto = (v: boolean) => {
+		set('mtt_import_value_auto', v);
+		if (!v && outlay) {
+			set('mtt_import_value_inr', outlay.computed ? String(outlay.computed) : '');
+			if (outlay.supplier) set('mtt_import_supplier', outlay.supplier);
+		}
+	};
 
 	async function onSave() {
 		setErr(null);
@@ -871,8 +909,15 @@ function MTTEditModal({
 			await updateDoc('Export Shipment', shipment.name, {
 				mtt_ad_bank: form.mtt_ad_bank,
 				mtt_same_ad_bank: form.mtt_same_ad_bank ? 1 : 0,
-				mtt_import_supplier: orNull(form.mtt_import_supplier),
-				mtt_import_value_inr: form.mtt_import_value_inr ? Number(form.mtt_import_value_inr) : 0,
+				// under auto the server owns these — post what the user is shown so the
+				// payload never contradicts the display (the controller still recomputes)
+				mtt_import_supplier: auto ? (outlay?.supplier ?? null) : orNull(form.mtt_import_supplier),
+				mtt_import_value_auto: auto ? 1 : 0,
+				mtt_import_value_inr: auto
+					? (outlay?.computed ?? 0)
+					: form.mtt_import_value_inr
+						? Number(form.mtt_import_value_inr)
+						: 0,
 				mtt_commencement_date: orNull(form.mtt_commencement_date),
 				mtt_import_payment_date: orNull(form.mtt_import_payment_date),
 				mtt_completion_date: orNull(form.mtt_completion_date),
@@ -888,16 +933,43 @@ function MTTEditModal({
 	return (
 		<Modal title="MTT compliance" icon="globe" onClose={onClose}>
 			<div className="formgrid">
+				<div className="span2">
+					<CheckInput
+						checked={auto}
+						onChange={toggleAuto}
+						label="Auto-derive outlay & supplier from the linked purchase orders"
+					/>
+				</div>
 				<Field label="AD bank (both legs)">
 					<TextInput value={form.mtt_ad_bank} onChange={(v) => set('mtt_ad_bank', v)} />
 				</Field>
-				<Field label="Import-leg supplier">
-					<SearchSelect
-						value={form.mtt_import_supplier}
-						onChange={(v) => set('mtt_import_supplier', v)}
-						options={(suppliers.data ?? []).map((s) => ({ value: s.name, label: s.supplier_name }))}
-						placeholder="Search suppliers…"
-					/>
+				<Field
+					label="Import-leg supplier"
+					hint={
+						auto
+							? outlay?.supplier
+								? 'From the linked purchase order'
+								: (outlay?.suppliers.length ?? 0) > 1
+									? 'Several suppliers across the POs — switch off auto to set one'
+									: 'No PO linked yet'
+							: undefined
+					}
+				>
+					{auto ? (
+						<TextInput
+							value={outlay?.supplier ? (outlay.supplier_name ?? supplierName(outlay.supplier)) : ''}
+							onChange={() => {}}
+							placeholder="—"
+							disabled
+						/>
+					) : (
+						<SearchSelect
+							value={form.mtt_import_supplier}
+							onChange={(v) => set('mtt_import_supplier', v)}
+							options={(suppliers.data ?? []).map((s) => ({ value: s.name, label: s.supplier_name }))}
+							placeholder="Search suppliers…"
+						/>
+					)}
 				</Field>
 				<div className="span2">
 					<CheckInput
@@ -927,13 +999,28 @@ function MTTEditModal({
 						onChange={(v) => set('mtt_completion_date', v)}
 					/>
 				</Field>
-				<Field label="Import outlay (INR)" hint="For the net-FX-profit check">
-					<TextInput
-						type="number"
-						mono
-						value={form.mtt_import_value_inr}
-						onChange={(v) => set('mtt_import_value_inr', v)}
-					/>
+				<Field
+					label="Import outlay (INR)"
+					hint={
+						form.mtt_import_value_auto
+							? outlay && outlay.uncosted_lines > 0
+								? `${outlay.costed_lines} line(s) costed · ${outlay.uncosted_lines} without a PO not counted`
+								: outlay && outlay.costed_lines === 0
+									? 'No linked POs yet — link a PO or switch off auto'
+									: 'Summed from the linked PO lines'
+							: 'For the net-FX-profit check'
+					}
+				>
+					{form.mtt_import_value_auto ? (
+						<TextInput mono value={outlay ? String(outlay.computed) : '0'} onChange={() => {}} disabled />
+					) : (
+						<TextInput
+							type="number"
+							mono
+							value={form.mtt_import_value_inr}
+							onChange={(v) => set('mtt_import_value_inr', v)}
+						/>
+					)}
 				</Field>
 				<Field label="EDPMS (export) status">
 					<SelectInput

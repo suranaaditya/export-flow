@@ -610,9 +610,25 @@ export interface ShipmentItemRow {
 	gst_export_deadline: string | null;
 }
 
+/** import outlay + supplier derivable from a merchanting shipment's linked POs */
+export interface MttOutlay {
+	/** Σ(shipped qty × PO line rate), in INR */
+	computed: number;
+	costed_lines: number;
+	/** shipment lines with no PO yet — not included in the outlay */
+	uncosted_lines: number;
+	suppliers: string[];
+	/** the single supplier auto-fill applies; null when ambiguous or none */
+	supplier: string | null;
+	/** display name of `supplier` (resolves disabled vendors); null when no single */
+	supplier_name: string | null;
+}
+
 export interface ShipmentDetailData {
 	/** actual date the export milestone (Shipped on Board / Departed) completed */
 	export_completed_on: string | null;
+	/** present for merchanting shipments — drives the auto outlay/supplier fill */
+	mtt_outlay: MttOutlay | null;
 	shipment: {
 		name: string;
 		customer: string;
@@ -648,6 +664,7 @@ export interface ShipmentDetailData {
 		mtt_ad_bank: string | null;
 		mtt_same_ad_bank: 0 | 1;
 		mtt_import_supplier: string | null;
+		mtt_import_value_auto: 0 | 1;
 		mtt_import_value_inr: number | null;
 		mtt_commencement_date: string | null;
 		mtt_import_payment_date: string | null;

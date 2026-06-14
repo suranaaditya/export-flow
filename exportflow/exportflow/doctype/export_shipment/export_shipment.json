@@ -50,6 +50,7 @@
   "mtt_ad_bank",
   "mtt_same_ad_bank",
   "mtt_import_supplier",
+  "mtt_import_value_auto",
   "mtt_import_value_inr",
   "cb_mtt",
   "mtt_commencement_date",
@@ -329,11 +330,19 @@
    "options": "Supplier"
   },
   {
-   "description": "Forex paid out for the buy leg, in INR — used for the net-FX-profit check.",
+   "default": "1",
+   "description": "Derive the import outlay and import-leg supplier from the shipment's linked purchase orders. Uncheck to enter them manually.",
+   "fieldname": "mtt_import_value_auto",
+   "fieldtype": "Check",
+   "label": "Auto-derive from purchase orders"
+  },
+  {
+   "description": "Forex paid out for the buy leg, in INR — used for the net-FX-profit check. Auto-derived from the linked POs unless edited manually.",
    "fieldname": "mtt_import_value_inr",
    "fieldtype": "Currency",
    "label": "Import outlay (INR)",
-   "options": "Company:company:default_currency"
+   "options": "Company:company:default_currency",
+   "read_only_depends_on": "eval:doc.mtt_import_value_auto"
   },
   {
    "fieldname": "cb_mtt",
@@ -406,7 +415,7 @@
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-06-13 14:00:00.000000",
+ "modified": "2026-06-14 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "ExportFlow",
  "name": "Export Shipment",

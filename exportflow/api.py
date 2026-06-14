@@ -1329,8 +1329,25 @@ def get_shipment_detail(name: str) -> dict:
 
 	export_done_on = doc.export_completed_on()
 
+	from exportflow.mtt import is_merchanting
+
+	mtt_outlay = None
+	if is_merchanting(doc.trade_type):
+		facts = doc.computed_import_facts()
+		# the single supplier auto-fill applies (None when ambiguous / none)
+		single = facts["suppliers"][0] if len(facts["suppliers"]) == 1 else None
+		mtt_outlay = {
+			"computed": facts["outlay_inr"],
+			"costed_lines": facts["costed_lines"],
+			"uncosted_lines": facts["uncosted_lines"],
+			"suppliers": facts["suppliers"],
+			"supplier": single,
+			"supplier_name": frappe.db.get_value("Supplier", single, "supplier_name") if single else None,
+		}
+
 	return {
 		"export_completed_on": str(export_done_on) if export_done_on else None,
+		"mtt_outlay": mtt_outlay,
 		"shipment": {
 			f: doc.get(f)
 			for f in (
@@ -1368,6 +1385,7 @@ def get_shipment_detail(name: str) -> dict:
 				"mtt_ad_bank",
 				"mtt_same_ad_bank",
 				"mtt_import_supplier",
+				"mtt_import_value_auto",
 				"mtt_import_value_inr",
 				"mtt_commencement_date",
 				"mtt_import_payment_date",

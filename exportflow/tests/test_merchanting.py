@@ -1,5 +1,5 @@
 import frappe
-from frappe.utils import add_days, add_months, getdate, nowdate
+from frappe.utils import add_days, add_months, flt, getdate, nowdate
 
 try:
 	from frappe.tests import IntegrationTestCase
@@ -306,6 +306,234 @@ class TestMerchanting(IntegrationTestCase):
 
 		rel.reload()
 		self.assertEqual(getdate(rel.due_date), add_months(getdate(commencement), 9))
+
+	# ---------------------------------------------------------------- auto import facts
+
+	def _make_po_for_row(self, so, row, supplier, rate):
+		"""A submitted PO line sourcing this SO row, at the given buying rate."""
+		frappe.db.set_value("Sales Order Item", row.name, "delivered_by_supplier", 1)
+		po = frappe.get_doc(
+			{
+				"doctype": "Purchase Order",
+				"supplier": supplier,
+				"company": self.company,
+				"transaction_date": nowdate(),
+				"schedule_date": add_days(nowdate(), 15),
+				"items": [
+					{
+						"item_code": row.item_code,
+						"qty": row.qty,
+						"rate": rate,
+						"schedule_date": add_days(nowdate(), 15),
+						"sales_order": so.name,
+						"sales_order_item": row.name,
+						"delivered_by_supplier": 1,
+					}
+				],
+			}
+		).insert(ignore_permissions=True)
+		po.submit()
+		return po
+
+	def _ship_lines(self, customer, lines, trade_type=MERCHANTING):
+		return create_shipment(
+			{"customer": customer, "mode": "Sea", "trade_type": trade_type, "items": lines}
+		)["name"]
+
+	def test_auto_import_outlay_from_single_po(self):
+		"""A merchanting shipment auto-fills the outlay (Σ qty × PO rate) and the
+		import-leg supplier from a single linked PO."""
+		so, customer = self.make_deal(qty=10, rate=12)
+		supplier = make_supplier(f"_Test EF MTT Sup {_suffix()}")
+		po = self._make_po_for_row(so, so.items[0], supplier, rate=7)
+		row = so.items[0]
+		name = self._ship_lines(
+			customer,
+			[
+				{
+					"item_code": row.item_code,
+					"qty": 10,
+					"uom": row.uom,
+					"sales_order": so.name,
+					"so_detail": row.name,
+					"purchase_order": po.name,
+					"po_detail": po.items[0].name,
+				}
+			],
+		)
+		shp = frappe.get_doc("Export Shipment", name)
+		self.assertTrue(shp.mtt_import_value_auto, "auto on by default for merchanting")
+		self.assertEqual(flt(shp.mtt_import_value_inr), 70.0)  # 10 × 7
+		self.assertEqual(shp.mtt_import_supplier, supplier)
+
+	def test_auto_outlay_sums_but_supplier_blank_when_ambiguous(self):
+		"""Several POs with different suppliers: the outlay sums across them, but the
+		single-supplier field is left for manual entry (never guessed)."""
+		sfx = _suffix()
+		item_a = make_plain_item(f"_Test EF M2 A {sfx}")
+		item_b = make_plain_item(f"_Test EF M2 B {sfx}")
+		customer = make_customer(f"_Test EF M2 Cust {sfx}")
+		so = book_deal(
+			self.company,
+			customer,
+			[{"item_code": item_a, "qty": 10, "rate": 12}, {"item_code": item_b, "qty": 5, "rate": 20}],
+		)
+		sup1 = make_supplier(f"_Test EF M2 Sup1 {sfx}")
+		sup2 = make_supplier(f"_Test EF M2 Sup2 {sfx}")
+		po1 = self._make_po_for_row(so, so.items[0], sup1, rate=7)
+		po2 = self._make_po_for_row(so, so.items[1], sup2, rate=9)
+		name = self._ship_lines(
+			customer,
+			[
+				{
+					"item_code": so.items[0].item_code,
+					"qty": 10,
+					"uom": so.items[0].uom,
+					"sales_order": so.name,
+					"so_detail": so.items[0].name,
+					"purchase_order": po1.name,
+					"po_detail": po1.items[0].name,
+				},
+				{
+					"item_code": so.items[1].item_code,
+					"qty": 5,
+					"uom": so.items[1].uom,
+					"sales_order": so.name,
+					"so_detail": so.items[1].name,
+					"purchase_order": po2.name,
+					"po_detail": po2.items[0].name,
+				},
+			],
+		)
+		shp = frappe.get_doc("Export Shipment", name)
+		self.assertEqual(flt(shp.mtt_import_value_inr), 115.0)  # 10×7 + 5×9
+		self.assertFalse(shp.mtt_import_supplier, "ambiguous supplier must not be guessed")
+
+	def test_manual_import_outlay_overrides_auto(self):
+		"""Switching auto off preserves a hand-entered outlay (never recomputed)."""
+		so, customer = self.make_deal(qty=10, rate=12)
+		supplier = make_supplier(f"_Test EF MTT Sup3 {_suffix()}")
+		po = self._make_po_for_row(so, so.items[0], supplier, rate=7)
+		row = so.items[0]
+		name = self._ship_lines(
+			customer,
+			[
+				{
+					"item_code": row.item_code,
+					"qty": 10,
+					"uom": row.uom,
+					"sales_order": so.name,
+					"so_detail": row.name,
+					"purchase_order": po.name,
+					"po_detail": po.items[0].name,
+				}
+			],
+		)
+		shp = frappe.get_doc("Export Shipment", name)
+		shp.mtt_import_value_auto = 0
+		shp.mtt_import_value_inr = 5000
+		shp.save(ignore_permissions=True)
+		shp.reload()
+		self.assertEqual(flt(shp.mtt_import_value_inr), 5000.0, "manual value must survive validate")
+
+	def test_auto_outlay_blank_without_pos(self):
+		"""A merchanting shipment whose lines have no PO yet leaves the outlay blank
+		(nothing bought) rather than zero."""
+		so, customer = self.make_deal()
+		shp = frappe.get_doc("Export Shipment", self.make_shipment(so, customer, trade_type=MERCHANTING))
+		self.assertTrue(shp.mtt_import_value_auto)
+		self.assertFalse(shp.mtt_import_value_inr, "no PO → no outlay (blank/zero, not a figure)")
+		facts = shp.computed_import_facts()
+		self.assertEqual(facts["uncosted_lines"], 1)
+		self.assertEqual(facts["costed_lines"], 0)
+
+	def test_po_submit_resyncs_auto_outlay(self):
+		"""A shipment booked BEFORE its PO exists (blank PO link) picks up the
+		import outlay + supplier when the sourcing PO is later submitted — via the
+		SO-line fallback at create and the PO on_submit resync."""
+		so, customer = self.make_deal(qty=10, rate=12)
+		name = self.make_shipment(so, customer, trade_type=MERCHANTING)  # no PO yet
+		shp = frappe.get_doc("Export Shipment", name)
+		self.assertFalse(shp.mtt_import_value_inr, "no sourcing PO yet → blank outlay")
+		supplier = make_supplier(f"_Test EF MTT POsub {_suffix()}")
+		self._make_po_for_row(so, so.items[0], supplier, rate=7)  # submit → on_submit resync
+		shp.reload()
+		self.assertEqual(flt(shp.mtt_import_value_inr), 70.0, "PO submit resynced the outlay")
+		self.assertEqual(shp.mtt_import_supplier, supplier)
+
+	def test_auto_supplier_cleared_when_pos_become_ambiguous(self):
+		"""A single-supplier shipment that later also sources a second vendor clears
+		the auto-derived supplier rather than leaving a stale guess."""
+		sfx = _suffix()
+		item_a = make_plain_item(f"_Test EF MC A {sfx}")
+		item_b = make_plain_item(f"_Test EF MC B {sfx}")
+		customer = make_customer(f"_Test EF MC Cust {sfx}")
+		so = book_deal(
+			self.company,
+			customer,
+			[{"item_code": item_a, "qty": 10, "rate": 12}, {"item_code": item_b, "qty": 5, "rate": 20}],
+		)
+		sup1 = make_supplier(f"_Test EF MC Sup1 {sfx}")
+		sup2 = make_supplier(f"_Test EF MC Sup2 {sfx}")
+		po1 = self._make_po_for_row(so, so.items[0], sup1, rate=7)
+		name = self._ship_lines(
+			customer,
+			[
+				{
+					"item_code": so.items[0].item_code,
+					"qty": 10,
+					"uom": so.items[0].uom,
+					"sales_order": so.name,
+					"so_detail": so.items[0].name,
+					"purchase_order": po1.name,
+					"po_detail": po1.items[0].name,
+				}
+			],
+		)
+		shp = frappe.get_doc("Export Shipment", name)
+		self.assertEqual(shp.mtt_import_supplier, sup1, "single supplier auto-set")
+		po2 = self._make_po_for_row(so, so.items[1], sup2, rate=9)
+		shp.append(
+			"items",
+			{
+				"item_code": so.items[1].item_code,
+				"qty": 5,
+				"uom": so.items[1].uom,
+				"sales_order": so.name,
+				"so_detail": so.items[1].name,
+				"purchase_order": po2.name,
+				"po_detail": po2.items[0].name,
+			},
+		)
+		shp.save(ignore_permissions=True)
+		shp.reload()
+		self.assertFalse(shp.mtt_import_supplier, "two suppliers now → cleared, not stale sup1")
+		self.assertEqual(flt(shp.mtt_import_value_inr), 115.0)  # 10×7 + 5×9
+
+	def test_auto_outlay_via_so_detail_fallback(self):
+		"""A shipment item with a blank PO link still costs out via the SO-line
+		fallback when a submitted PO already sources its SO line."""
+		so, customer = self.make_deal(qty=10, rate=12)
+		supplier = make_supplier(f"_Test EF MTT FB {_suffix()}")
+		self._make_po_for_row(so, so.items[0], supplier, rate=7)  # PO submitted first
+		row = so.items[0]
+		# book WITHOUT a PO link — purchase_order/po_detail blank
+		name = self._ship_lines(
+			customer,
+			[
+				{
+					"item_code": row.item_code,
+					"qty": 10,
+					"uom": row.uom,
+					"sales_order": so.name,
+					"so_detail": row.name,
+				}
+			],
+		)
+		shp = frappe.get_doc("Export Shipment", name)
+		self.assertEqual(flt(shp.mtt_import_value_inr), 70.0, "derived via the so_detail fallback")
+		self.assertEqual(shp.mtt_import_supplier, supplier)
+		self.assertEqual(shp.computed_import_facts()["costed_lines"], 1)
 
 	# ---------------------------------------------------------------- pure helpers
 

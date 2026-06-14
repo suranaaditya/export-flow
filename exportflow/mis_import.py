@@ -37,31 +37,20 @@ def _is_merchanting(group) -> bool:
 	return False
 
 
-def _import_value_inr(group, rate: float) -> float | None:
-	"""Buy-leg outlay in INR from the per-item supplier rates (for the MTT
-	net-FX-profit check). None when the sheet carries no supplier pricing."""
-	fcy = sum(
-		flt(it["qty"]) * flt(it.get("supplier_rate"))
-		for it in group["items"]
-		if it.get("qty") and it.get("supplier_rate")
-	)
-	return flt(fcy * rate, 2) if fcy else None
-
-
 def _mtt_shipment_fields(group, merchanting: bool, rate: float) -> dict:
 	"""MTT fields to stamp on a merchanting shipment from the MIS row. The sheet
 	carries no import-payment date, so the 9-month clock is anchored on the
-	export (B/L) date as a proxy and the outlay clock stays manual."""
+	export (B/L) date as a proxy and the outlay clock stays manual.
+
+	The import outlay and import-leg supplier are NOT stamped here — they are
+	auto-derived from the linked POs (mtt_import_value_auto, default on), so a
+	sheet figure would only be wiped at insert. A shipment with no derivable PO
+	keeps a blank outlay until its PO is linked (or the user switches off auto)."""
 	if not merchanting:
 		return {}
-	sup_name = group.get("supplier_name")
 	fields = {
 		"mtt_ad_bank": group.get("bank") or None,
-		"mtt_import_supplier": (
-			ensure_supplier(sup_name) if sup_name and not _is_generic(sup_name) else None
-		),
 		"mtt_commencement_date": group.get("bl_date") or group.get("shipping_bill_date") or None,
-		"mtt_import_value_inr": _import_value_inr(group, rate),
 	}
 	if flt(group.get("amount_received")) > 0 and group.get("pay_received_date"):
 		fields["mtt_completion_date"] = group.get("pay_received_date")
@@ -514,6 +503,71 @@ def backfill_trade_types(path: str, company: str = "MN Globex", dry_run: int = 1
 		frappe.db.commit()
 		result["mode"] = "committed"
 	frappe.logger().info(f"MIS trade-type backfill: {result}")
+	return result
+
+
+def backfill_mtt_import_facts(company: str | None = None, dry_run: int = 1) -> dict:
+	"""Derive the MTT import outlay (and single-supplier) from the linked POs for
+	merchanting shipments flagged auto — fills rows imported/created before the
+	auto-derive existed. db_set only (no full save → no checklist churn); the
+	supplier is set only when the linked POs share one vendor. Idempotent.
+
+	Run on the server (no client data file needed):
+	    bench --site <site> execute exportflow.mis_import.backfill_mtt_import_facts \\
+	        --kwargs "{'company': 'MN Globex', 'dry_run': False}"
+	"""
+	dry_run = int(dry_run)
+	filters = {"trade_type": MERCHANTING, "mtt_import_value_auto": 1}
+	if company:
+		filters["company"] = company
+	names = frappe.get_all("Export Shipment", filters=filters, pluck="name")
+
+	result = {
+		"scanned": len(names),
+		"outlay_set": 0,
+		"supplier_set": 0,
+		"company": company or "all",
+		"changes": [],
+	}
+	for name in names:
+		doc = frappe.get_doc("Export Shipment", name)
+		facts = doc.computed_import_facts()
+		new_outlay = facts["outlay_inr"] or None
+		single_supplier = facts["suppliers"][0] if len(facts["suppliers"]) == 1 else None
+
+		outlay_changed = flt(doc.mtt_import_value_inr) != flt(new_outlay or 0)
+		# under auto the supplier mirrors the POs — set the single vendor, or clear
+		# a previously-derived one when the POs are now ambiguous/absent
+		supplier_changed = doc.mtt_import_supplier != single_supplier
+		if not (outlay_changed or supplier_changed):
+			continue
+		result["changes"].append(
+			{
+				"shipment": name,
+				"outlay": new_outlay,
+				"supplier": single_supplier,
+				"uncosted_lines": facts["uncosted_lines"],
+			}
+		)
+		if outlay_changed:
+			result["outlay_set"] += 1
+			if not dry_run:
+				doc.db_set("mtt_import_value_inr", new_outlay, update_modified=False)
+		if supplier_changed:
+			result["supplier_set"] += 1
+			if not dry_run:
+				doc.db_set("mtt_import_supplier", single_supplier, update_modified=False)
+
+	if dry_run:
+		frappe.db.rollback()
+		result["mode"] = "dry-run (rolled back)"
+	else:
+		frappe.db.commit()
+		result["mode"] = "committed"
+	frappe.logger().info(
+		f"MTT import-facts backfill: scanned={result['scanned']} "
+		f"outlay={result['outlay_set']} supplier={result['supplier_set']}"
+	)
 	return result
 
 

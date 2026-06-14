@@ -53,6 +53,7 @@ class ExportShipment(Document):
 		self.apply_merchanting_cha()
 		self.seed_milestones()
 		self.validate_items()
+		self.apply_mtt_import_facts()
 		self.validate_lc()
 		self.validate_milestone_blockers()
 		self.set_current_milestone()
@@ -69,6 +70,69 @@ class ExportShipment(Document):
 		from exportflow.exportflow.doctype.cha.cha import ensure_third_country_cha
 
 		self.cha = ensure_third_country_cha()
+
+	def _effective_po(self, row):
+		"""(purchase_order, po_detail) sourcing a shipment line — its own link when
+		set and still submitted, else the submitted PO Item for its SO line. Mirrors
+		the fallback get_shipment_detail uses for shipments booked before the PO
+		existed, so the two views can never disagree."""
+		if row.po_detail:
+			if frappe.db.get_value("Purchase Order Item", row.po_detail, "docstatus") == 1:
+				return row.purchase_order, row.po_detail
+			return None, None
+		# no po_detail: resolve the submitted PO Item for this SO line, preferring a
+		# purchase_order already recorded on the row (a partial link) so the derived
+		# PO can never diverge from one the row names
+		filters = {"sales_order_item": row.so_detail, "docstatus": 1}
+		if row.purchase_order:
+			filters["parent"] = row.purchase_order
+		poi = frappe.db.get_value(
+			"Purchase Order Item", filters, ["name", "parent"], as_dict=True
+		)
+		return (poi.parent, poi.name) if poi else (None, None)
+
+	def computed_import_facts(self) -> dict:
+		"""Derive the merchanting import leg from the shipment's linked POs:
+		outlay = Σ (shipped qty × PO line buying rate), in INR (POs are stored in
+		company currency, so base_rate is already INR — no FX needed), plus the
+		distinct PO suppliers. A line with no submitted sourcing PO contributes
+		nothing (nothing bought yet); a line that HAS one is 'costed' even at a
+		zero rate."""
+		total = 0.0
+		costed = uncosted = 0
+		suppliers: set[str] = set()
+		for row in self.items:
+			po_name, po_detail = self._effective_po(row)
+			if not po_detail:
+				uncosted += 1
+				continue
+			supplier = frappe.db.get_value("Purchase Order", po_name, "supplier")
+			if supplier:
+				suppliers.add(supplier)
+			total += flt(row.qty) * flt(
+				frappe.db.get_value("Purchase Order Item", po_detail, "base_rate")
+			)
+			costed += 1
+		return {
+			"outlay_inr": flt(total, 2),
+			"costed_lines": costed,
+			"uncosted_lines": uncosted,
+			"suppliers": sorted(suppliers),
+		}
+
+	def apply_mtt_import_facts(self):
+		"""When 'Auto-derive from purchase orders' is on (default for merchanting),
+		the controller OWNS the import outlay and import-leg supplier: outlay from
+		the linked POs, supplier when they share a SINGLE vendor (else cleared — an
+		ambiguous/empty set never leaves a stale guess). A manual override (toggle
+		off) is left untouched."""
+		from exportflow.mtt import is_merchanting
+
+		if not is_merchanting(self.trade_type) or not self.mtt_import_value_auto:
+			return
+		facts = self.computed_import_facts()
+		self.mtt_import_value_inr = facts["outlay_inr"] or None
+		self.mtt_import_supplier = facts["suppliers"][0] if len(facts["suppliers"]) == 1 else None
 
 	def validate_milestone_blockers(self):
 		"""The UI completes milestones via set_milestone, but a direct document
