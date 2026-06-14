@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useFrappeCreateDoc, useFrappeUpdateDoc } from 'frappe-react-sdk';
+import { useFrappeCreateDoc, useFrappeDeleteDoc, useFrappeUpdateDoc } from 'frappe-react-sdk';
 import { Field, SelectInput, TextArea, TextInput } from '@/components/form';
 import { Modal } from '@/components/ui';
 import {
@@ -30,18 +30,78 @@ export interface RealizationSeed {
 
 const numStr = (v: number | null | undefined) => (v != null ? String(v) : '');
 
+/** Shared modal footer. While editing, a permitted user gets a Delete button
+ *  that swaps the footer to an inline two-step confirm (no accidental loss).
+ *  Used by both finance modals, so delete works on the Finance screen and the
+ *  shipment finance card alike. */
+function FinanceModalFoot({
+	isNew,
+	noun,
+	err,
+	busy,
+	saving,
+	canDelete,
+	confirmDelete,
+	setConfirmDelete,
+	deleting,
+	onClose,
+	onSave,
+	onDelete,
+}: {
+	isNew: boolean;
+	noun: string;
+	err: string | null;
+	busy: boolean;
+	saving: boolean;
+	canDelete: boolean;
+	confirmDelete: boolean;
+	setConfirmDelete: (v: boolean) => void;
+	deleting: boolean;
+	onClose: () => void;
+	onSave: () => void;
+	onDelete: () => void;
+}) {
+	if (confirmDelete) {
+		return (
+			<div className="formfoot">
+				<span className="fconfirm">Delete this {noun} permanently? This can’t be undone.</span>
+				<span className="spacer" />
+				<button type="button" className="btn" disabled={deleting} onClick={() => setConfirmDelete(false)}>Keep</button>
+				<button type="button" className="btn danger" disabled={deleting} onClick={onDelete}>{deleting ? 'Deleting…' : 'Yes, delete'}</button>
+			</div>
+		);
+	}
+	return (
+		<div className="formfoot">
+			{err && <span className="ferr">{err}</span>}
+			{!isNew && canDelete && (
+				<button type="button" className="btn" disabled={busy} onClick={() => setConfirmDelete(true)}>Delete</button>
+			)}
+			<span className="spacer" />
+			<button type="button" className="btn" onClick={onClose}>Cancel</button>
+			<button type="button" className="btn primary" disabled={busy} onClick={onSave}>
+				{saving ? 'Saving…' : isNew ? 'Create' : 'Save'}
+			</button>
+		</div>
+	);
+}
+
 export function IncentiveModal({
 	record,
 	seed,
 	lockShipment,
+	canDelete,
 	onClose,
 	onSaved,
+	onDeleted,
 }: {
 	record: IncentiveRow | null;
 	seed?: IncentiveSeed | null;
 	lockShipment?: boolean;
+	canDelete?: boolean;
 	onClose: () => void;
 	onSaved: () => void;
+	onDeleted?: () => void;
 }) {
 	const isNew = record === null;
 	const [form, setForm] = useState({
@@ -59,9 +119,23 @@ export function IncentiveModal({
 		remarks: record?.remarks ?? '',
 	});
 	const [err, setErr] = useState<string | null>(null);
+	const [confirmDelete, setConfirmDelete] = useState(false);
 	const { createDoc, loading: creating } = useFrappeCreateDoc();
 	const { updateDoc, loading: updating } = useFrappeUpdateDoc();
+	const { deleteDoc, loading: deleting } = useFrappeDeleteDoc();
 	const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }));
+
+	async function onDelete() {
+		if (!record) return;
+		setErr(null);
+		try {
+			await deleteDoc('Export Incentive', record.name);
+			(onDeleted ?? onSaved)();
+		} catch (e) {
+			setConfirmDelete(false);
+			setErr(parseServerError(e));
+		}
+	}
 
 	async function onSave() {
 		setErr(null);
@@ -139,14 +213,20 @@ export function IncentiveModal({
 					</Field>
 				</div>
 			</div>
-			<div className="formfoot">
-				{err && <span className="ferr">{err}</span>}
-				<span className="spacer" />
-				<button type="button" className="btn" onClick={onClose}>Cancel</button>
-				<button type="button" className="btn primary" disabled={creating || updating} onClick={() => void onSave()}>
-					{creating || updating ? 'Saving…' : isNew ? 'Create' : 'Save'}
-				</button>
-			</div>
+			<FinanceModalFoot
+				isNew={isNew}
+				noun="incentive"
+				err={err}
+				busy={creating || updating || deleting}
+				saving={creating || updating}
+				canDelete={!!canDelete}
+				confirmDelete={confirmDelete}
+				setConfirmDelete={setConfirmDelete}
+				deleting={deleting}
+				onClose={onClose}
+				onSave={() => void onSave()}
+				onDelete={() => void onDelete()}
+			/>
 		</Modal>
 	);
 }
@@ -155,14 +235,18 @@ export function RealizationModal({
 	record,
 	seed,
 	lockShipment,
+	canDelete,
 	onClose,
 	onSaved,
+	onDeleted,
 }: {
 	record: RealizationRow | null;
 	seed?: RealizationSeed | null;
 	lockShipment?: boolean;
+	canDelete?: boolean;
 	onClose: () => void;
 	onSaved: () => void;
+	onDeleted?: () => void;
 }) {
 	const isNew = record === null;
 	const [form, setForm] = useState({
@@ -185,9 +269,23 @@ export function RealizationModal({
 		remarks: record?.remarks ?? '',
 	});
 	const [err, setErr] = useState<string | null>(null);
+	const [confirmDelete, setConfirmDelete] = useState(false);
 	const { createDoc, loading: creating } = useFrappeCreateDoc();
 	const { updateDoc, loading: updating } = useFrappeUpdateDoc();
+	const { deleteDoc, loading: deleting } = useFrappeDeleteDoc();
 	const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }));
+
+	async function onDelete() {
+		if (!record) return;
+		setErr(null);
+		try {
+			await deleteDoc('Export Realization', record.name);
+			(onDeleted ?? onSaved)();
+		} catch (e) {
+			setConfirmDelete(false);
+			setErr(parseServerError(e));
+		}
+	}
 
 	// always offer the common currencies plus whatever the deal / record uses,
 	// so a seeded currency outside the default trio (e.g. ZAR, AED) stays selectable
@@ -244,14 +342,20 @@ export function RealizationModal({
 				<Field label="eBRC date"><TextInput type="date" value={form.ebrc_date} onChange={(v) => set('ebrc_date', v)} /></Field>
 				<div className="span2"><Field label="Remarks"><TextArea value={form.remarks} onChange={(v) => set('remarks', v)} rows={2} /></Field></div>
 			</div>
-			<div className="formfoot">
-				{err && <span className="ferr">{err}</span>}
-				<span className="spacer" />
-				<button type="button" className="btn" onClick={onClose}>Cancel</button>
-				<button type="button" className="btn primary" disabled={creating || updating} onClick={() => void onSave()}>
-					{creating || updating ? 'Saving…' : isNew ? 'Create' : 'Save'}
-				</button>
-			</div>
+			<FinanceModalFoot
+				isNew={isNew}
+				noun="realization"
+				err={err}
+				busy={creating || updating || deleting}
+				saving={creating || updating}
+				canDelete={!!canDelete}
+				confirmDelete={confirmDelete}
+				setConfirmDelete={setConfirmDelete}
+				deleting={deleting}
+				onClose={onClose}
+				onSave={() => void onSave()}
+				onDelete={() => void onDelete()}
+			/>
 		</Modal>
 	);
 }

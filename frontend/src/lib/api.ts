@@ -320,20 +320,29 @@ export interface FinanceWorkspaceData {
 		mtt_outlay_overdue?: number;
 		mtt_fx_negative?: number;
 	};
-	can: {
+	can: FinanceCan & {
 		incentive_read: boolean;
 		realization_read: boolean;
-		incentive_write: boolean;
-		realization_write: boolean;
 		mtt_read: boolean;
 	};
+}
+
+/** Per-doctype affordance gating shared by the Finance screen and the shipment
+ *  finance card: create → add, write → edit a row, delete → remove a mistake. */
+export interface FinanceCan {
+	incentive_create: boolean;
+	incentive_write: boolean;
+	incentive_delete: boolean;
+	realization_create: boolean;
+	realization_write: boolean;
+	realization_delete: boolean;
 }
 
 export interface ShipmentFinanceData {
 	incentives: IncentiveRow[];
 	realizations: RealizationRow[];
 	mtt: MTTBlock | null;
-	can: { incentive_write: boolean; realization_write: boolean };
+	can: FinanceCan;
 }
 
 /** Pre-fill values for creating an incentive/realization from a shipment.

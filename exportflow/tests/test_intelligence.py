@@ -520,6 +520,65 @@ class TestIntelligence(IntegrationTestCase):
 			frappe.db.get_value("Export Shipment", shp, "company"),
 		)
 
+	_FIN_CAN = (
+		"incentive_create",
+		"incentive_write",
+		"incentive_delete",
+		"realization_create",
+		"realization_write",
+		"realization_delete",
+	)
+
+	def _fin_user(self, *roles):
+		user = frappe.get_doc(
+			{
+				"doctype": "User",
+				"email": f"_test_fincan_{_suffix()}@example.com".lower(),
+				"first_name": "FinCan",
+				"user_type": "System User",
+			}
+		).insert(ignore_permissions=True)
+		if roles:
+			user.add_roles(*roles)
+		return user
+
+	def test_finance_can_permission_gating(self):
+		"""The finance `can` map (drives add / edit / delete affordances on both
+		the Finance screen and the shipment card) is the user's real ERPNext
+		permission: System Manager full; Export Accounts may correct but not
+		delete; a viewer gets nothing."""
+		so, customer, _s = self.make_deal()
+		shp = self.make_shipment(so, customer)
+		self.make_incentive(shp, amount=100)
+
+		# Administrator (System Manager) — every affordance
+		can = get_shipment_finance(shp)["can"]
+		ws = get_finance_workspace()["can"]
+		for k in self._FIN_CAN:
+			self.assertTrue(can[k], f"admin shipment-card {k}")
+			self.assertTrue(ws[k], f"admin workspace {k}")
+
+		# Export Accounts — create + write, but NOT delete (delete is admin-only)
+		acct = self._fin_user("Export Accounts")
+		frappe.set_user(acct.name)
+		self.addCleanup(frappe.set_user, "Administrator")
+		can = get_shipment_finance(shp)["can"]
+		for k in ("incentive_create", "incentive_write", "realization_create", "realization_write"):
+			self.assertTrue(can[k], f"accounts may {k}")
+		self.assertFalse(can["incentive_delete"], "accounts may correct but not delete")
+		self.assertFalse(can["realization_delete"], "accounts may correct but not delete")
+		self.assertFalse(get_finance_workspace()["can"]["incentive_delete"])
+
+		# Read-only viewer — no mutation affordances at all
+		frappe.set_user("Administrator")
+		viewer = self._fin_user("Export Viewer")
+		frappe.set_user(viewer.name)
+		can = get_shipment_finance(shp)["can"]
+		self.assertFalse(any(can[k] for k in self._FIN_CAN), "viewer sees no add/edit/delete")
+		ws = get_finance_workspace()["can"]
+		self.assertFalse(any(ws[k] for k in self._FIN_CAN))
+		self.assertTrue(ws["incentive_read"], "but the viewer can still read")
+
 	def test_sales_dashboard(self):
 		so, customer, supplier = self.make_deal(qty=10)
 		result = create_purchase_order(

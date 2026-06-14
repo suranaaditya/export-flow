@@ -50,6 +50,10 @@
   --ok:          #15916A;   --ok-bg:      rgba(21, 145, 106, .10);
   --pending:     #B0741A;   --pending-bg: rgba(176, 116, 26, .11);
   --err:         #C8475E;   --err-bg:     rgba(200, 71, 94, .09);
+  /* solid danger FILL (white text) — deeper than --err so #fff clears WCAG AA
+     (~5.3:1) in BOTH themes; --err itself is a light foreground accent in dark
+     mode (#E8738A) and washes out when inverted to a background. Dark inherits. */
+  --err-solid:   #C2394F;
 
   /* ---- Component-specific ---- */
   --row-hover:   rgba(92, 77, 230, .045);

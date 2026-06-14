@@ -55,8 +55,13 @@ export function Finance() {
 	const kpis = d?.kpis ?? {};
 	const mttTrades = d?.mtt_trades ?? [];
 	const mttOverdue = (kpis.mtt_completion_overdue ?? 0) + (kpis.mtt_outlay_overdue ?? 0);
-	const canIncW = d?.can.incentive_write;
-	const canRelW = d?.can.realization_write;
+	// create gates the "New" actions; write makes rows editable; delete is gated
+	// inside the modal — each is the user's real ERPNext permission
+	const can = d?.can;
+	const canIncNew = can?.incentive_create;
+	const canIncEdit = can?.incentive_write;
+	const canRelNew = can?.realization_create;
+	const canRelEdit = can?.realization_write;
 	const loading = isLoading || !d;
 	const dash = (s: string) => (loading ? '—' : s);
 
@@ -98,20 +103,20 @@ export function Finance() {
 							icon="shield"
 							title="Export incentives"
 							count={d ? `${d.incentives.length}` : undefined}
-							action={canIncW ? <a href="#" onClick={(e) => { e.preventDefault(); setIncModal('new'); }}>New incentive</a> : undefined}
+							action={canIncNew ? <a href="#" onClick={(e) => { e.preventDefault(); setIncModal('new'); }}>New incentive</a> : undefined}
 						/>
 						{isLoading ? (
 							<div className="sub" style={{ padding: '14px 18px' }}>Loading…</div>
 						) : !d || d.incentives.length === 0 ? (
 							<EmptyMsg title="No incentives yet" text="RoDTEP and drawback claims per shipment land here." />
 						) : (
-							<table className={canIncW ? 'clickable' : undefined}>
+							<table className={canIncEdit ? 'clickable' : undefined}>
 								<thead>
 									<tr><th>Scheme</th><th>Shipment</th><th>SB no</th><th>Amount</th><th>Scroll / scrip</th><th>Status</th></tr>
 								</thead>
 								<tbody>
 									{d.incentives.map((i) => (
-										<tr key={i.name} onClick={canIncW ? () => setIncModal(i) : undefined}>
+										<tr key={i.name} onClick={canIncEdit ? () => setIncModal(i) : undefined}>
 											<td className="c1">{i.scheme}</td>
 											<td>{i.shipment ? <span className="id id-sm">{i.shipment}</span> : <span className="dim">—</span>}</td>
 											<td className="dim">{i.shipping_bill_no ?? '—'}</td>
@@ -130,20 +135,20 @@ export function Finance() {
 							icon="banknote"
 							title="Bank realization"
 							count={d ? `${d.realizations.length}` : undefined}
-							action={canRelW ? <a href="#" onClick={(e) => { e.preventDefault(); setRelModal('new'); }}>New realization</a> : undefined}
+							action={canRelNew ? <a href="#" onClick={(e) => { e.preventDefault(); setRelModal('new'); }}>New realization</a> : undefined}
 						/>
 						{isLoading ? (
 							<div className="sub" style={{ padding: '14px 18px' }}>Loading…</div>
 						) : !d || d.realizations.length === 0 ? (
 							<EmptyMsg title="No realizations yet" text="Export-proceeds tracking (FIRC, eBRC, due dates) appears here." />
 						) : (
-							<table className={canRelW ? 'clickable' : undefined}>
+							<table className={canRelEdit ? 'clickable' : undefined}>
 								<thead>
 									<tr><th>Invoice</th><th>Shipment</th><th>Received</th><th>Due</th><th>eBRC</th><th>Status</th></tr>
 								</thead>
 								<tbody>
 									{d.realizations.map((r) => (
-										<tr key={r.name} onClick={canRelW ? () => setRelModal(r) : undefined}>
+										<tr key={r.name} onClick={canRelEdit ? () => setRelModal(r) : undefined}>
 											<td className="id">{r.export_invoice ?? r.name}</td>
 											<td>{r.shipment ? <span className="id id-sm">{r.shipment}</span> : <span className="dim">—</span>}</td>
 											<td className="num">{inr(r.amount_received_inr)}</td>
@@ -229,15 +234,19 @@ export function Finance() {
 			{incModal !== null && (
 				<IncentiveModal
 					record={incModal === 'new' ? null : incModal}
+					canDelete={can?.incentive_delete}
 					onClose={() => setIncModal(null)}
 					onSaved={() => { setIncModal(null); mutate(); }}
+					onDeleted={() => { setIncModal(null); mutate(); }}
 				/>
 			)}
 			{relModal !== null && (
 				<RealizationModal
 					record={relModal === 'new' ? null : relModal}
+					canDelete={can?.realization_delete}
 					onClose={() => setRelModal(null)}
 					onSaved={() => { setRelModal(null); mutate(); }}
+					onDeleted={() => { setRelModal(null); mutate(); }}
 				/>
 			)}
 

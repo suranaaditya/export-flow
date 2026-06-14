@@ -2336,9 +2336,8 @@ def get_finance_workspace() -> dict:
 		"can": {
 			"incentive_read": can_inc,
 			"realization_read": can_rel,
-			"incentive_write": bool(frappe.has_permission("Export Incentive", "write")),
-			"realization_write": bool(frappe.has_permission("Export Realization", "write")),
 			"mtt_read": can_ship,
+			**_finance_can(),
 		},
 	}
 
@@ -2372,10 +2371,23 @@ def get_shipment_finance(shipment: str) -> dict:
 		else [],
 		"realizations": realizations,
 		"mtt": _mtt_block(facts, realizations) if facts else None,
-		"can": {
-			"incentive_write": bool(frappe.has_permission("Export Incentive", "create")),
-			"realization_write": bool(frappe.has_permission("Export Realization", "create")),
-		},
+		# create → the "Add" actions; write → editing an existing row; delete →
+		# removing one made by mistake. Each is the user's real ERPNext permission
+		# (the save/delete call re-checks per-doc server-side regardless).
+		"can": _finance_can(),
+	}
+
+
+def _finance_can() -> dict:
+	"""Per-doctype create/write/delete flags for the incentive & realization
+	cards — drives which row affordances (add / edit / delete) the UI shows."""
+	return {
+		"incentive_create": bool(frappe.has_permission("Export Incentive", "create")),
+		"incentive_write": bool(frappe.has_permission("Export Incentive", "write")),
+		"incentive_delete": bool(frappe.has_permission("Export Incentive", "delete")),
+		"realization_create": bool(frappe.has_permission("Export Realization", "create")),
+		"realization_write": bool(frappe.has_permission("Export Realization", "write")),
+		"realization_delete": bool(frappe.has_permission("Export Realization", "delete")),
 	}
 
 

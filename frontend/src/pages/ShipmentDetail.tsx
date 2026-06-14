@@ -24,8 +24,10 @@ import {
 	realizationTone,
 	urgencyLabel,
 	urgencyTone,
+	type IncentiveRow,
 	type MTTBlock,
 	type MttOutlay,
+	type RealizationRow,
 	type ShipmentDetailData,
 	type ShipmentFinanceData,
 	type ShipmentFinanceSeed,
@@ -441,35 +443,46 @@ function ShipmentFinanceCard({ shipment, merchanting }: { shipment: string; merc
 	const seedQ = useFrappeGetCall<{ message: ShipmentFinanceSeed }>(API.shipmentFinanceSeed, {
 		shipment,
 	});
-	const [modal, setModal] = useState<'incentive' | 'realization' | null>(null);
+	// the open modal carries the row being edited (record) or null when adding
+	const [modal, setModal] = useState<
+		| { kind: 'incentive'; record: IncentiveRow | null }
+		| { kind: 'realization'; record: RealizationRow | null }
+		| null
+	>(null);
 
 	const fin = data?.message;
 	if (!fin) return null;
-	const canRel = fin.can.realization_write;
-	// incentives (RoDTEP / drawback) never apply to merchanting trades
-	const canInc = fin.can.incentive_write && !merchanting;
+	const c = fin.can;
+	const canRelAdd = c.realization_create;
+	// incentives (RoDTEP / drawback) never apply to merchanting trades — but an
+	// existing one booked by mistake must still be editable and deletable, so
+	// only the "Add" affordance is suppressed, not the row actions
+	const canIncAdd = c.incentive_create && !merchanting;
 	const hasContent = fin.incentives.length > 0 || fin.realizations.length > 0;
-	if (!hasContent && !canRel && !canInc) return null;
+	if (!hasContent && !canRelAdd && !canIncAdd) return null;
 
 	const seed = seedQ.data?.message;
 	const seedSettled = seedQ.data !== undefined || !!seedQ.error;
 	// a shipment spanning SOs in different currencies has no single FCY invoice
 	// value to pre-fill — tell the user to set it by hand
-	const currencyConflict = canRel && !!seed?.currency_conflict;
+	const currencyConflict = canRelAdd && !!seed?.currency_conflict;
 
 	// link actions inherit the `.chead a` style (iris + hover underline); href="#"
-	// keeps them keyboard-focusable, matching the Finance screen's create links
-	const actions = (
-		<span style={{ display: 'inline-flex', gap: 14, alignItems: 'center' }}>
-			{seedSettled && canRel && (
-				<a href="#" onClick={(e) => { e.preventDefault(); setModal('realization'); }}>Add realization</a>
-			)}
-			{seedSettled && canInc && (
-				<a href="#" onClick={(e) => { e.preventDefault(); setModal('incentive'); }}>Add incentive</a>
-			)}
-			<Link to="/finance">Open finance</Link>
-		</span>
-	);
+	// keeps them keyboard-focusable, matching the Finance screen's create links.
+	// (No "Open finance" link — the sidebar already navigates there, and this card
+	// is itself the shipment-scoped finance view; a non-filtered duplicate added
+	// nothing.) Rows are clickable to edit; deletion lives inside the modal.
+	const actions =
+		canRelAdd || canIncAdd ? (
+			<span style={{ display: 'inline-flex', gap: 14, alignItems: 'center' }}>
+				{seedSettled && canRelAdd && (
+					<a href="#" onClick={(e) => { e.preventDefault(); setModal({ kind: 'realization', record: null }); }}>Add realization</a>
+				)}
+				{seedSettled && canIncAdd && (
+					<a href="#" onClick={(e) => { e.preventDefault(); setModal({ kind: 'incentive', record: null }); }}>Add incentive</a>
+				)}
+			</span>
+		) : undefined;
 
 	return (
 		<Card>
@@ -498,6 +511,7 @@ function ShipmentFinanceCard({ shipment, merchanting }: { shipment: string; merc
 				<LRow
 					key={i.name}
 					icon="shield"
+					onClick={c.incentive_write ? () => setModal({ kind: 'incentive', record: i }) : undefined}
 					t1={<span>{i.scheme}</span>}
 					t2={i.scrip_number || i.scroll_number || i.drawback_serial || 'claim'}
 					right={
@@ -514,35 +528,51 @@ function ShipmentFinanceCard({ shipment, merchanting }: { shipment: string; merc
 				<LRow
 					key={r.name}
 					icon="calendar"
+					onClick={c.realization_write ? () => setModal({ kind: 'realization', record: r }) : undefined}
 					t1={<span className="data">{r.export_invoice ?? r.name}</span>}
 					t2={r.due_date ? `due ${fmtDate(r.due_date)}` : 'realization'}
 					right={<Tag tone={realizationTone(r)}>{r.overdue ? 'Overdue' : r.status}</Tag>}
 				/>
 			))}
-			{modal === 'realization' && (
+			{modal?.kind === 'realization' && (
 				<RealizationModal
-					record={null}
-					seed={{
-						shipment,
-						currency: seed?.currency ?? null,
-						invoice_value: seed?.invoice_value ?? null,
-						export_date: seed?.export_date ?? null,
-					}}
+					record={modal.record}
+					// pre-fill only when adding; an edit fills from the record itself
+					seed={
+						modal.record
+							? null
+							: {
+									shipment,
+									currency: seed?.currency ?? null,
+									invoice_value: seed?.invoice_value ?? null,
+									export_date: seed?.export_date ?? null,
+								}
+					}
 					lockShipment
+					canDelete={c.realization_delete}
 					onClose={() => setModal(null)}
 					onSaved={() => {
 						setModal(null);
 						void mutate();
 					}}
+					onDeleted={() => {
+						setModal(null);
+						void mutate();
+					}}
 				/>
 			)}
-			{modal === 'incentive' && (
+			{modal?.kind === 'incentive' && (
 				<IncentiveModal
-					record={null}
-					seed={{ shipment, fob_value: seed?.fob_value_inr ?? null }}
+					record={modal.record}
+					seed={modal.record ? null : { shipment, fob_value: seed?.fob_value_inr ?? null }}
 					lockShipment
+					canDelete={c.incentive_delete}
 					onClose={() => setModal(null)}
 					onSaved={() => {
+						setModal(null);
+						void mutate();
+					}}
+					onDeleted={() => {
 						setModal(null);
 						void mutate();
 					}}
