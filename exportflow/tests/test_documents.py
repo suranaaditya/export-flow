@@ -126,6 +126,63 @@ class TestDocuments(IntegrationTestCase):
 		self.assertNotIn("Bill of Lading", types)
 		self.assertNotIn("VGM Declaration", types)
 
+	def test_print_context_data_fidelity(self):
+		"""The redesigned invoice/packing-list context: per-batch packs grouped by
+		item with net/tare/gross weights, freight+insurance → CIF total, IGST-paid
+		INR taxable value, 'to order' consignee, notify party and the bank block."""
+		from exportflow.printing import document_print_context
+
+		so, customer, _s = self.make_deal(qty=50)
+		frappe.db.set_value("Item", so.items[0].item_code, "cas_number", "6001-64-5")
+		shp = self.make_shipment(so, customer, qty=50, incoterm="CIF")
+		doc = frappe.get_doc("Export Shipment", shp)
+		doc.gst_export_mode = "On payment of IGST"
+		doc.igst_rate = 18
+		doc.inr_rate = 89.6
+		doc.freight_amount = 100
+		doc.insurance_amount = 50
+		doc.consignee_to_order = 1
+		doc.notify_party = "Some Notify Co."
+		doc.append(
+			"packs",
+			{
+				"item_code": so.items[0].item_code,
+				"batch_no": "CH-21225",
+				"marks": "1-10",
+				"num_packages": 30,
+				"pack_type": "HDPE Drums",
+				"net_per": 25,
+				"tare_per": 2.4,
+			},
+		)
+		doc.save()
+		for k, v in {
+			"bank_account_no": "8801301100000008",
+			"bank_name": "Bank of India",
+			"bank_swift": "BKIDINBBPAL",
+		}.items():
+			frappe.db.set_single_value("ExportFlow Settings", k, v)
+
+		ctx = document_print_context(instance_of(shp, "Commercial Invoice"))
+		line = ctx["lines"][0]
+		self.assertEqual(line["cas_number"], "6001-64-5")
+		self.assertEqual(len(line["packs"]), 1)
+		self.assertEqual(line["packs"][0]["net"], 750.0, "30 × 25")
+		self.assertEqual(line["packs"][0]["tare"], 72.0, "30 × 2.4")
+		self.assertEqual(line["net_wt"], 750.0)
+		self.assertEqual(ctx["gross_total_wt"], 822.0, "750 net + 72 tare")
+		self.assertEqual(ctx["total_packages"], 30)
+		self.assertEqual(ctx["total"], 600.0, "50 × 12 goods value")
+		self.assertEqual(ctx["grand_total"], 750.0, "600 + 100 freight + 50 insurance")
+		self.assertEqual(ctx["taxable_value_inr"], 67200.0, "750 × 89.6")
+		self.assertEqual(ctx["igst_amount"], 12096.0, "67200 × 18%")
+		self.assertEqual(ctx["consignee_name"], "TO THE ORDER")
+		self.assertIsNone(ctx["consignee_address"])
+		self.assertEqual(ctx["notify_party"], "Some Notify Co.")
+		self.assertTrue(ctx["has_bank"])
+		self.assertEqual(ctx["bank"]["account_no"], "8801301100000008")
+		self.assertEqual(ctx["incoterm"], "CIF")
+
 	def test_incoterm_condition_and_lapse(self):
 		so, customer, _s = self.make_deal()
 		shp = self.make_shipment(so, customer, incoterm="FOB")

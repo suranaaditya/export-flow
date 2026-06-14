@@ -97,34 +97,121 @@ SIGNATURE = """
   </div>
 """
 
-COMMERCIAL_INVOICE = (
-	'{%- set ctx = document_print_context(doc.name) -%}\n' + SHARED_CSS + """
-<div class="ef-doc">
-  <div class="head">
-    <div>
-      <h1>COMMERCIAL INVOICE</h1>
-      <div class="muted">For export — customs and negotiation copy</div>
-    </div>
-    <div style="text-align:right">
-      <div class="mono" style="font-size:14px"><b>{{ doc.document_number or doc.name }}</b></div>
-      <div class="muted">Date: <span class="mono">{{ frappe.utils.formatdate(doc.document_date, "dd MMM yyyy") if doc.document_date else "—" }}</span></div>
-    </div>
+EFX_CSS = """
+<style>
+  .efx { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #16181d; font-size: 10.5px; line-height: 1.4; }
+  .efx .doc { border: 1.4px solid #16181d; }
+  .efx .title { text-align: center; font-weight: 700; font-size: 14px; letter-spacing: .2em; text-transform: uppercase; padding: 7px 8px 6px; border-bottom: 1.4px solid #16181d; }
+  .efx .title small { display: block; font-size: 8px; letter-spacing: .14em; font-weight: 500; color: #6b7280; margin-top: 2px; }
+  .efx table { width: 100%; border-collapse: collapse; }
+  .efx td, .efx th { vertical-align: top; }
+  .efx .grid td { border: 0.7px solid #b9bec8; padding: 5px 9px; }
+  .efx .seam td { border-bottom: 1.4px solid #16181d; }
+  .efx .lbl { font-size: 7.6px; text-transform: uppercase; letter-spacing: .06em; color: #8a909c; font-weight: 600; margin-bottom: 2px; display: block; }
+  .efx b { font-weight: 700; }
+  .efx .mono { font-family: 'SFMono-Regular', Menlo, Consolas, monospace; }
+  .efx .muted { color: #6b7280; }
+  .efx .addr { white-space: pre-wrap; }
+  .efx table.lines th { background: #f3f4f6; border: 0.7px solid #b9bec8; border-top: 1.4px solid #16181d; border-bottom: 1.4px solid #16181d; font-size: 8px; text-transform: uppercase; letter-spacing: .05em; color: #3b4250; padding: 5px 7px; text-align: left; }
+  .efx table.lines td { border: 0.7px solid #b9bec8; padding: 6px 7px; }
+  .efx .r { text-align: right; } .efx .c { text-align: center; }
+  .efx .batches { margin-top: 5px; font-size: 8.8px; color: #3b4250; }
+  .efx .batches .bt { padding: 1px 0; }
+  .efx table.lines tr.sub td { border-top: 0; border-bottom: 0.5px dashed #d4d8df; font-size: 9px; padding-top: 2px; padding-bottom: 2px; }
+  .efx table.lines tfoot td { border: 0.7px solid #b9bec8; border-top: 1.4px solid #16181d; padding: 6px 7px; font-weight: 700; }
+  .efx .gd { padding: 6px 9px; font-size: 9.6px; }
+  .efx .gd b { letter-spacing: .02em; }
+  .efx .words { font-size: 9.6px; padding: 6px 9px; border-top: 0.7px solid #b9bec8; }
+  .efx .tot td { padding: 3px 9px; font-size: 10px; }
+  .efx .tot .g td { font-weight: 700; font-size: 11.5px; border-top: 1.4px solid #16181d; }
+  .efx .sigbox { height: 70px; position: relative; }
+  .efx .sigline { position: absolute; bottom: 6px; left: 9px; right: 9px; border-top: 0.7px solid #16181d; padding-top: 3px; font-size: 8.4px; }
+  .efx .logo { max-height: 38px; max-width: 168px; margin-bottom: 5px; display: block; }
+</style>
+"""
+
+# Shared top of the invoice / packing list: exporter + invoice meta, consignee /
+# buyer, origin / destination, route. Composed per format with its own title.
+def _efx_head(title, subtitle, show_money_meta=True):
+	meta = """
+        {% if ctx.buyer_order_no %}<tr><td class="lbl" style="border:0;padding:0 0 1px">Buyer's order no &amp; date</td></tr>
+        <tr><td style="border:0;padding:0 0 5px"><span class="mono">{{ ctx.buyer_order_no }}</span>{% if ctx.buyer_order_date %} &middot; {{ frappe.utils.formatdate(ctx.buyer_order_date, "dd MMM yyyy") }}{% endif %}</td></tr>{% endif %}
+        {% if ctx.ad_code %}<tr><td class="lbl" style="border:0;padding:0 0 1px">AD code</td></tr><tr><td style="border:0;padding:0"><span class="mono">{{ ctx.ad_code }}</span>{% if ctx.shipment.port_of_loading %} &middot; {{ ctx.shipment.port_of_loading }}{% endif %}</td></tr>{% endif %}
+"""
+	return ('{%- set ctx = document_print_context(doc.name) -%}\n' + EFX_CSS + """
+<div class="efx"><div class="doc">
+  <div class="title">""" + title + """<small>""" + subtitle + """</small></div>
+
+  <table class="grid">
+    <tr class="seam">
+      <td style="width:58%">
+        <span class="lbl">Exporter</span>
+        {% if ctx.logo %}<img class="logo" src="{{ ctx.logo | e }}">{% endif %}
+        <b>{{ ctx.company_name }}</b>
+        {% if ctx.exporter_address %}<div class="addr muted">{{ ctx.exporter_address | e }}</div>{% endif %}
+        <div style="margin-top:3px">{% if ctx.iec_number %}IEC <span class="mono">{{ ctx.iec_number }}</span>{% endif %}{% if ctx.gstin %} &nbsp; GSTIN <span class="mono">{{ ctx.gstin }}</span>{% endif %}</div>
+      </td>
+      <td>
+        <table style="width:100%">
+          <tr><td class="lbl" style="border:0;padding:0 0 1px">Invoice no &amp; date</td></tr>
+          <tr><td style="border:0;padding:0 0 5px"><b class="mono">{{ doc.document_number or doc.name }}</b>{% if doc.document_date %} &middot; {{ frappe.utils.formatdate(doc.document_date, "dd MMM yyyy") }}{% endif %}</td></tr>
+""" + meta + """
+        </table>
+      </td>
+    </tr>
+    <tr class="seam">
+      <td><span class="lbl">Consignee</span><b>{{ ctx.consignee_name }}</b>{% if ctx.consignee_address %}<div class="addr muted">{{ ctx.consignee_address | e }}</div>{% endif %}</td>
+      <td><span class="lbl">Buyer</span>{% if ctx.consignee_is_buyer %}<span class="muted">Same as consignee</span>{% else %}<b>{{ ctx.customer_name }}</b>{% if ctx.customer_address %}<div class="muted">{{ ctx.customer_address }}</div>{% endif %}{% endif %}</td>
+    </tr>
+    <tr class="seam">
+      <td><span class="lbl">Country of origin of goods</span>{{ ctx.lines[0].country_of_origin if ctx.lines else "India" }}</td>
+      <td><span class="lbl">Country of final destination</span>{{ ctx.destination_country or ctx.named_place or "—" }}</td>
+    </tr>
+    <tr>
+      <td><span class="lbl">{% if ctx.shipment.mode == "Air" %}Flight / voyage{% else %}Vessel / voyage{% endif %}</span>{% if ctx.shipment.mode == "Sea" %}{{ ctx.shipment.vessel or "—" }}{% if ctx.shipment.voyage %} / {{ ctx.shipment.voyage }}{% endif %}{% else %}{{ ctx.shipment.airline or "—" }}{% if ctx.shipment.flight_number %} / {{ ctx.shipment.flight_number }}{% endif %}{% endif %}</td>
+      <td><span class="lbl">Port of loading</span>{{ ctx.shipment.port_of_loading or "—" }}</td>
+    </tr>
+    <tr class="seam">
+      <td><span class="lbl">Port of discharge</span>{{ ctx.shipment.port_of_discharge or "—" }}</td>
+      <td><span class="lbl">Final destination</span>{{ ctx.shipment.final_destination or ctx.destination_country or "—" }}</td>
+    </tr>
+    <tr""" + ("" if show_money_meta else ' class="seam"') + """>
+      <td><span class="lbl">Terms of delivery</span>{% if ctx.incoterm %}{{ ctx.incoterm }}{% if ctx.named_place %} &middot; {{ ctx.named_place }}{% endif %}{% else %}—{% endif %}</td>
+      <td><span class="lbl">Terms of payment</span>{{ ctx.payment_terms or "—" }}</td>
+    </tr>
+  </table>
+""")
+
+
+COMMERCIAL_INVOICE = _efx_head("Commercial Invoice", "Customs &amp; bank negotiation copy") + """
+  {% if not ctx.merchanting %}
+  <div class="gd" style="border-bottom:1.4px solid #16181d">
+    {% if ctx.gst_export_mode == "On payment of IGST" %}<b>Supply meant for export on payment of IGST.</b>
+    {% else %}<b>Supply meant for export under LUT, without payment of IGST.</b>{% if ctx.lut_number %} LUT ARN <span class="mono">{{ ctx.lut_number }}</span>{% if ctx.lut_valid_upto %} (valid upto {{ frappe.utils.formatdate(ctx.lut_valid_upto, "dd MMM yyyy") }}){% endif %}.{% endif %}{% endif %}
   </div>
-""" + EXPORTER_CONSIGNEE + SHIPMENT_BLOCK + """
-  {% if ctx.mixed_currencies %}<div class="warn">Shipment lines are priced in more than one currency — amounts below are per line.</div>{% endif %}
-  <table class="items">
+  {% else %}
+  <div class="gd" style="border-bottom:1.4px solid #16181d"><b>Third-country / merchanting trade.</b> Goods shipped directly from country of origin to destination without entering India &mdash; outside the purview of GST (CGST Schedule III).</div>
+  {% endif %}
+
+  {% if ctx.mixed_currencies %}<div class="gd muted" style="border-bottom:0.7px solid #b9bec8;color:#b54708">Lines are priced in more than one currency &mdash; amounts shown per line.</div>{% endif %}
+  <table class="lines">
     <thead><tr>
-      <th style="width:24px">#</th><th>Description of goods</th><th>HS code</th><th>Batch</th>
-      <th class="r">Qty</th><th class="r">Rate</th><th class="r">Amount{% if ctx.currency %} ({{ ctx.currency }}){% endif %}</th>
+      <th style="width:22px">Sr</th><th>Description of goods</th><th style="width:78px">HS code</th>
+      <th class="r" style="width:74px">Qty</th><th class="r" style="width:78px">Rate</th><th class="r" style="width:96px">Amount{% if ctx.currency %} ({{ ctx.currency }}){% endif %}</th>
     </tr></thead>
     <tbody>
     {% for row in ctx.lines %}
       <tr>
-        <td class="mono">{{ loop.index }}</td>
-        <td><b>{{ row.item_name }}</b>{% if row.grade %} · {{ row.grade }}{% endif %}{% if row.pack_description %}<br><span class="muted">{{ row.pack_description }}</span>{% endif %}<br><span class="muted">Country of origin: {{ row.country_of_origin }}</span></td>
+        <td class="c mono">{{ loop.index }}</td>
+        <td>
+          <b>{{ row.item_name }}</b>{% if row.grade %} &middot; {{ row.grade }}{% endif %}
+          <div class="muted" style="font-size:8.8px;margin-top:1px">{% if row.cas_number %}CAS {{ row.cas_number }} &nbsp;{% endif %}Country of origin: {{ row.country_of_origin }}{% if row.pack_description %} &middot; {{ row.pack_description }}{% endif %}</div>
+          {% if row.packs %}<div class="batches">
+            {% for g in row.packs %}<div class="bt">&bull; Batch <b>{{ g.batch_no or "—" }}</b>{% if g.num_packages %} &middot; {{ g.num_packages }} {{ g.pack_type or "pkgs" }}{% endif %}{% if g.marks %} (nos {{ g.marks }}){% endif %}{% if g.mfg_date %} &middot; Mfg {{ frappe.utils.formatdate(g.mfg_date, "MMM yyyy") }}{% endif %}{% if g.exp_date %} &middot; Exp {{ frappe.utils.formatdate(g.exp_date, "MMM yyyy") }}{% endif %}</div>{% endfor %}
+          </div>{% elif row.batch_no %}<div class="batches"><div class="bt">&bull; Batch <b>{{ row.batch_no }}</b></div></div>{% endif %}
+        </td>
         <td class="mono">{{ row.hs_code or "—" }}</td>
-        <td class="mono">{{ row.batch_no or "—" }}</td>
-        <td class="r mono">{{ row.qty }} {{ row.uom or "" }}</td>
+        <td class="r mono">{{ "%g"|format(row.qty) }} {{ row.uom or "" }}</td>
         <td class="r mono">{{ frappe.utils.fmt_money(row.rate, currency=ctx.currency) if row.rate else "—" }}</td>
         <td class="r mono">{{ frappe.utils.fmt_money(row.amount, currency=ctx.currency) if row.rate else "—" }}</td>
       </tr>
@@ -133,258 +220,205 @@ COMMERCIAL_INVOICE = (
   </table>
 
   {% if ctx.currency %}
-  <table class="totals"><tr>
-    <td></td>
-    <td style="width:45%">
-      <table style="width:100%">
-        <tr><td class="grand">Total{% if ctx.incoterm %} ({{ ctx.incoterm }}{% if ctx.named_place %}, {{ ctx.named_place }}{% endif %}){% endif %}</td>
-            <td class="grand r mono" style="text-align:right">{{ frappe.utils.fmt_money(ctx.total, currency=ctx.currency) }}</td></tr>
-        <tr><td class="muted" colspan="2" style="font-size:10.5px">{{ frappe.utils.money_in_words(ctx.total, ctx.currency) }}</td></tr>
-      </table>
-    </td>
-  </tr></table>
-  {% endif %}
-
-  {% if ctx.lut_number %}
-  <div class="decl">
-    <div class="lbl">GST declaration</div>
-    Supply meant for export under LUT without payment of IGST.
-    LUT ARN: <span class="mono">{{ ctx.lut_number }}</span>{% if ctx.lut_valid_upto %} · valid upto {{ frappe.utils.formatdate(ctx.lut_valid_upto, "dd MMM yyyy") }}{% endif %}.
-  </div>
+  <table>
+    <tr>
+      <td style="width:55%;border-right:0.7px solid #b9bec8;vertical-align:top">
+        <div class="words"><span class="lbl">Amount in words</span>{{ ctx.grand_total_in_words }}</div>
+        {% if ctx.taxable_value_inr %}<div class="gd" style="border-top:0.7px solid #b9bec8"><span class="lbl">Taxable value (INR)</span>{{ frappe.utils.fmt_money(ctx.taxable_value_inr, currency="INR") }} <span class="muted">@ {{ "%g"|format(ctx.shipment.inr_rate) }}/{{ ctx.currency }}</span> &nbsp;&middot;&nbsp; IGST @ {{ "%g"|format(ctx.igst_rate) }}% = {{ frappe.utils.fmt_money(ctx.igst_amount, currency="INR") }}</div>{% endif %}
+      </td>
+      <td>
+        <table class="tot">
+          <tr><td>Goods value (FOB)</td><td class="r mono">{{ frappe.utils.fmt_money(ctx.total, currency=ctx.currency) }}</td></tr>
+          {% if ctx.freight %}<tr><td>Freight</td><td class="r mono">{{ frappe.utils.fmt_money(ctx.freight, currency=ctx.currency) }}</td></tr>{% endif %}
+          {% if ctx.insurance %}<tr><td>Insurance</td><td class="r mono">{{ frappe.utils.fmt_money(ctx.insurance, currency=ctx.currency) }}</td></tr>{% endif %}
+          <tr class="g"><td>Total ({{ ctx.incoterm_label }})</td><td class="r mono">{{ frappe.utils.fmt_money(ctx.grand_total, currency=ctx.currency) }}</td></tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+  {% else %}
+  <div class="gd muted" style="border-top:0.7px solid #b9bec8">Lines are priced in more than one currency — the value totals are the per-line amounts above; the consolidated total is to be drawn up manually.</div>
   {% endif %}
 
   {% if ctx.scheme_suppliers %}
-  <div class="decl">
-    <div class="lbl">Merchant export — 0.1% concessional GST (Notification 40/2017 – Central Tax (Rate))</div>
-    Goods procured from registered suppliers under the concessional rate:
-    <table class="kv" style="margin-top:4px">
-      {% for s in ctx.scheme_suppliers %}
-      <tr>
-        <td>{{ s.supplier_name }}</td>
-        <td class="mono">{% if s.gstin %}GSTIN {{ s.gstin }}{% else %}GSTIN —{% endif %}</td>
-        <td class="mono">{% if s.invoice_no %}Inv {{ s.invoice_no }}{% if s.invoice_date %} · {{ frappe.utils.formatdate(s.invoice_date, "dd MMM yyyy") }}{% endif %}{% else %}Inv —{% endif %}</td>
-      </tr>
-      {% endfor %}
-    </table>
+  <div class="gd" style="border-top:0.7px solid #b9bec8;background:#fafbfc">
+    <span class="lbl">Merchant export &mdash; 0.1% concessional GST (Notification 41/2017&ndash;IGST(R))</span>
+    {% for s in ctx.scheme_suppliers %}<div>{{ s.supplier_name }}{% if s.gstin %} &middot; GSTIN <span class="mono">{{ s.gstin }}</span>{% endif %}{% if s.invoice_no %} &middot; Inv <span class="mono">{{ s.invoice_no }}</span>{% if s.invoice_date %} {{ frappe.utils.formatdate(s.invoice_date, "dd MMM yyyy") }}{% endif %}{% endif %}</div>{% endfor %}
   </div>
   {% endif %}
-""" + SIGNATURE + "\n</div>\n"
-)
 
-PACKING_LIST = (
-	'{%- set ctx = document_print_context(doc.name) -%}\n' + SHARED_CSS + """
-<div class="ef-doc">
-  <div class="head">
-    <div>
-      <h1>PACKING LIST</h1>
-      {% if ctx.invoice_number %}<div class="muted">Against commercial invoice <span class="mono">{{ ctx.invoice_number }}</span>{% if ctx.invoice_date %} dated {{ frappe.utils.formatdate(ctx.invoice_date, "dd MMM yyyy") }}{% endif %}</div>{% endif %}
-    </div>
-    <div style="text-align:right">
-      <div class="mono" style="font-size:14px"><b>{{ doc.document_number or doc.name }}</b></div>
-      <div class="muted">Date: <span class="mono">{{ frappe.utils.formatdate(doc.document_date, "dd MMM yyyy") if doc.document_date else "—" }}</span></div>
-    </div>
-  </div>
-""" + EXPORTER_CONSIGNEE + SHIPMENT_BLOCK + """
-  <table class="items">
+  <table class="grid" style="border-top:1.4px solid #16181d">
+    <tr>
+      <td style="width:58%">
+        <span class="lbl">Bank details for remittance</span>
+        {% if ctx.has_bank %}<table style="width:100%;font-size:9.4px">
+          {% if ctx.bank.name %}<tr><td style="border:0;padding:1px 8px 1px 0;width:88px" class="muted">Bank</td><td style="border:0;padding:1px 0">{{ ctx.bank.name }}{% if ctx.bank.branch %}, {{ ctx.bank.branch | e }}{% endif %}</td></tr>{% endif %}
+          {% if ctx.bank.account_no %}<tr><td style="border:0;padding:1px 8px 1px 0" class="muted">Account no</td><td style="border:0;padding:1px 0"><span class="mono">{{ ctx.bank.account_no }}</span></td></tr>{% endif %}
+          {% if ctx.bank.ifsc or ctx.bank.swift %}<tr><td style="border:0;padding:1px 8px 1px 0" class="muted">IFSC / SWIFT</td><td style="border:0;padding:1px 0"><span class="mono">{{ ctx.bank.ifsc or "—" }}</span> / <span class="mono">{{ ctx.bank.swift or "—" }}</span></td></tr>{% endif %}
+          {% if ctx.bank.correspondent %}<tr><td style="border:0;padding:1px 8px 1px 0" class="muted">Correspondent</td><td style="border:0;padding:1px 0">{{ ctx.bank.correspondent | e }}</td></tr>{% endif %}
+        </table>{% else %}<span class="muted">—</span>{% endif %}
+      </td>
+      <td class="sigbox">
+        <div class="muted" style="font-size:9px">For <b>{{ ctx.company_name }}</b></div>
+        <div class="sigline">{% if ctx.signatory_name %}{{ ctx.signatory_name }}{% if ctx.signatory_designation %} &middot; {{ ctx.signatory_designation }}{% endif %} &mdash; {% endif %}Authorised signatory</div>
+      </td>
+    </tr>
+  </table>
+</div></div>
+"""
+
+PACKING_LIST = _efx_head("Packing List", "Net, tare &amp; gross weights", show_money_meta=False) + """
+  {% if ctx.invoice_number %}<div class="gd" style="border-bottom:1.4px solid #16181d">Against commercial invoice <b class="mono">{{ ctx.invoice_number }}</b>{% if ctx.invoice_date %} dated {{ frappe.utils.formatdate(ctx.invoice_date, "dd MMM yyyy") }}{% endif %}</div>{% endif %}
+  <table class="lines">
     <thead><tr>
-      <th style="width:24px">#</th><th>Description of goods</th><th>Batch</th><th>Packing</th><th class="r">Quantity</th>
+      <th style="width:22px">Sr</th><th>Description &amp; batch</th><th class="c" style="width:48px">Pkgs</th>
+      <th class="r" style="width:118px">Net wt (Kg)</th><th class="r" style="width:118px">Tare wt (Kg)</th><th class="r" style="width:88px">Gross (Kg)</th>
     </tr></thead>
     <tbody>
     {% for row in ctx.lines %}
       <tr>
-        <td class="mono">{{ loop.index }}</td>
-        <td><b>{{ row.item_name }}</b>{% if row.grade %} · {{ row.grade }}{% endif %}</td>
-        <td class="mono">{{ row.batch_no or "—" }}</td>
-        <td>{{ row.pack_description or "—" }}</td>
-        <td class="r mono">{{ row.qty }} {{ row.uom or "" }}</td>
+        <td class="c mono">{{ loop.index }}</td>
+        <td><b>{{ row.item_name }}</b>{% if row.grade %} &middot; {{ row.grade }}{% endif %}<span class="muted">{% if row.hs_code %} &middot; HS {{ row.hs_code }}{% endif %}{% if row.cas_number %} &middot; CAS {{ row.cas_number }}{% endif %}</span>{% if not row.packs and row.pack_description %}<div class="muted" style="font-size:9px">{{ row.pack_description }}</div>{% endif %}</td>
+        <td class="c mono">{{ row.packs|sum(attribute="num_packages") or "" }}</td>
+        <td class="r mono">{{ "%g"|format(row.net_wt) if row.net_wt else "—" }}</td>
+        <td class="r mono">{{ "%g"|format(row.tare_wt) if row.tare_wt else "—" }}</td>
+        <td class="r mono">{{ "%g"|format(row.gross_wt) if row.gross_wt else "—" }}</td>
       </tr>
-    {% endfor %}
-    </tbody>
-  </table>
-""" + SIGNATURE + "\n</div>\n"
-)
-
-SCOMET = (
-	'{%- set ctx = document_print_context(doc.name) -%}\n' + SHARED_CSS + """
-<div class="ef-doc">
-  <div class="head">
-    <div>
-      <h1>SCOMET DECLARATION</h1>
-      <div class="muted">Non-applicability of export authorisation</div>
-    </div>
-    <div style="text-align:right">
-      <div class="mono" style="font-size:14px"><b>{{ doc.document_number or doc.name }}</b></div>
-      <div class="muted">Date: <span class="mono">{{ frappe.utils.formatdate(doc.document_date, "dd MMM yyyy") if doc.document_date else "—" }}</span></div>
-    </div>
-  </div>
-
-  <p>To,<br>The Deputy Commissioner of Customs{% if ctx.shipment.port_of_loading %},<br>{{ ctx.shipment.port_of_loading }}{% endif %}</p>
-
-  <p><b>Subject: Declaration of SCOMET non-applicability — shipment <span class="mono">{{ ctx.shipment.name }}</span>{% if ctx.invoice_number %} / invoice <span class="mono">{{ ctx.invoice_number }}</span>{% endif %}</b></p>
-
-  {% if ctx.scomet_text %}
-  <p style="white-space:pre-wrap">{{ ctx.scomet_text | e }}</p>
-  {% else %}
-  <p>We, <b>{{ ctx.company_name }}</b>{% if ctx.iec_number %} (IEC <span class="mono">{{ ctx.iec_number }}</span>){% endif %},
-  hereby declare that the goods listed below, exported to <b>{{ ctx.customer_name }}</b>{% if ctx.destination_country %}, {{ ctx.destination_country }}{% endif %},
-  are <b>not</b> covered under the SCOMET (Special Chemicals, Organisms, Materials, Equipment and Technologies) list —
-  Appendix 3 to Schedule 2 of the ITC(HS) Classification of Export and Import Items — and accordingly do not require
-  an export authorisation under the Foreign Trade Policy.</p>
-  {% endif %}
-
-  <table class="items">
-    <thead><tr><th style="width:24px">#</th><th>Description of goods</th><th>HS code</th><th>Batch</th><th class="r">Quantity</th></tr></thead>
-    <tbody>
-    {% for row in ctx.lines %}
-      <tr>
-        <td class="mono">{{ loop.index }}</td>
-        <td><b>{{ row.item_name }}</b>{% if row.grade %} · {{ row.grade }}{% endif %}</td>
-        <td class="mono">{{ row.hs_code or "—" }}</td>
-        <td class="mono">{{ row.batch_no or "—" }}</td>
-        <td class="r mono">{{ row.qty }} {{ row.uom or "" }}</td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
-
-  <p style="margin-top:12px">We undertake full responsibility for the accuracy of this declaration.</p>
-""" + SIGNATURE + "\n</div>\n"
-)
-
-
-SHIPPING_INSTRUCTION = (
-	'{%- set ctx = document_print_context(doc.name) -%}\n' + SHARED_CSS + """
-<div class="ef-doc">
-  <div class="head">
-    <div>
-      <h1>SHIPPING INSTRUCTION</h1>
-      <div class="muted">To the customs house agent</div>
-    </div>
-    <div style="text-align:right">
-      <div class="mono" style="font-size:14px"><b>{{ doc.document_number or doc.name }}</b></div>
-      <div class="muted">Date: <span class="mono">{{ frappe.utils.formatdate(doc.document_date, "dd MMM yyyy") if doc.document_date else "—" }}</span></div>
-    </div>
-  </div>
-
-  <p>To,<br><b>{{ ctx.shipment.cha or "The Customs House Agent" }}</b></p>
-  <p>Please arrange customs clearance and {{ "shipment" if ctx.shipment.mode == "Sea" else "uplift" }} of the following export consignment{% if ctx.invoice_number %} covered by our commercial invoice <span class="mono">{{ ctx.invoice_number }}</span>{% if ctx.invoice_date %} dated {{ frappe.utils.formatdate(ctx.invoice_date, "dd MMM yyyy") }}{% endif %}{% endif %}.</p>
-""" + EXPORTER_CONSIGNEE + SHIPMENT_BLOCK + """
-  <table class="items">
-    <thead><tr><th style="width:24px">#</th><th>Description of goods</th><th>HS code</th><th>Batch</th><th>Packing</th><th class="r">Quantity</th></tr></thead>
-    <tbody>
-    {% for row in ctx.lines %}
-      <tr>
-        <td class="mono">{{ loop.index }}</td>
-        <td><b>{{ row.item_name }}</b>{% if row.grade %} · {{ row.grade }}{% endif %}</td>
-        <td class="mono">{{ row.hs_code or "—" }}</td>
-        <td class="mono">{{ row.batch_no or "—" }}</td>
-        <td>{{ row.pack_description or "—" }}</td>
-        <td class="r mono">{{ row.qty }} {{ row.uom or "" }}</td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
-
-  <div class="decl">
-    <div class="lbl">Filing instructions</div>
-    {% if ctx.lut_number %}File the shipping bill under LUT without payment of IGST (LUT ARN <span class="mono">{{ ctx.lut_number }}</span>).{% else %}Confirm the GST treatment with us before filing.{% endif %}
-    {% if ctx.iec_number %} IEC: <span class="mono">{{ ctx.iec_number }}</span>.{% endif %}
-    {% if ctx.ad_code %} AD code at {{ ctx.shipment.port_of_loading }}: <span class="mono">{{ ctx.ad_code }}</span>.{% endif %}
-    {% if ctx.scheme_suppliers %} Cargo includes goods procured under the 0.1% merchant-export scheme — supplier invoice references are on the commercial invoice.{% endif %}
-    {% if ctx.lc %} Shipment is under LC <span class="mono">{{ ctx.lc.lc_number }}</span>{% if ctx.lc.latest_shipment_date %}; latest shipment date {{ frappe.utils.formatdate(ctx.lc.latest_shipment_date, "dd MMM yyyy") }}{% endif %} — please prioritise accordingly.{% endif %}
-    Share the checklist of documents you need from us and keep us posted on examination and LEO.
-  </div>
-""" + SIGNATURE + "\n</div>\n"
-)
-
-BILL_OF_EXCHANGE = (
-	'{%- set ctx = document_print_context(doc.name) -%}\n' + SHARED_CSS + """
-<div class="ef-doc">
-  <div class="head">
-    <div>
-      <h1>BILL OF EXCHANGE</h1>
-      <div class="muted">First of exchange (second of the same tenor and date being unpaid)</div>
-    </div>
-    <div style="text-align:right">
-      <div class="mono" style="font-size:14px"><b>{{ doc.document_number or doc.name }}</b></div>
-      <div class="muted">Date: <span class="mono">{{ frappe.utils.formatdate(doc.document_date, "dd MMM yyyy") if doc.document_date else "—" }}</span></div>
-    </div>
-  </div>
-
-  {% if ctx.currency %}
-  <p style="font-size:14px">Exchange for <b class="mono">{{ frappe.utils.fmt_money(ctx.total, currency=ctx.currency) }}</b></p>
-
-  <p>At sight of this <b>FIRST</b> of Exchange (second of the same tenor and date being unpaid), pay to the order of
-  <b>{{ ctx.company_name }}</b> the sum of <b>{{ ctx.total_in_words }}</b>
-  for value received{% if ctx.invoice_number %} against our commercial invoice <span class="mono">{{ ctx.invoice_number }}</span>{% if ctx.invoice_date %} dated {{ frappe.utils.formatdate(ctx.invoice_date, "dd MMM yyyy") }}{% endif %}{% endif %}.</p>
-  {% else %}
-  <p class="warn">Shipment lines are priced in more than one currency — issue this bill manually.</p>
-  {% endif %}
-
-  {% if ctx.lc %}
-  <p>Drawn under {{ ctx.lc.issuing_bank or "the issuing bank" }} Letter of Credit No <span class="mono">{{ ctx.lc.lc_number }}</span>{% if ctx.lc.issue_date %} dated {{ frappe.utils.formatdate(ctx.lc.issue_date, "dd MMM yyyy") }}{% endif %}.</p>
-  {% endif %}
-
-  <table class="meta" style="margin-top:14px"><tr>
-    <td><div class="blk">
-      <div class="lbl">To (drawee)</div>
-      <b>{{ ctx.lc.issuing_bank if ctx.lc and ctx.lc.issuing_bank else ctx.customer_name }}</b>
-      {% if ctx.lc %}<br><span class="muted">For account of:</span> {{ ctx.customer_name }}{% endif %}
-    </div></td>
-    <td><div class="blk">
-      <div class="lbl">Drawer</div>
-      <b>{{ ctx.company_name }}</b>
-      {% if ctx.exporter_address %}<br><span style="white-space:pre-wrap">{{ ctx.exporter_address | e }}</span>{% endif %}
-    </div></td>
-  </tr></table>
-""" + SIGNATURE + "\n</div>\n"
-)
-
-COVERING_SCHEDULE = (
-	'{%- set ctx = document_print_context(doc.name) -%}\n' + SHARED_CSS + """
-<div class="ef-doc">
-  <div class="head">
-    <div>
-      <h1>DOCUMENT PRESENTATION SCHEDULE</h1>
-      <div class="muted">Covering schedule for negotiation / collection</div>
-    </div>
-    <div style="text-align:right">
-      <div class="mono" style="font-size:14px"><b>{{ doc.document_number or doc.name }}</b></div>
-      <div class="muted">Date: <span class="mono">{{ frappe.utils.formatdate(doc.document_date, "dd MMM yyyy") if doc.document_date else "—" }}</span></div>
-    </div>
-  </div>
-
-  <p>To,<br><b>{{ (ctx.lc.negotiating_bank or ctx.lc.advising_bank) if ctx.lc else "The Bank" }}</b></p>
-
-  <p>We present the documents listed below
-  {% if ctx.lc %}for negotiation under Letter of Credit <span class="mono">{{ ctx.lc.lc_number }}</span> issued by {{ ctx.lc.issuing_bank or "the issuing bank" }}{% if ctx.lc.expiry_date %}, expiring {{ frappe.utils.formatdate(ctx.lc.expiry_date, "dd MMM yyyy") }}{% endif %}{% else %}for collection{% endif %}{% if ctx.invoice_number %}, covering our commercial invoice <span class="mono">{{ ctx.invoice_number }}</span>{% if ctx.currency %} for {{ frappe.utils.fmt_money(ctx.total, currency=ctx.currency) }}{% endif %}{% endif %}.
-  {% if ctx.transport_doc.number %}{{ ctx.transport_doc.label }} <span class="mono">{{ ctx.transport_doc.number }}</span>{% if ctx.transport_doc.date %} dated {{ frappe.utils.formatdate(ctx.transport_doc.date, "dd MMM yyyy") }}{% endif %}.{% endif %}</p>
-
-  <table class="items">
-    <thead><tr><th style="width:24px">#</th><th>Document</th><th>Description</th><th class="r">Originals</th><th class="r">Copies</th></tr></thead>
-    <tbody>
-    {% if ctx.lc_requirements %}
-      {% for req in ctx.lc_requirements %}
-      <tr>
-        <td class="mono">{{ loop.index }}</td>
-        <td><b>{{ req.document_type }}</b></td>
-        <td>{{ req.description or "—" }}</td>
-        <td class="r mono">{{ req.originals or "—" }}</td>
-        <td class="r mono">{{ req.copies or "—" }}</td>
+      {% for g in row.packs %}
+      <tr class="sub">
+        <td></td>
+        <td class="muted" style="padding-left:18px">Batch <b>{{ g.batch_no or "—" }}</b>{% if g.num_packages %} &middot; {{ g.num_packages }} {{ g.pack_type or "pkgs" }}{% endif %}{% if g.marks %} (nos {{ g.marks }}){% endif %}{% if g.mfg_date %} &middot; Mfg {{ frappe.utils.formatdate(g.mfg_date, "MMM yyyy") }}{% endif %}{% if g.exp_date %} &middot; Exp {{ frappe.utils.formatdate(g.exp_date, "MMM yyyy") }}{% endif %}</td>
+        <td class="c muted mono">{{ g.num_packages or "" }}</td>
+        <td class="r muted mono">{% if g.num_packages %}{{ g.num_packages }} &times; {{ "%g"|format(g.net_per) }} = {% endif %}{{ "%g"|format(g.net) }}</td>
+        <td class="r muted mono">{% if g.num_packages and g.tare_per %}{{ g.num_packages }} &times; {{ "%g"|format(g.tare_per) }} = {% endif %}{{ "%g"|format(g.tare) }}</td>
+        <td class="r muted mono">{{ "%g"|format(g.gross) }}</td>
       </tr>
       {% endfor %}
-    {% else %}
-      <tr><td class="mono">1</td><td colspan="4" class="muted">List the presented documents here (no LC requirement rows on this shipment).</td></tr>
-    {% endif %}
+    {% endfor %}
     </tbody>
+    {% if ctx.packs_present %}<tfoot><tr>
+      <td></td><td>Total</td><td class="c mono">{{ ctx.total_packages }}</td>
+      <td class="r mono">{{ "%g"|format(ctx.net_total_wt) }}</td><td class="r mono">{{ "%g"|format(ctx.tare_total_wt) }}</td><td class="r mono">{{ "%g"|format(ctx.gross_total_wt) }}</td>
+    </tr></tfoot>{% endif %}
   </table>
 
-  <div class="decl">
-    <div class="lbl">Instructions</div>
-    Please negotiate the documents and credit the proceeds to our account, advising us of the value date.
-    Remit charges as per LC terms. Advise discrepancies, if any, immediately.
+  <table class="grid" style="border-top:1.4px solid #16181d">
+    <tr>
+      <td style="width:58%"><span class="lbl">Declaration</span><span class="muted">We declare that this packing list shows the actual packed quantities and weights of the goods described, and that all particulars are true and correct.</span>{% if ctx.iec_number %}<div style="margin-top:3px">IEC <span class="mono">{{ ctx.iec_number }}</span></div>{% endif %}</td>
+      <td class="sigbox">
+        <div class="muted" style="font-size:9px">For <b>{{ ctx.company_name }}</b></div>
+        <div class="sigline">{% if ctx.signatory_name %}{{ ctx.signatory_name }}{% if ctx.signatory_designation %} &middot; {{ ctx.signatory_designation }}{% endif %} &mdash; {% endif %}Authorised signatory</div>
+      </td>
+    </tr>
+  </table>
+</div></div>
+"""
+
+def _efx_sign(left=""):
+	"""Bottom signatory band in the EFX bordered style."""
+	return """
+  <table class="grid" style="border-top:1.4px solid #16181d"><tr>
+    <td style="width:58%">""" + (left or "&nbsp;") + """</td>
+    <td class="sigbox"><div class="muted" style="font-size:9px">For <b>{{ ctx.company_name }}</b></div><div class="sigline">{% if ctx.signatory_name %}{{ ctx.signatory_name }}{% if ctx.signatory_designation %} &middot; {{ ctx.signatory_designation }}{% endif %} &mdash; {% endif %}Authorised signatory</div></td>
+  </tr></table>
+"""
+
+
+def _efx_letter(title, subtitle, body, sign_left=""):
+	"""Letter-style EFX document: bordered title, exporter + reference strip, a
+	free-prose body and the signatory band. Shared by the declaration / banking
+	documents that print from a shipment's Document Instance."""
+	return ('{%- set ctx = document_print_context(doc.name) -%}\n' + EFX_CSS + """
+<div class="efx"><div class="doc">
+  <div class="title">""" + title + """<small>""" + subtitle + """</small></div>
+  <table class="grid"><tr class="seam">
+    <td style="width:60%"><span class="lbl">Exporter</span>{% if ctx.logo %}<img class="logo" src="{{ ctx.logo|e }}">{% endif %}<b>{{ ctx.company_name }}</b>{% if ctx.exporter_address %}<div class="addr muted">{{ ctx.exporter_address|e }}</div>{% endif %}<div style="margin-top:3px">{% if ctx.iec_number %}IEC <span class="mono">{{ ctx.iec_number }}</span>{% endif %}{% if ctx.gstin %} &nbsp; GSTIN <span class="mono">{{ ctx.gstin }}</span>{% endif %}</div></td>
+    <td><span class="lbl">Reference</span><b class="mono">{{ doc.document_number or doc.name }}</b>{% if doc.document_date %}<div class="muted">Date {{ frappe.utils.formatdate(doc.document_date, "dd MMM yyyy") }}</div>{% endif %}{% if ctx.invoice_number %}<div class="muted" style="margin-top:3px">Against invoice <span class="mono">{{ ctx.invoice_number }}</span></div>{% endif %}</td>
+  </tr></table>
+""" + body + _efx_sign(sign_left) + """
+</div></div>
+""")
+
+
+# Reusable EFX item table (description / HS / batch / qty) for the declaration
+# and instruction documents.
+EFX_LINES = """
+  <table class="lines">
+    <thead><tr><th style="width:22px">Sr</th><th>Description of goods</th><th style="width:84px">HS code</th><th style="width:104px">Batch</th><th class="r" style="width:92px">Quantity</th></tr></thead>
+    <tbody>
+    {% for row in ctx.lines %}
+      <tr>
+        <td class="c mono">{{ loop.index }}</td>
+        <td><b>{{ row.item_name }}</b>{% if row.grade %} &middot; {{ row.grade }}{% endif %}{% if row.cas_number %} <span class="muted">&middot; CAS {{ row.cas_number }}</span>{% endif %}</td>
+        <td class="mono">{{ row.hs_code or "—" }}</td>
+        <td class="mono">{{ row.batch_no or (row.packs[0].batch_no if row.packs else "") or "—" }}</td>
+        <td class="r mono">{{ "%g"|format(row.qty) }} {{ row.uom or "" }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+"""
+
+
+SCOMET = _efx_letter(
+	"SCOMET Declaration", "Non-applicability of export authorisation",
+	"""  <div class="gd" style="font-size:10.5px;line-height:1.6">
+  <p style="margin:0 0 8px">To,<br>The Deputy Commissioner of Customs{% if ctx.shipment.mode == "Air" %}, Air Cargo Complex{% endif %}{% if ctx.shipment.port_of_loading %},<br>{{ ctx.shipment.port_of_loading }}{% endif %}</p>
+  <p style="margin:0 0 8px"><b>Subject:</b> Declaration of SCOMET non-applicability &mdash; shipment <span class="mono">{{ ctx.shipment.name }}</span>{% if ctx.invoice_number %} / invoice <span class="mono">{{ ctx.invoice_number }}</span>{% endif %}.</p>
+  {% if ctx.scomet_text %}<p style="white-space:pre-wrap;margin:0">{{ ctx.scomet_text | e }}</p>
+  {% else %}<p style="margin:0">We, <b>{{ ctx.company_name }}</b>{% if ctx.iec_number %} (IEC <span class="mono">{{ ctx.iec_number }}</span>){% endif %}, hereby declare that the goods listed below{% if ctx.destination_country %}, supplied to <b>{{ ctx.destination_country }}</b>,{% endif %} are <b>not</b> covered under the SCOMET (Special Chemicals, Organisms, Materials, Equipment and Technologies) list &mdash; Appendix 3 to Schedule 2 of the ITC(HS) Classification of Export and Import Items &mdash; and accordingly do not require an export authorisation under the Foreign Trade Policy.</p>{% endif %}
+  </div>""" + EFX_LINES + """  <div class="gd" style="border-top:0.7px solid #b9bec8;font-size:10px">We undertake full responsibility for the accuracy of this declaration.</div>""",
+)
+
+
+SHIPPING_INSTRUCTION = _efx_head(
+	"Shipping Instruction", "To the customs house agent / forwarder"
+) + """
+  <div class="gd" style="border-bottom:1.4px solid #16181d">To, <b>{{ ctx.shipment.cha or "The Customs House Agent" }}</b>{% if ctx.notify_party %} &nbsp;&middot;&nbsp; <b>Notify party:</b> <span style="white-space:pre-wrap">{{ ctx.notify_party | e }}</span>{% endif %}<br>Please arrange customs clearance and {{ "shipment" if ctx.shipment.mode == "Sea" else "uplift" }} of the consignment below{% if ctx.invoice_number %}, covered by our commercial invoice <span class="mono">{{ ctx.invoice_number }}</span>{% if ctx.invoice_date %} dated {{ frappe.utils.formatdate(ctx.invoice_date, "dd MMM yyyy") }}{% endif %}{% endif %}.</div>
+""" + EFX_LINES + """
+  <div class="gd" style="border-top:0.7px solid #b9bec8;background:#fafbfc;font-size:9.8px;line-height:1.55">
+    <span class="lbl">Filing instructions</span>
+    {% if ctx.merchanting %}Third-country / merchanting trade &mdash; outside GST; no shipping bill under India customs.
+    {% elif ctx.gst_export_mode == "On payment of IGST" %}File the shipping bill for export <b>on payment of IGST</b>.
+    {% elif ctx.lut_number %}File the shipping bill under <b>LUT without payment of IGST</b> (LUT ARN <span class="mono">{{ ctx.lut_number }}</span>).
+    {% else %}Confirm the GST treatment with us before filing.{% endif %}
+    {% if ctx.iec_number %} IEC <span class="mono">{{ ctx.iec_number }}</span>.{% endif %}
+    {% if ctx.ad_code %} AD code at {{ ctx.shipment.port_of_loading }}: <span class="mono">{{ ctx.ad_code }}</span>.{% endif %}
+    {% if ctx.scheme_suppliers %} Cargo includes goods procured under the 0.1% merchant-export scheme &mdash; supplier invoice references are on the commercial invoice.{% endif %}
+    {% if ctx.lc %} Shipment is under LC <span class="mono">{{ ctx.lc.lc_number }}</span>{% if ctx.lc.latest_shipment_date %}; latest shipment date {{ frappe.utils.formatdate(ctx.lc.latest_shipment_date, "dd MMM yyyy") }}{% endif %} &mdash; please prioritise accordingly.{% endif %}
+    Share the checklist of documents you need from us and keep us posted on examination and LEO.
+  </div>""" + _efx_sign() + """
+</div></div>
+"""
+
+BILL_OF_EXCHANGE = _efx_letter(
+	"Bill of Exchange", "First of exchange (second of the same tenor and date being unpaid)",
+	"""  <div class="gd" style="font-size:11px;line-height:1.7">
+  {% if ctx.currency %}
+  <p style="margin:0 0 10px;font-size:13px">Exchange for <b class="mono">{{ frappe.utils.fmt_money(ctx.grand_total, currency=ctx.currency) }}</b></p>
+  <p style="margin:0 0 8px">At sight of this <b>FIRST</b> of Exchange (Second of the same tenor and date being unpaid), pay to the order of <b>{{ ctx.company_name }}</b> the sum of <b>{{ ctx.grand_total_in_words }}</b> for value received{% if ctx.invoice_number %} against our commercial invoice <span class="mono">{{ ctx.invoice_number }}</span>{% if ctx.invoice_date %} dated {{ frappe.utils.formatdate(ctx.invoice_date, "dd MMM yyyy") }}{% endif %}{% endif %}.</p>
+  {% if ctx.lc %}<p style="margin:0">Drawn under {{ ctx.lc.issuing_bank or "the issuing bank" }} Letter of Credit No <span class="mono">{{ ctx.lc.lc_number }}</span>{% if ctx.lc.issue_date %} dated {{ frappe.utils.formatdate(ctx.lc.issue_date, "dd MMM yyyy") }}{% endif %}.</p>{% endif %}
+  {% else %}<p class="muted" style="margin:0">Shipment lines are priced in more than one currency &mdash; issue this bill manually.</p>{% endif %}
   </div>
-""" + SIGNATURE + "\n</div>\n"
+  <table class="grid" style="border-top:0.7px solid #b9bec8"><tr>
+    <td style="width:50%"><span class="lbl">To (drawee)</span><b>{{ ctx.lc.issuing_bank if ctx.lc and ctx.lc.issuing_bank else ctx.customer_name }}</b>{% if ctx.lc %}<div class="muted">For account of: {{ ctx.customer_name }}</div>{% endif %}</td>
+    <td><span class="lbl">Drawer</span><b>{{ ctx.company_name }}</b>{% if ctx.exporter_address %}<div class="addr muted">{{ ctx.exporter_address | e }}</div>{% endif %}</td>
+  </tr></table>""",
+)
+
+COVERING_SCHEDULE = _efx_letter(
+	"Document Presentation Schedule", "Covering schedule for negotiation / collection",
+	"""  <div class="gd" style="font-size:10.5px;line-height:1.6">
+  <p style="margin:0 0 8px">To,<br><b>{{ (ctx.lc.negotiating_bank or ctx.lc.advising_bank) if ctx.lc else "The Bank" }}</b></p>
+  <p style="margin:0">We present the documents listed below {% if ctx.lc %}for negotiation under Letter of Credit <span class="mono">{{ ctx.lc.lc_number }}</span> issued by {{ ctx.lc.issuing_bank or "the issuing bank" }}{% if ctx.lc.expiry_date %}, expiring {{ frappe.utils.formatdate(ctx.lc.expiry_date, "dd MMM yyyy") }}{% endif %}{% else %}for collection{% endif %}{% if ctx.invoice_number %}, covering our commercial invoice <span class="mono">{{ ctx.invoice_number }}</span>{% if ctx.currency %} for {{ frappe.utils.fmt_money(ctx.grand_total, currency=ctx.currency) }}{% endif %}{% endif %}.{% if ctx.transport_doc.number %} {{ ctx.transport_doc.label }} <span class="mono">{{ ctx.transport_doc.number }}</span>{% if ctx.transport_doc.date %} dated {{ frappe.utils.formatdate(ctx.transport_doc.date, "dd MMM yyyy") }}{% endif %}.{% endif %}</p>
+  </div>
+  <table class="lines">
+    <thead><tr><th style="width:22px">Sr</th><th>Document</th><th>Description</th><th class="r" style="width:74px">Originals</th><th class="r" style="width:62px">Copies</th></tr></thead>
+    <tbody>
+    {% if ctx.lc_requirements %}{% for req in ctx.lc_requirements %}<tr><td class="c mono">{{ loop.index }}</td><td><b>{{ req.document_type }}</b></td><td>{{ req.description or "—" }}</td><td class="r mono">{{ req.originals or "—" }}</td><td class="r mono">{{ req.copies or "—" }}</td></tr>{% endfor %}{% else %}<tr><td class="c mono">1</td><td colspan="4" class="muted">List the presented documents here (no LC requirement rows on this shipment).</td></tr>{% endif %}
+    </tbody>
+  </table>
+  <div class="gd" style="border-top:0.7px solid #b9bec8;font-size:10px"><span class="lbl">Instructions</span>Please negotiate the documents and credit the proceeds to our account, advising us of the value date. Remit charges as per LC terms. Advise discrepancies, if any, immediately.</div>""",
 )
 
 
@@ -554,16 +588,18 @@ if __name__ == "__main__":
 	# the logo was added to the Exporter block (these three) — bump their stamp;
 	# the formats below keep their old stamp so migrate doesn't needlessly re-sync
 	NEW = "2026-06-14 14:00:00.000000"
+	# the bordered professional redesign (data-fidelity build) — newer stamp
+	REDESIGN = "2026-06-15 12:00:00.000000"
 	write_format(
-		"exportflow_commercial_invoice", "ExportFlow Commercial Invoice", COMMERCIAL_INVOICE, modified=NEW
+		"exportflow_commercial_invoice", "ExportFlow Commercial Invoice", COMMERCIAL_INVOICE, modified=REDESIGN
 	)
-	write_format("exportflow_packing_list", "ExportFlow Packing List", PACKING_LIST, modified=NEW)
-	write_format("exportflow_scomet_declaration", "ExportFlow SCOMET Declaration", SCOMET)
+	write_format("exportflow_packing_list", "ExportFlow Packing List", PACKING_LIST, modified=REDESIGN)
+	write_format("exportflow_scomet_declaration", "ExportFlow SCOMET Declaration", SCOMET, modified=REDESIGN)
 	write_format(
-		"exportflow_shipping_instruction", "ExportFlow Shipping Instruction", SHIPPING_INSTRUCTION, modified=NEW
+		"exportflow_shipping_instruction", "ExportFlow Shipping Instruction", SHIPPING_INSTRUCTION, modified=REDESIGN
 	)
-	write_format("exportflow_bill_of_exchange", "ExportFlow Bill of Exchange", BILL_OF_EXCHANGE)
-	write_format("exportflow_covering_schedule", "ExportFlow Covering Schedule", COVERING_SCHEDULE)
+	write_format("exportflow_bill_of_exchange", "ExportFlow Bill of Exchange", BILL_OF_EXCHANGE, modified=REDESIGN)
+	write_format("exportflow_covering_schedule", "ExportFlow Covering Schedule", COVERING_SCHEDULE, modified=REDESIGN)
 	write_format(
 		"exportflow_sales_order",
 		"ExportFlow Sales Order",

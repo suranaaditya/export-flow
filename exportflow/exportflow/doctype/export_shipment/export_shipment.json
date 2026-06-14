@@ -46,6 +46,21 @@
   "awb_date",
   "section_banking",
   "letter_of_credit",
+  "section_commercial",
+  "gst_export_mode",
+  "igst_rate",
+  "inr_rate",
+  "cb_commercial",
+  "freight_amount",
+  "insurance_amount",
+  "buyer_order_no",
+  "buyer_order_date",
+  "section_parties",
+  "consignee_to_order",
+  "consignee_name",
+  "cb_parties",
+  "consignee_address",
+  "notify_party",
   "section_mtt",
   "mtt_ad_bank",
   "mtt_same_ad_bank",
@@ -60,6 +75,8 @@
   "mtt_edpms_status",
   "section_items",
   "items",
+  "section_packing",
+  "packs",
   "section_milestones",
   "milestones",
   "section_notes",
@@ -305,6 +322,101 @@
    "options": "Letter of Credit"
   },
   {
+   "fieldname": "section_commercial",
+   "fieldtype": "Section Break",
+   "label": "Invoice & Terms"
+  },
+  {
+   "default": "Under LUT (without IGST)",
+   "depends_on": "eval:doc.trade_type!='Third-country / Merchanting'",
+   "description": "Drives the GST declaration on the commercial invoice. Merchanting trades are outside GST and carry no such declaration.",
+   "fieldname": "gst_export_mode",
+   "fieldtype": "Select",
+   "label": "GST Export Mode",
+   "options": "Under LUT (without IGST)\nOn payment of IGST"
+  },
+  {
+   "default": "18",
+   "depends_on": "eval:doc.trade_type!='Third-country / Merchanting' && doc.gst_export_mode=='On payment of IGST'",
+   "description": "IGST rate shown on the invoice when exporting on payment of IGST.",
+   "fieldname": "igst_rate",
+   "fieldtype": "Float",
+   "label": "IGST Rate (%)"
+  },
+  {
+   "depends_on": "eval:doc.trade_type!='Third-country / Merchanting' && doc.gst_export_mode=='On payment of IGST'",
+   "description": "INR per unit of deal currency, to show the taxable value in INR on an IGST-paid invoice.",
+   "fieldname": "inr_rate",
+   "fieldtype": "Float",
+   "label": "INR Conversion Rate",
+   "precision": "4"
+  },
+  {
+   "fieldname": "cb_commercial",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Freight, in the deal currency — added to the goods value to give the CFR/CIF/CIP total.",
+   "fieldname": "freight_amount",
+   "fieldtype": "Float",
+   "label": "Freight",
+   "precision": "2"
+  },
+  {
+   "description": "Insurance, in the deal currency — added to give the CIF/CIP total.",
+   "fieldname": "insurance_amount",
+   "fieldtype": "Float",
+   "label": "Insurance",
+   "precision": "2"
+  },
+  {
+   "description": "The buyer's own purchase-order reference, shown on the invoice.",
+   "fieldname": "buyer_order_no",
+   "fieldtype": "Data",
+   "label": "Buyer's Order No"
+  },
+  {
+   "fieldname": "buyer_order_date",
+   "fieldtype": "Date",
+   "label": "Buyer's Order Date"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_parties",
+   "fieldtype": "Section Break",
+   "label": "Consignee & Notify"
+  },
+  {
+   "default": "0",
+   "description": "Print the consignee as \"TO THE ORDER\" (negotiable B/L). Leave the name blank to fall back to the buyer.",
+   "fieldname": "consignee_to_order",
+   "fieldtype": "Check",
+   "label": "Consignee to order"
+  },
+  {
+   "depends_on": "eval:!doc.consignee_to_order",
+   "description": "Leave blank to use the buyer as consignee.",
+   "fieldname": "consignee_name",
+   "fieldtype": "Data",
+   "label": "Consignee Name"
+  },
+  {
+   "fieldname": "cb_parties",
+   "fieldtype": "Column Break"
+  },
+  {
+   "depends_on": "eval:!doc.consignee_to_order",
+   "fieldname": "consignee_address",
+   "fieldtype": "Small Text",
+   "label": "Consignee Address"
+  },
+  {
+   "description": "Notify party for the carrier document (B/L / AWB).",
+   "fieldname": "notify_party",
+   "fieldtype": "Small Text",
+   "label": "Notify Party"
+  },
+  {
    "depends_on": "eval:doc.trade_type=='Third-country / Merchanting'",
    "fieldname": "section_mtt",
    "fieldtype": "Section Break",
@@ -391,6 +503,19 @@
    "reqd": 1
   },
   {
+   "collapsible": 1,
+   "description": "Per-batch packing detail — drum/package ranges, quantities, mfg/exp dates and net/tare weights. Itemised on the commercial invoice and packing list; grouped by item.",
+   "fieldname": "section_packing",
+   "fieldtype": "Section Break",
+   "label": "Packing Detail"
+  },
+  {
+   "fieldname": "packs",
+   "fieldtype": "Table",
+   "label": "Packs",
+   "options": "Export Shipment Pack"
+  },
+  {
    "fieldname": "section_milestones",
    "fieldtype": "Section Break",
    "label": "Milestones"
@@ -415,7 +540,7 @@
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-06-14 10:00:00.000000",
+ "modified": "2026-06-15 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "ExportFlow",
  "name": "Export Shipment",

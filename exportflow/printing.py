@@ -10,7 +10,7 @@ touches HTML.
 
 import frappe
 from frappe import _
-from frappe.utils import flt
+from frappe.utils import cint, flt
 
 from exportflow.company import exportflow_company
 
@@ -109,11 +109,37 @@ def document_print_context(name: str):
 		"Customer", shipment.customer, "destination_country"
 	)
 
+	# per-batch packing detail, grouped by item — each group's net/tare/gross is
+	# (count × per-package weight), exactly as the packing list itemises it
+	packs_by_item: dict[str, list] = {}
+	for p in shipment.get("packs") or []:
+		net = flt(p.num_packages) * flt(p.net_per)
+		tare = flt(p.num_packages) * flt(p.tare_per)
+		packs_by_item.setdefault(p.item_code, []).append(
+			frappe._dict(
+				batch_no=p.batch_no,
+				marks=p.marks,
+				num_packages=cint(p.num_packages),
+				pack_type=p.pack_type,
+				net_per=flt(p.net_per),
+				tare_per=flt(p.tare_per),
+				gross_per=flt(p.net_per) + flt(p.tare_per),
+				mfg_date=p.mfg_date,
+				exp_date=p.exp_date,
+				net=flt(net, 2),
+				tare=flt(tare, 2),
+				gross=flt(net + tare, 2),
+			)
+		)
+
 	# items enriched with master + SO-line data (rate/currency come from the deal)
 	items = []
 	currencies = set()
 	named_places = []
+	payment_terms = None
 	total = 0.0
+	net_total_wt = tare_total_wt = gross_total_wt = 0.0
+	pkg_total = 0
 	for row in shipment.items:
 		so_line = frappe.db.get_value(
 			"Sales Order Item", row.so_detail, ["rate", "parent"], as_dict=True
@@ -122,7 +148,7 @@ def document_print_context(name: str):
 			frappe.db.get_value(
 				"Sales Order",
 				so_line.parent,
-				["currency", "incoterm", "named_place"],
+				["currency", "incoterm", "named_place", "payment_terms_narrative"],
 				as_dict=True,
 			)
 			if so_line.parent
@@ -132,21 +158,39 @@ def document_print_context(name: str):
 			currencies.add(so.currency)
 		if so.named_place and so.named_place not in named_places:
 			named_places.append(so.named_place)
+		if so.get("payment_terms_narrative") and not payment_terms:
+			payment_terms = so.payment_terms_narrative
 		item = frappe.db.get_value(
 			"Item",
 			row.item_code,
-			["item_name", "customs_tariff_number", "pharmacopoeia_grade", "country_of_origin"],
+			[
+				"item_name",
+				"customs_tariff_number",
+				"pharmacopoeia_grade",
+				"country_of_origin",
+				"cas_number",
+			],
 			as_dict=True,
 		) or frappe._dict()
 		rate = flt(so_line.rate)
 		amount = flt(rate * flt(row.qty), 2)
 		total += amount
+		# attach this line's packing groups + roll up its weights
+		line_packs = packs_by_item.get(row.item_code, [])
+		line_net = flt(sum(g.net for g in line_packs), 2)
+		line_tare = flt(sum(g.tare for g in line_packs), 2)
+		line_gross = flt(sum(g.gross for g in line_packs), 2)
+		net_total_wt += line_net
+		tare_total_wt += line_tare
+		gross_total_wt += line_gross
+		pkg_total += sum(g.num_packages for g in line_packs)
 		items.append(
 			frappe._dict(
 				item_code=row.item_code,
 				item_name=row.item_name or item.item_name or row.item_code,
 				grade=item.pharmacopoeia_grade,
 				hs_code=item.customs_tariff_number,
+				cas_number=item.cas_number,
 				country_of_origin=item.country_of_origin or "India",
 				batch_no=row.batch_no,
 				qty=flt(row.qty),
@@ -154,6 +198,10 @@ def document_print_context(name: str):
 				rate=rate,
 				amount=amount,
 				pack_description=row.pack_description,
+				packs=line_packs,
+				net_wt=line_net,
+				tare_wt=line_tare,
+				gross_wt=line_gross,
 			)
 		)
 
@@ -225,6 +273,53 @@ def document_print_context(name: str):
 		else frappe._dict(label="B/L", number=shipment.bl_number, date=shipment.bl_date)
 	)
 
+	from exportflow.mtt import is_merchanting
+
+	merchanting = is_merchanting(shipment.trade_type)
+
+	# consignee: "TO THE ORDER", an explicit party, or (default) the buyer itself.
+	# the address is always plain text with real newlines (party_address flattens
+	# get_address_display's <br> HTML) so the template's `| e` + pre-wrap renders it
+	# cleanly — using customer_address (raw <br> HTML) here would print literal tags.
+	if shipment.get("consignee_to_order"):
+		consignee_name, consignee_address = "TO THE ORDER", None
+	elif shipment.get("consignee_name") or shipment.get("consignee_address"):
+		consignee_name = shipment.consignee_name or customer_name
+		consignee_address = shipment.consignee_address or party_address("Customer", shipment.customer)
+	else:
+		consignee_name = customer_name
+		consignee_address = party_address("Customer", shipment.customer)
+	# when the consignee resolves to the buyer, the Buyer block just repeats it
+	consignee_is_buyer = not shipment.get("consignee_to_order") and consignee_name == customer_name
+
+	# money: goods + freight + insurance = the incoterm (CFR/CIF/CIP) total
+	freight = flt(shipment.get("freight_amount"))
+	insurance = flt(shipment.get("insurance_amount"))
+	goods_total = flt(total, 2)
+	grand_total = flt(goods_total + freight + insurance, 2)
+
+	# GST declaration mode — suppressed entirely for merchanting (outside GST)
+	gst_export_mode = None if merchanting else (shipment.get("gst_export_mode") or "Under LUT (without IGST)")
+	igst_rate = flt(shipment.get("igst_rate"))
+	inr_rate = flt(shipment.get("inr_rate"))
+	taxable_value_inr = igst_amount = None
+	if gst_export_mode == "On payment of IGST" and inr_rate:
+		taxable_value_inr = flt(grand_total * inr_rate, 2)
+		igst_amount = flt(taxable_value_inr * igst_rate / 100.0, 2)
+
+	# exporter collection bank (for the buyer's remittance)
+	bank = frappe._dict(
+		account_no=settings.get("bank_account_no"),
+		name=settings.get("bank_name"),
+		branch=settings.get("bank_branch_address"),
+		ifsc=settings.get("bank_ifsc"),
+		swift=settings.get("bank_swift"),
+		correspondent=settings.get("bank_correspondent"),
+	)
+	has_bank = any(bank.values())
+
+	incoterm_label = shipment.incoterm or ("FOB" if not (freight or insurance) else "CIF")
+
 	return frappe._dict(
 		instance=inst,
 		shipment=shipment,
@@ -239,22 +334,46 @@ def document_print_context(name: str):
 		signatory_name=settings.signatory_name,
 		signatory_designation=settings.signatory_designation,
 		scomet_text=settings.scomet_text,
+		merchanting=merchanting,
 		customer_name=customer_name,
 		customer_address=customer_address,
+		consignee_name=consignee_name,
+		consignee_address=consignee_address,
+		consignee_is_buyer=consignee_is_buyer,
+		notify_party=shipment.get("notify_party"),
 		destination_country=destination_country,
 		incoterm=shipment.incoterm,
+		incoterm_label=incoterm_label,
 		named_place=", ".join(named_places) if named_places else shipment.final_destination,
+		buyer_order_no=shipment.get("buyer_order_no"),
+		buyer_order_date=shipment.get("buyer_order_date"),
+		payment_terms=payment_terms,
 		# "lines", not "items" — on a _dict, jinja's ctx.items resolves to the
 		# dict method, not the key
 		lines=items,
 		currency=currency,
 		mixed_currencies=len(currencies) > 1,
-		total=flt(total, 2),
+		total=goods_total,
+		freight=freight,
+		insurance=insurance,
+		grand_total=grand_total,
+		net_total_wt=flt(net_total_wt, 2),
+		tare_total_wt=flt(tare_total_wt, 2),
+		gross_total_wt=flt(gross_total_wt, 2),
+		total_packages=pkg_total,
+		packs_present=any(line.packs for line in items),
+		gst_export_mode=gst_export_mode,
+		igst_rate=igst_rate,
+		taxable_value_inr=taxable_value_inr,
+		igst_amount=igst_amount,
+		bank=bank,
+		has_bank=has_bank,
 		scheme_suppliers=scheme_suppliers,
 		lc=lc,
 		lc_requirements=lc_requirements,
 		invoice_number=invoice_number,
 		invoice_date=invoice_date,
 		transport_doc=transport_doc,
-		total_in_words=frappe.utils.money_in_words(flt(total, 2), currency) if currency else None,
+		total_in_words=frappe.utils.money_in_words(goods_total, currency) if currency else None,
+		grand_total_in_words=frappe.utils.money_in_words(grand_total, currency) if currency else None,
 	)

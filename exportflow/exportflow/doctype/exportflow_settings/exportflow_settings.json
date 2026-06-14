@@ -22,6 +22,14 @@
   "signatory_name",
   "cb_efs_sig",
   "signatory_designation",
+  "section_bank",
+  "bank_account_no",
+  "bank_name",
+  "bank_branch_address",
+  "cb_efs_bank",
+  "bank_ifsc",
+  "bank_swift",
+  "bank_correspondent",
   "section_declarations",
   "scomet_text",
   "section_mtt",
@@ -131,6 +139,49 @@
   },
   {
    "collapsible": 1,
+   "description": "The exporter's collection bank — printed in the \"Bank details\" box on every commercial invoice for the buyer's remittance.",
+   "fieldname": "section_bank",
+   "fieldtype": "Section Break",
+   "label": "Bank Details"
+  },
+  {
+   "fieldname": "bank_account_no",
+   "fieldtype": "Data",
+   "label": "Account Number"
+  },
+  {
+   "fieldname": "bank_name",
+   "fieldtype": "Data",
+   "label": "Bank Name"
+  },
+  {
+   "description": "Branch name / address",
+   "fieldname": "bank_branch_address",
+   "fieldtype": "Small Text",
+   "label": "Branch"
+  },
+  {
+   "fieldname": "cb_efs_bank",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "bank_ifsc",
+   "fieldtype": "Data",
+   "label": "IFSC Code"
+  },
+  {
+   "fieldname": "bank_swift",
+   "fieldtype": "Data",
+   "label": "SWIFT Code"
+  },
+  {
+   "description": "Correspondent / intermediary bank and routing, for inward foreign remittance.",
+   "fieldname": "bank_correspondent",
+   "fieldtype": "Small Text",
+   "label": "Correspondent Bank"
+  },
+  {
+   "collapsible": 1,
    "fieldname": "section_declarations",
    "fieldtype": "Section Break",
    "label": "Declaration Overrides"
@@ -196,7 +247,7 @@
  "index_web_pages_for_search": 0,
  "issingle": 1,
  "links": [],
- "modified": "2026-06-14 16:00:00.000000",
+ "modified": "2026-06-15 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "ExportFlow",
  "name": "ExportFlow Settings",
