@@ -2031,7 +2031,8 @@ def _mtt_block(shipment_facts: dict, realizations: list) -> dict | None:
 		shipment_facts,
 		completion_months=completion_months,
 		outlay_months=outlay_months,
-		export_proceeds_inr=proceeds_inr or None,
+		# pass the figure when a realization exists (even if it sums to 0), else None
+		export_proceeds_inr=proceeds_inr if realizations else None,
 		proceeds_received=received_any,
 	)
 

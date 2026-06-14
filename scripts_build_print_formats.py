@@ -39,6 +39,7 @@ EXPORTER_CONSIGNEE = """
   <table class="meta"><tr>
     <td><div class="blk">
       <div class="lbl">Exporter</div>
+      {% if ctx.logo %}<img src="{{ ctx.logo | e }}" style="max-height:42px;max-width:170px;margin-bottom:5px;display:block">{% endif %}
       <b>{{ ctx.company_name }}</b><br>
       {% if ctx.exporter_address %}<span style="white-space:pre-wrap">{{ ctx.exporter_address | e }}</span><br>{% endif %}
       {% if ctx.iec_number %}IEC: <span class="mono">{{ ctx.iec_number }}</span><br>{% endif %}
@@ -433,6 +434,7 @@ SALES_ORDER = """{%- set ex = exporter_profile() -%}
   <table class="meta"><tr>
     <td><div class="blk">
       <div class="lbl">Exporter / Seller</div>
+      {% if ex.logo %}<img src="{{ ex.logo | e }}" style="max-height:42px;max-width:170px;margin-bottom:5px;display:block">{% endif %}
       <b>{{ ex.company_name }}</b><br>
       {% if ex.address %}<span class="muted" style="white-space:pre-wrap">{{ ex.address | e }}</span><br>{% endif %}
       {% if ex.gstin %}GSTIN: <span class="mono">{{ ex.gstin }}</span><br>{% endif %}
@@ -549,10 +551,17 @@ def write_format(
 
 
 if __name__ == "__main__":
-	write_format("exportflow_commercial_invoice", "ExportFlow Commercial Invoice", COMMERCIAL_INVOICE)
-	write_format("exportflow_packing_list", "ExportFlow Packing List", PACKING_LIST)
+	# the logo was added to the Exporter block (these three) — bump their stamp;
+	# the formats below keep their old stamp so migrate doesn't needlessly re-sync
+	NEW = "2026-06-14 14:00:00.000000"
+	write_format(
+		"exportflow_commercial_invoice", "ExportFlow Commercial Invoice", COMMERCIAL_INVOICE, modified=NEW
+	)
+	write_format("exportflow_packing_list", "ExportFlow Packing List", PACKING_LIST, modified=NEW)
 	write_format("exportflow_scomet_declaration", "ExportFlow SCOMET Declaration", SCOMET)
-	write_format("exportflow_shipping_instruction", "ExportFlow Shipping Instruction", SHIPPING_INSTRUCTION)
+	write_format(
+		"exportflow_shipping_instruction", "ExportFlow Shipping Instruction", SHIPPING_INSTRUCTION, modified=NEW
+	)
 	write_format("exportflow_bill_of_exchange", "ExportFlow Bill of Exchange", BILL_OF_EXCHANGE)
 	write_format("exportflow_covering_schedule", "ExportFlow Covering Schedule", COVERING_SCHEDULE)
 	write_format(
@@ -560,5 +569,5 @@ if __name__ == "__main__":
 		"ExportFlow Sales Order",
 		SALES_ORDER,
 		doc_type="Sales Order",
-		modified="2026-06-14 13:00:00.000000",
+		modified="2026-06-14 14:00:00.000000",
 	)

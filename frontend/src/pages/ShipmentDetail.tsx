@@ -763,11 +763,19 @@ function MTTComplianceCard({
 				</Tag>
 			),
 		});
+		if (mtt.export_proceeds_inr != null)
+			rows.push({
+				k: 'Export proceeds',
+				v: <span className="num">{fmtMoney(mtt.export_proceeds_inr, 'INR')}</span>,
+				data: true,
+			});
 		rows.push({
 			k: 'Net FX profit',
 			v:
 				mtt.net_fx_profit_inr == null ? (
-					<span style={{ color: 'var(--fg-4)' }}>add import outlay</span>
+					<span style={{ color: 'var(--fg-4)' }}>
+						{mtt.import_value_inr == null ? 'add import outlay' : 'awaiting export proceeds'}
+					</span>
 				) : (
 					<span>
 						<span className="num">{fmtMoney(mtt.net_fx_profit_inr, 'INR')}</span>{' '}

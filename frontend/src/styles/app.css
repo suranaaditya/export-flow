@@ -88,6 +88,8 @@ header.appbar {
 .brand { display: flex; align-items: center; gap: 11px }
 .brand img { height: 26px; width: auto; display: block }
 .brand img.mk-l { display: var(--mark-light) } .brand img.mk-w { display: var(--mark-white) }
+.brand img.cologo { height: auto; max-height: 30px; max-width: 132px; border-radius: 4px }
+.sidebar.collapsed .brand img.cologo { max-width: 40px; max-height: 26px; object-fit: contain }
 .brand .nm { font-weight: 600; font-size: 15px; letter-spacing: -.02em }
 .brand .nm em { font-style: normal; background: var(--brand-grad); -webkit-background-clip: text; background-clip: text; color: transparent }
 .brand .by { font-size: 10.5px; color: var(--fg-3); letter-spacing: .08em; text-transform: uppercase; margin-top: 1px }

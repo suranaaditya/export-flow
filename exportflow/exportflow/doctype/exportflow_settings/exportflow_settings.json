@@ -6,6 +6,8 @@
  "field_order": [
   "section_company",
   "company",
+  "cb_efs_company",
+  "company_logo",
   "section_exporter",
   "iec_number",
   "gstin",
@@ -42,6 +44,16 @@
    "fieldtype": "Link",
    "label": "ExportFlow Company",
    "options": "Company"
+  },
+  {
+   "fieldname": "cb_efs_company",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Shown in the app's top-left navigation and on every print's exporter block.",
+   "fieldname": "company_logo",
+   "fieldtype": "Attach Image",
+   "label": "Company Logo"
   },
   {
    "description": "Printed on every export document (§5.2)",
@@ -175,7 +187,7 @@
  "index_web_pages_for_search": 0,
  "issingle": 1,
  "links": [],
- "modified": "2026-06-13 18:00:00.000000",
+ "modified": "2026-06-14 14:00:00.000000",
  "modified_by": "Administrator",
  "module": "ExportFlow",
  "name": "ExportFlow Settings",

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useFrappeAuth } from 'frappe-react-sdk';
+import { useFrappeAuth, useFrappeGetDoc } from 'frappe-react-sdk';
 import { NavLink, Outlet } from 'react-router-dom';
 import { Icon, type IconName } from '@/components/Icon';
 import { useTheme } from '@/lib/theme';
@@ -38,6 +38,11 @@ function getInitialCollapsed(): boolean {
 export function AppShell() {
 	const { toggle } = useTheme();
 	const { currentUser } = useFrappeAuth();
+	const settings = useFrappeGetDoc<{ company_logo?: string | null }>(
+		'ExportFlow Settings',
+		'ExportFlow Settings',
+	);
+	const logo = settings.data?.company_logo || null;
 	const [collapsed, setCollapsed] = useState(getInitialCollapsed);
 
 	useEffect(() => {
@@ -54,13 +59,18 @@ export function AppShell() {
 		<div className="layout">
 			<aside className={collapsed ? 'sidebar collapsed' : 'sidebar'}>
 				<div className="brand">
-					<img className="mk-l" src={BRAND + 'dux-mark.png'} alt="DUX" />
-					<img className="mk-w" src={BRAND + 'dux-mark-white.png'} alt="DUX" />
+					{logo ? (
+						<img className="cologo" src={logo} alt="" />
+					) : (
+						<>
+							<img className="mk-l" src={BRAND + 'dux-mark.png'} alt="" />
+							<img className="mk-w" src={BRAND + 'dux-mark-white.png'} alt="" />
+						</>
+					)}
 					<div className="btext">
 						<div className="nm">
 							Export<em>Flow</em>
 						</div>
-						<div className="by">DUX Digitech</div>
 					</div>
 				</div>
 				<nav className="snav">

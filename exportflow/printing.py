@@ -64,6 +64,7 @@ def exporter_profile():
 		lut=settings.lut_number,
 		signatory_name=settings.signatory_name,
 		signatory_designation=settings.signatory_designation,
+		logo=frappe.utils.get_url(settings.company_logo) if settings.company_logo else None,
 	)
 
 
@@ -204,6 +205,7 @@ def document_print_context(name: str):
 		instance=inst,
 		shipment=shipment,
 		company_name=company_name,
+		logo=frappe.utils.get_url(settings.company_logo) if settings.company_logo else None,
 		exporter_address=settings.exporter_address,
 		iec_number=settings.iec_number,
 		gstin=settings.gstin,

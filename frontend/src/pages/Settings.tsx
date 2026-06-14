@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
 	useFrappeCreateDoc,
 	useFrappeDeleteDoc,
+	useFrappeFileUpload,
 	useFrappeGetCall,
 	useFrappeGetDoc,
 	useFrappeGetDocList,
@@ -406,11 +407,13 @@ const EMPTY_PROFILE: ExporterProfile = {
 /** Exporter identity printed on every §5.2 document (IEC, GSTIN, LUT…). */
 function ExporterProfilePanel({ canEdit }: { canEdit: boolean }) {
 	const { data, error, isLoading, mutate } = useFrappeGetDoc<
-		Partial<ExporterProfile> & { auto_cha_third_country?: 0 | 1 }
+		Partial<ExporterProfile> & { auto_cha_third_country?: 0 | 1; company_logo?: string | null }
 	>('ExportFlow Settings', 'ExportFlow Settings');
 	const { updateDoc, loading: saving } = useFrappeUpdateDoc();
+	const { upload, loading: logoBusy } = useFrappeFileUpload();
 	const [form, setForm] = useState<ExporterProfile>(EMPTY_PROFILE);
 	const [autoCha, setAutoCha] = useState(false);
+	const [logo, setLogo] = useState<string | null>(null);
 	const [seeded, setSeeded] = useState(false);
 	const [err, setErr] = useState<string | null>(null);
 	const [savedTick, setSavedTick] = useState(false);
@@ -425,8 +428,37 @@ function ExporterProfilePanel({ canEdit }: { canEdit: boolean }) {
 			),
 		}));
 		setAutoCha(!!data.auto_cha_third_country);
+		setLogo(data.company_logo ?? null);
 		setSeeded(true);
 	}, [data, seeded]);
+
+	async function onLogoUpload(file: File) {
+		setErr(null);
+		try {
+			const res = await upload(file, {
+				doctype: 'ExportFlow Settings',
+				docname: 'ExportFlow Settings',
+				fieldname: 'company_logo',
+				isPrivate: false,
+			});
+			await updateDoc('ExportFlow Settings', 'ExportFlow Settings', { company_logo: res.file_url });
+			setLogo(res.file_url);
+			mutate();
+		} catch (e) {
+			setErr(parseServerError(e));
+		}
+	}
+
+	async function onLogoRemove() {
+		setErr(null);
+		try {
+			await updateDoc('ExportFlow Settings', 'ExportFlow Settings', { company_logo: null });
+			setLogo(null);
+			mutate();
+		} catch (e) {
+			setErr(parseServerError(e));
+		}
+	}
 
 	const set = <K extends keyof ExporterProfile>(key: K, value: string) => {
 		setSavedTick(false);
@@ -463,6 +495,47 @@ function ExporterProfilePanel({ canEdit }: { canEdit: boolean }) {
 			) : (
 				<>
 					<div className="formgrid">
+						<div className="span2">
+							<Field
+								label="Company logo"
+								hint="Shown in the top-left nav and on every print's exporter block"
+							>
+								<div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+									{logo ? (
+										<img
+											src={logo}
+											alt=""
+											style={{ maxHeight: 40, maxWidth: 160, borderRadius: 4, border: '1px solid var(--hairline)' }}
+										/>
+									) : (
+										<span className="dim">No logo set</span>
+									)}
+									{canEdit && (
+										<>
+											<label className="btn" style={{ cursor: 'pointer' }}>
+												<Icon name="upload" size={14} /> {logo ? 'Change' : 'Upload'}
+												<input
+													type="file"
+													accept="image/png,image/jpeg,image/svg+xml,image/webp"
+													style={{ display: 'none' }}
+													onChange={(e) => {
+														const f = e.target.files?.[0];
+														e.target.value = '';
+														if (f) void onLogoUpload(f);
+													}}
+												/>
+											</label>
+											{logo && (
+												<button type="button" className="btn" onClick={() => void onLogoRemove()}>
+													<Icon name="x" size={14} /> Remove
+												</button>
+											)}
+											{logoBusy && <span className="dim">Uploading…</span>}
+										</>
+									)}
+								</div>
+							</Field>
+						</div>
 						<Field label="IEC number">
 							<TextInput mono value={form.iec_number} onChange={(v) => set('iec_number', v)} />
 						</Field>

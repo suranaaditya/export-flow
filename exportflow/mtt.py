@@ -104,7 +104,8 @@ def clocks(
 
 	import_value = _get(shipment, "mtt_import_value_inr")
 	import_value_inr = flt(import_value) if import_value else None
-	proceeds = flt(export_proceeds_inr) if export_proceeds_inr else None
+	# None = no realization yet (hide proceeds/net-FX); 0 is a real (degenerate) value
+	proceeds = flt(export_proceeds_inr) if export_proceeds_inr is not None else None
 	net_fx_profit_inr = (
 		flt(proceeds - import_value_inr, 2)
 		if (import_value_inr is not None and proceeds is not None)
