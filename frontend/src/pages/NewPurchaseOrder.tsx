@@ -325,6 +325,7 @@ export function NewPurchaseOrder() {
 		incoterms: [],
 		uoms: ctx?.uoms ?? [],
 		countries: ctx?.countries ?? [],
+		itemTaxTemplates: ctx?.item_tax_templates ?? [],
 		...STATIC_OPTIONS,
 	};
 
@@ -340,6 +341,8 @@ export function NewPurchaseOrder() {
 	const termsOptions = (ctx?.terms_templates ?? []).map((t) => ({ value: t }));
 
 	const totals = preview;
+	// only the lines that actually bear tax — keeps the per-item breakup honest
+	const taxedItems = totals?.by_item.filter((b) => b.tax > 0) ?? [];
 
 	return (
 		<main className="tight">
@@ -566,6 +569,29 @@ export function NewPurchaseOrder() {
 							</div>
 						)}
 					</Card>
+					{taxedItems.length > 0 && (
+						<Card>
+							<CHead icon="banknote" title="Tax by item" count={`${taxedItems.length}`} />
+							<table>
+								<thead>
+									<tr>
+										<th>Item</th>
+										<th>Taxable</th>
+										<th>Tax</th>
+									</tr>
+								</thead>
+								<tbody>
+									{taxedItems.map((b) => (
+										<tr key={b.item_code}>
+											<td>{b.item_name || b.item_code}</td>
+											<td className="num">{fmtMoney(b.net, currency)}</td>
+											<td className="num">{fmtMoney(b.tax, currency)}</td>
+										</tr>
+									))}
+								</tbody>
+							</table>
+						</Card>
+					)}
 					<Card>
 						<CHead icon="truck" title="Drop ship" />
 						<div className="empty" style={{ padding: '18px 20px', alignItems: 'flex-start', textAlign: 'left' }}>

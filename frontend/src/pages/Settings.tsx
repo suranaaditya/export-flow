@@ -678,6 +678,7 @@ export function Settings() {
 		incoterms: ctx?.incoterms ?? [],
 		uoms: ctx?.uoms ?? [],
 		countries: ctx?.countries ?? [],
+		itemTaxTemplates: ctx?.item_tax_templates ?? [],
 		...STATIC_OPTIONS,
 	};
 

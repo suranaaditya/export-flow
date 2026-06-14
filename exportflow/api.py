@@ -154,6 +154,7 @@ def get_new_so_context() -> dict:
 			"UOM", filters={"enabled": 1}, pluck="name", order_by="name asc", limit_page_length=300
 		),
 		"countries": frappe.get_all("Country", pluck="name", order_by="name asc", limit_page_length=300),
+		"item_tax_templates": _item_tax_templates(company),
 	}
 
 
@@ -200,10 +201,57 @@ def create_supplier(values) -> dict:
 	return {"name": doc.name, "supplier_name": doc.supplier_name}
 
 
+# scalar item-master fields the create/edit forms own
+ITEM_SCALAR_FIELDS = (
+	"pharmacopoeia_grade",
+	"customs_tariff_number",
+	"cas_number",
+	"default_pack_size",
+	"stock_uom",
+)
+
+
+def _item_has_gst_hsn() -> bool:
+	"""india_compliance adds gst_hsn_code to Item — present on the GST site, not
+	on the test site. Cache-safe meta check so the tax plumbing degrades cleanly
+	where GST isn't installed."""
+	return frappe.get_meta("Item").has_field("gst_hsn_code")
+
+
+def _apply_item_tax_fields(doc, values) -> None:
+	"""Set the GST HSN code (india_compliance, when the field exists and the code
+	is in the master) and a SINGLE Item Tax Template row (Item.taxes) from the
+	item-form values. The PO tax engine then auto-applies them: GST autofills
+	from HSN on india_compliance, the tax template overrides per-item rates.
+
+	Each field is touched only when its key is present in the payload, so a
+	partial update never wipes an untouched field (mirrors update_item's scalar
+	loop)."""
+	if "gst_hsn_code" in values and _item_has_gst_hsn():
+		hsn = (values.get("gst_hsn_code") or "").strip()
+		if hsn and not frappe.db.exists("GST HSN Code", hsn):
+			frappe.throw(_("GST HSN code {0} is not in the master").format(hsn))
+		doc.gst_hsn_code = hsn or None
+	if "item_tax_template" in values:
+		# the app manages one tax template per item; refuse to silently flatten a
+		# multi-row table set up in the desk (validity-dated rows etc.)
+		if len(doc.get("taxes") or []) > 1:
+			frappe.throw(
+				_("{0} has multiple tax rows configured in the desk — edit them there.").format(
+					doc.name or doc.item_name
+				)
+			)
+		template = (values.get("item_tax_template") or "").strip()
+		doc.set("taxes", [])
+		if template:
+			doc.append("taxes", {"item_tax_template": template})
+
+
 @frappe.whitelist()
 def create_item(values) -> dict:
 	"""Pharma trading item: never stocked (goods go supplier → port), always
-	buyable and sellable."""
+	buyable and sellable. Carries the GST HSN code + Item Tax Template that drive
+	PO tax autofill."""
 	frappe.has_permission("Item", "create", throw=True)
 	if isinstance(values, str):
 		values = json.loads(values)
@@ -224,7 +272,26 @@ def create_item(values) -> dict:
 			"cas_number": values.get("cas_number") or None,
 			"default_pack_size": values.get("default_pack_size") or None,
 		}
-	).insert()
+	)
+	_apply_item_tax_fields(doc, values)
+	doc.insert()
+	return {"name": doc.name, "item_name": doc.item_name, "stock_uom": doc.stock_uom}
+
+
+@frappe.whitelist()
+def update_item(name: str, values) -> dict:
+	"""Edit an item master from the in-app form — scalar fields plus the GST HSN
+	code and the single Item Tax Template (Item.taxes). item_name/item_code are
+	immutable here (rename is a separate concern)."""
+	doc = frappe.get_doc("Item", name)
+	doc.check_permission("write")
+	if isinstance(values, str):
+		values = json.loads(values)
+	for field in ITEM_SCALAR_FIELDS:
+		if field in values:
+			doc.set(field, values.get(field) or None)
+	_apply_item_tax_fields(doc, values)
+	doc.save()
 	return {"name": doc.name, "item_name": doc.item_name, "stock_uom": doc.stock_uom}
 
 
@@ -242,6 +309,16 @@ def get_item_info(item_code: str) -> dict:
 		"Item Default", {"parent": item_code, "company": company}, "default_supplier"
 	) or frappe.db.get_value("Item Default", {"parent": item_code}, "default_supplier")
 	return item
+
+
+def _item_tax_templates(company: str | None) -> list[str]:
+	"""Item Tax Templates for the company (the picker on the item form). Always
+	company-scoped — like the sibling taxes_templates/accounts sources — so an
+	unconfigured site yields an empty list, never another company's templates."""
+	return frappe.get_all(
+		"Item Tax Template", filters={"company": company}, pluck="name", order_by="name asc",
+		limit_page_length=0,
+	)
 
 
 @frappe.whitelist()
@@ -759,6 +836,7 @@ def get_new_po_context() -> dict:
 			"UOM", filters={"enabled": 1}, pluck="name", order_by="name asc", limit_page_length=300
 		),
 		"countries": frappe.get_all("Country", pluck="name", order_by="name asc", limit_page_length=300),
+		"item_tax_templates": _item_tax_templates(company),
 	}
 
 
@@ -899,6 +977,33 @@ def _build_po_doc(podata, validate_remaining: bool = True, target=None, exclude_
 	)
 
 
+def _po_item_tax_breakup(po) -> list[dict]:
+	"""Per-item net + tax, from ERPNext's own itemised tax breakup — so the form
+	shows how GST lands on each line as items are added (the dynamic per-item
+	breakup), computed by the same engine that books the tax. get_itemised_tax is
+	keyed by item code, so lines sharing an item collapse into one row."""
+	from erpnext.controllers.taxes_and_totals import get_itemised_tax
+
+	try:
+		itemised = get_itemised_tax(po)  # {item_code: {tax_desc: {tax_amount, ...}}}
+	except Exception:
+		itemised = {}
+	rows: dict[str, dict] = {}
+	order: list[str] = []
+	for it in po.items:
+		row = rows.get(it.item_code)
+		if not row:
+			row = {"item_code": it.item_code, "item_name": it.item_name, "net": 0.0, "tax": 0.0}
+			rows[it.item_code] = row
+			order.append(it.item_code)
+		row["net"] += flt(it.net_amount or it.amount)
+	for code, taxes in (itemised or {}).items():
+		row = rows.get(code)
+		if row:
+			row["tax"] = flt(sum(flt(t.get("tax_amount")) for t in taxes.values()))
+	return [{**rows[c], "net": flt(rows[c]["net"], 2), "tax": flt(rows[c]["tax"], 2)} for c in order]
+
+
 def _po_totals(po) -> dict:
 	return {
 		"net_total": flt(po.net_total),
@@ -913,6 +1018,7 @@ def _po_totals(po) -> dict:
 			}
 			for tax in po.taxes
 		],
+		"by_item": _po_item_tax_breakup(po),
 	}
 
 
@@ -926,11 +1032,15 @@ def preview_purchase_order(podata) -> dict:
 		podata = json.loads(podata)
 
 	po = _build_po_doc(podata, validate_remaining=False)
+	# set_missing_values fetches each item's item_tax_rate (the per-item GST
+	# override from its Item Tax Template) and supplier defaults; validate then
+	# runs the full ERPNext + india_compliance pipeline (HSN GST autofill) — the
+	# same order a real save uses, so the preview matches what gets booked
 	try:
+		po.run_method("set_missing_values")
 		po.run_method("validate")
 	except Exception:
 		# a preview must not die on incomplete data — fall back to the math
-		po.run_method("set_missing_values")
 		po.run_method("calculate_taxes_and_totals")
 	return _po_totals(po)
 

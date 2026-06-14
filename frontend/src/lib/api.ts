@@ -32,6 +32,7 @@ export interface NewSOContext {
 	ports: { name: string; unlocode: string | null; city: string | null; country: string | null; mode: string }[];
 	uoms: string[];
 	countries: string[];
+	item_tax_templates: string[];
 }
 
 export interface ItemInfo {
@@ -133,6 +134,7 @@ export const API = {
 	createCustomer: 'exportflow.api.create_customer',
 	createSupplier: 'exportflow.api.create_supplier',
 	createItem: 'exportflow.api.create_item',
+	updateItem: 'exportflow.api.update_item',
 	soProcurement: 'exportflow.api.get_so_procurement',
 	createPo: 'exportflow.api.create_purchase_order',
 	submitPo: 'exportflow.api.submit_purchase_order',
@@ -476,6 +478,7 @@ export interface NewPOContext {
 	sales_orders: { name: string; customer_name: string }[];
 	uoms: string[];
 	countries: string[];
+	item_tax_templates: string[];
 }
 
 export interface POTaxRow {
@@ -485,11 +488,20 @@ export interface POTaxRow {
 	total: number;
 }
 
+/** Per-item net + tax, aggregated by item code (the dynamic per-item breakup). */
+export interface POItemTax {
+	item_code: string;
+	item_name: string | null;
+	net: number;
+	tax: number;
+}
+
 export interface POTotals {
 	net_total: number;
 	total_taxes_and_charges: number;
 	grand_total: number;
 	taxes: POTaxRow[];
+	by_item: POItemTax[];
 }
 
 /** Frappe print endpoints, generic. */

@@ -146,6 +146,7 @@ export function NewShipment() {
 		incoterms: [],
 		uoms: [],
 		countries: [],
+		itemTaxTemplates: [],
 		...STATIC_OPTIONS,
 	};
 	const ports = useFrappeGetDocList<{ name: string; unlocode: string | null; mode: string }>(

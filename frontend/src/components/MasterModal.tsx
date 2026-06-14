@@ -15,6 +15,12 @@ type Values = Record<string, string | boolean>;
 function seed(def: MasterDef, record: Record<string, unknown> | null): Values {
 	const v: Values = {};
 	for (const f of def.fields) {
+		// a field can derive its value from the full doc when it isn't a plain
+		// scalar (e.g. the Item Tax Template lives in the Item.taxes child table)
+		if (f.seedFrom) {
+			v[f.key] = record ? f.seedFrom(record) : '';
+			continue;
+		}
 		const raw = record?.[f.key];
 		v[f.key] = f.type === 'check' ? !!raw : raw != null ? String(raw) : '';
 	}
@@ -56,9 +62,12 @@ export function MasterModal({
 	const { call: createViaMethod, loading: creating } = useFrappePostCall<{
 		message: { name: string };
 	}>(def.createMethod ?? 'frappe.ping');
+	const { call: updateViaMethod, loading: updatingMethod } = useFrappePostCall<{
+		message: { name: string };
+	}>(def.updateMethod ?? 'frappe.ping');
 	const { createDoc, loading: creatingDoc } = useFrappeCreateDoc();
 	const { updateDoc, loading: updating } = useFrappeUpdateDoc();
-	const saving = creating || creatingDoc || updating;
+	const saving = creating || creatingDoc || updating || updatingMethod;
 
 	const set = (key: string, value: string | boolean) => setValues((v) => ({ ...v, [key]: value }));
 
@@ -82,7 +91,11 @@ export function MasterModal({
 				onSaved(name);
 			} else {
 				const name = String(record.name);
-				await updateDoc(def.doctype, name, payload);
+				if (def.updateMethod) {
+					await updateViaMethod({ name, values: payload });
+				} else {
+					await updateDoc(def.doctype, name, payload);
+				}
 				onSaved(name);
 			}
 		} catch (e) {

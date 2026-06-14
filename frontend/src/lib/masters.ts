@@ -13,7 +13,8 @@ export type OptionSource =
 	| 'docOrigins'
 	| 'docParties'
 	| 'docAttaches'
-	| 'docUnblock';
+	| 'docUnblock'
+	| 'itemTaxTemplates';
 
 export interface MasterField {
 	key: string;
@@ -25,6 +26,9 @@ export interface MasterField {
 	mono?: boolean;
 	/** locked after creation (e.g. naming fields) */
 	createOnly?: boolean;
+	/** derive the edit value from the full doc when it isn't a plain scalar
+	 *  field (e.g. an Item Tax Template stored in the Item.taxes child table) */
+	seedFrom?: (doc: Record<string, unknown>) => string;
 }
 
 export interface MasterDef {
@@ -34,6 +38,9 @@ export interface MasterDef {
 	icon: IconName;
 	/** whitelisted create endpoint; plain createDoc when absent */
 	createMethod?: string;
+	/** whitelisted update endpoint; plain updateDoc when absent (use when a
+	 *  field maps to a child table, e.g. the Item Tax Template) */
+	updateMethod?: string;
 	listFields: string[];
 	columns: { key: string; label: string; dim?: boolean }[];
 	fields: MasterField[];
@@ -134,6 +141,7 @@ export const MASTERS: MasterDef[] = [
 		singular: 'item',
 		icon: 'cube',
 		createMethod: API.createItem,
+		updateMethod: API.updateItem,
 		listFields: ['name', 'item_name', 'stock_uom', 'pharmacopoeia_grade', 'customs_tariff_number'],
 		columns: [
 			{ key: 'item_name', label: 'Item' },
@@ -146,6 +154,18 @@ export const MASTERS: MasterDef[] = [
 			{ key: 'stock_uom', label: 'Unit of measure', type: 'select', options: 'uoms' },
 			{ key: 'pharmacopoeia_grade', label: 'Pharmacopoeia grade', type: 'select', options: 'grades' },
 			{ key: 'customs_tariff_number', label: 'HS code', type: 'text', mono: true },
+			{ key: 'gst_hsn_code', label: 'GST HSN code', type: 'text', mono: true, hint: 'Drives GST autofill on purchase orders' },
+			{
+				key: 'item_tax_template',
+				label: 'Item tax template',
+				type: 'select',
+				options: 'itemTaxTemplates',
+				hint: 'Sets the per-item GST rate; leave blank to use HSN / template defaults',
+				seedFrom: (doc) => {
+					const taxes = doc.taxes as { item_tax_template?: string }[] | undefined;
+					return taxes?.[0]?.item_tax_template ?? '';
+				},
+			},
 			{ key: 'cas_number', label: 'CAS number', type: 'text', mono: true },
 			{ key: 'default_pack_size', label: 'Default pack size', type: 'text', hint: 'e.g. 25 kg HDPE drum' },
 		],
