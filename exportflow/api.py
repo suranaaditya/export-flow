@@ -1030,6 +1030,20 @@ def _build_po_doc(podata, validate_remaining: bool = True, target=None, exclude_
 	)
 
 
+def _book_po_taxes(po) -> None:
+	"""india_compliance's GST templates carry NO static tax rows — set_missing_values
+	is what adds the GST account-head row(s) (and each item's tax rate) based on the
+	items' HSN and the place of supply. The create/edit paths must run it before
+	saving so the booked PO carries the SAME tax the preview shows; without it the PO
+	keeps the template name but an empty taxes table, so GST appears on entry and then
+	vanishes after submit. The negotiated buying rate is preserved — set_missing_values
+	must not re-fetch the day's exchange rate for a foreign-currency PO."""
+	rate = flt(po.conversion_rate)
+	po.run_method("set_missing_values")
+	if rate > 0:
+		po.conversion_rate = rate
+
+
 def _po_item_tax_breakup(po) -> list[dict]:
 	"""Per-item net + tax, from ERPNext's own itemised tax breakup — so the form
 	shows how GST lands on each line as items are added (the dynamic per-item
@@ -1113,6 +1127,7 @@ def create_purchase_order_draft(podata) -> dict:
 
 	po = _build_po_doc(podata, validate_remaining=True)
 	supplier = po.supplier
+	_book_po_taxes(po)  # populate india_compliance's GST rows so they persist on save
 	po.insert()
 
 	# stamp the negotiated supplier on the linked SO rows (drop-ship)
@@ -1161,6 +1176,7 @@ def update_purchase_order_doc(name: str, podata) -> dict:
 	# enforce the remaining-qty cap, but exclude this PO's own current draft
 	# contribution so an in-place edit isn't rejected for double-counting itself
 	_build_po_doc(podata, validate_remaining=True, target=doc, exclude_po=doc.name)
+	_book_po_taxes(doc)  # re-populate india_compliance's GST rows so they persist
 	doc.save()
 
 	for row in doc.items:
