@@ -8,6 +8,7 @@ import {
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
 import { MasterModal } from '@/components/MasterModal';
+import { PackEditor, editToPayload, type PackEdit } from '@/components/packEditor';
 import { Field, SearchSelect, SelectInput, TextInput } from '@/components/form';
 import { Card, CHead, EmptyMsg } from '@/components/ui';
 import {
@@ -199,6 +200,12 @@ export function NewShipment() {
 	const checkedLines = lines.filter((l) => selectedSos.includes(l.sales_order) && selFor(l).checked);
 	const hasMtt = checkedLines.some((l) => l.merchanting);
 	const hasIndia = checkedLines.some((l) => l.india);
+
+	const [packs, setPacks] = useState<PackEdit[]>([]);
+	// the packing item picker offers only the lines ticked above — never free text
+	const packItemOpts = [...new Map(checkedLines.map((l) => [l.item_code, l.item_name])).entries()].map(
+		([value, label]) => ({ value, label: label || value }),
+	);
 	const mttSourced = hasMtt && !hasIndia;
 	const mttMixed = hasMtt && hasIndia;
 	// drive the trade type both ways: lock to merchanting when MTT-sourced, and
@@ -410,6 +417,8 @@ export function NewShipment() {
 						purchase_order: l.purchase_order,
 						po_detail: l.po_detail,
 					})),
+					// drop any pack whose item is no longer a shipped line
+					packs: editToPayload(packs, new Set(checked.map((l) => l.item_code))),
 				},
 			});
 			navigate('/shipments/' + result.message.name);
@@ -711,6 +720,19 @@ export function NewShipment() {
 								</div>
 							);
 						})
+					)}
+
+					{checkedLines.length > 0 && (
+						<>
+							<div style={{ borderTop: '1px solid var(--hairline)', padding: '12px 18px 0' }}>
+								<div className="fdivider" style={{ margin: 0 }}>Packing detail · optional</div>
+								<div className="sub" style={{ margin: '4px 0 0' }}>
+									One row per batch — drum ranges, mfg/exp and net/tare weights for the invoice &amp;
+									packing list. The item is one of the lines ticked above.
+								</div>
+							</div>
+							<PackEditor rows={packs} onChange={setPacks} itemOptions={packItemOpts} />
+						</>
 					)}
 
 					<div className="formfoot">

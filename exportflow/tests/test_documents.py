@@ -186,6 +186,42 @@ class TestDocuments(IntegrationTestCase):
 		self.assertIsNotNone(ctx["fob_value_inr"])
 		self.assertGreater(ctx["fob_value_inr"], 0)
 
+	def test_create_shipment_with_packs(self):
+		"""Packing detail can be entered while booking the shipment, and a pack
+		whose item isn't a shipment line is rejected (the form's picker only ever
+		offers the shipment's own items)."""
+		so, customer, _s = self.make_deal(qty=50)
+		row = so.items[0]
+		base = {
+			"customer": customer,
+			"mode": "Sea",
+			"items": [
+				{
+					"item_code": row.item_code,
+					"qty": 50,
+					"uom": row.uom,
+					"sales_order": so.name,
+					"so_detail": row.name,
+				}
+			],
+		}
+		res = create_shipment(
+			{
+				**base,
+				"packs": [
+					{"item_code": row.item_code, "batch_no": "B1", "num_packages": 5, "net_per": 10, "tare_per": 1}
+				],
+			}
+		)
+		doc = frappe.get_doc("Export Shipment", res["name"])
+		self.assertEqual(len(doc.packs), 1)
+		self.assertEqual(doc.packs[0].batch_no, "B1")
+		self.assertEqual(doc.packs[0].num_packages, 5)
+
+		stray = make_plain_item(f"_Test EF Stray Pack {_suffix()}")
+		with self.assertRaises(frappe.ValidationError):
+			create_shipment({**base, "packs": [{"item_code": stray, "num_packages": 1, "net_per": 1}]})
+
 	def test_statutory_declarations_on_every_shipment(self):
 		"""The four statutory declarations are on every shipment's checklist by
 		default and are Generated (have a Document-Instance print format → the

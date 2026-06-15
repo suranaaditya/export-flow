@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import {
 	useFrappeGetCall,
 	useFrappeGetDoc,
@@ -9,6 +9,7 @@ import {
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { DocumentChecklist } from '@/components/DocumentChecklist';
 import { IncentiveModal, RealizationModal } from '@/components/financeModals';
+import { PackEditor, editToPayload, packToEdit, type PackEdit } from '@/components/packEditor';
 import { Icon } from '@/components/Icon';
 import { Card, CHead, EmptyMsg, Facts, LRow, Modal, Tag } from '@/components/ui';
 import { CheckInput, Field, SearchSelect, SelectInput, TextArea, TextInput } from '@/components/form';
@@ -1261,19 +1262,6 @@ function PackingCard({
 	);
 }
 
-type PackEdit = {
-	_uid: string;
-	item_code: string;
-	batch_no: string;
-	marks: string;
-	num_packages: string;
-	pack_type: string;
-	net_per: string;
-	tare_per: string;
-	mfg_date: string;
-	exp_date: string;
-};
-
 function PackingModal({
 	id,
 	items,
@@ -1289,54 +1277,16 @@ function PackingModal({
 }) {
 	const { call: update, loading: saving } = useFrappePostCall(API.updateShipment);
 	const [err, setErr] = useState<string | null>(null);
-	const s = (v: number | string | null | undefined) => (v != null ? String(v) : '');
-	const [rows, setRows] = useState<PackEdit[]>(() =>
-		packs.map((p, i) => ({
-			_uid: p.name ?? `seed-${i}`,
-			item_code: p.item_code,
-			batch_no: p.batch_no ?? '',
-			marks: p.marks ?? '',
-			num_packages: s(p.num_packages),
-			pack_type: p.pack_type ?? '',
-			net_per: s(p.net_per),
-			tare_per: s(p.tare_per),
-			mfg_date: p.mfg_date ?? '',
-			exp_date: p.exp_date ?? '',
-		})),
-	);
-	const uidRef = useRef(0);
+	const [rows, setRows] = useState<PackEdit[]>(() => packs.map(packToEdit));
+	// the item is a strict pick from THIS shipment's own lines — never free text
 	const itemOpts = [...new Map(items.map((i) => [i.item_code, i.item_name])).entries()].map(
 		([value, label]) => ({ value, label: label || value }),
 	);
-	const setRow = (i: number, patch: Partial<PackEdit>) =>
-		setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
-	const addRow = () =>
-		setRows((rs) => [
-			...rs,
-			{ _uid: `new-${uidRef.current++}`, item_code: itemOpts[0]?.value ?? '', batch_no: '', marks: '', num_packages: '', pack_type: '', net_per: '', tare_per: '', mfg_date: '', exp_date: '' },
-		]);
 
 	async function onSave() {
 		setErr(null);
 		try {
-			await update({
-				name: id,
-				payload: {
-					packs: rows
-						.filter((r) => r.item_code)
-						.map((r) => ({
-							item_code: r.item_code,
-							batch_no: r.batch_no,
-							marks: r.marks,
-							num_packages: Number(r.num_packages) || 0,
-							pack_type: r.pack_type,
-							net_per: Number(r.net_per) || 0,
-							tare_per: Number(r.tare_per) || 0,
-							mfg_date: r.mfg_date || null,
-							exp_date: r.exp_date || null,
-						})),
-				},
-			});
+			await update({ name: id, payload: { packs: editToPayload(rows) } });
 			onSaved();
 		} catch (e) {
 			setErr(parseServerError(e));
@@ -1349,47 +1299,7 @@ function PackingModal({
 				One row per batch / package group. Net &amp; tare are per package; the totals (net / tare /
 				gross) are computed for the invoice and packing list.
 			</div>
-			<div className="packlist">
-				{rows.map((r, i) => (
-					<div className="packrow" key={r._uid}>
-						<div className="formgrid">
-							<Field label="Item">
-								<SearchSelect value={r.item_code} onChange={(v) => setRow(i, { item_code: v })} options={itemOpts} placeholder="Item…" />
-							</Field>
-							<Field label="Batch / lot no">
-								<TextInput mono value={r.batch_no} onChange={(v) => setRow(i, { batch_no: v })} />
-							</Field>
-							<Field label="Packages">
-								<TextInput type="number" mono value={r.num_packages} onChange={(v) => setRow(i, { num_packages: v })} />
-							</Field>
-							<Field label="Pack type" hint="e.g. HDPE Drums">
-								<TextInput value={r.pack_type} onChange={(v) => setRow(i, { pack_type: v })} />
-							</Field>
-							<Field label="Pkg nos" hint="e.g. 1-10">
-								<TextInput value={r.marks} onChange={(v) => setRow(i, { marks: v })} />
-							</Field>
-							<Field label="Net / pkg (kg)">
-								<TextInput type="number" mono value={r.net_per} onChange={(v) => setRow(i, { net_per: v })} />
-							</Field>
-							<Field label="Tare / pkg (kg)">
-								<TextInput type="number" mono value={r.tare_per} onChange={(v) => setRow(i, { tare_per: v })} />
-							</Field>
-							<Field label="Mfg date">
-								<TextInput type="date" value={r.mfg_date} onChange={(v) => setRow(i, { mfg_date: v })} />
-							</Field>
-							<Field label="Exp date">
-								<TextInput type="date" value={r.exp_date} onChange={(v) => setRow(i, { exp_date: v })} />
-							</Field>
-						</div>
-						<button type="button" className="xrow" onClick={() => setRows((rs) => rs.filter((_, idx) => idx !== i))}>
-							<Icon name="close" size={13} /> Remove batch
-						</button>
-					</div>
-				))}
-				<button type="button" className="btn" onClick={addRow}>
-					<Icon name="plus" size={14} /> Add batch / pack
-				</button>
-			</div>
+			<PackEditor rows={rows} onChange={setRows} itemOptions={itemOpts} />
 			<div className="formfoot">
 				{err && <span className="ferr">{err}</span>}
 				<span className="spacer" />
