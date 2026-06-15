@@ -487,6 +487,19 @@ class TestDocuments(IntegrationTestCase):
 		again = generate_document(inv)
 		self.assertEqual(again["status"], "Sent/Filed")
 
+	def test_generate_slashed_document_type(self):
+		"""A document type containing '/' (Drawback / DEEC Declaration) generates a
+		PATH-SAFE filename — frappe.scrub leaves the slash, which made save_file
+		write into a non-existent subdirectory."""
+		so, customer, _s = self.make_deal()
+		shp = self.make_shipment(so, customer)
+		result = generate_document(instance_of(shp, "Drawback / DEEC Declaration"))
+		self.assertTrue(result["file_url"], "PDF must be attached")
+		self.assertEqual(result["status"], "Drafted")
+		self.assertNotIn(
+			"/", result["file_url"].split("/private/files/")[-1], "the filename must not contain a slash"
+		)
+
 	def test_generate_rejects_tracked_documents(self):
 		so, customer, _s = self.make_deal()
 		shp = self.make_shipment(so, customer)

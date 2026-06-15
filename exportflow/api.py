@@ -1,4 +1,5 @@
 import json
+import re
 
 import frappe
 from frappe import _
@@ -1976,7 +1977,10 @@ def generate_document(name: str) -> dict:
 	)
 	from frappe.utils.file_manager import save_file
 
-	filename = f"{frappe.scrub(doc.document_type)}_{doc.name}.pdf"
+	# path-safe slug — frappe.scrub leaves "/" (e.g. "Drawback / DEEC Declaration"),
+	# which save_file would read as a subdirectory that doesn't exist
+	slug = re.sub(r"[^a-z0-9]+", "_", doc.document_type.lower()).strip("_") or "document"
+	filename = f"{slug}_{doc.name}.pdf"
 	file_doc = save_file(filename, pdf, "Document Instance", doc.name, is_private=1)
 
 	updates = {"file": file_doc.file_url}
