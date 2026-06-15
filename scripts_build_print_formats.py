@@ -422,6 +422,76 @@ COVERING_SCHEDULE = _efx_letter(
 )
 
 
+# ---- statutory declarations generated on every shipment ----
+
+NON_HAZARDOUS = _efx_letter(
+	"Shipper's Certification of Non-Hazardous Cargo",
+	'{% if ctx.shipment.mode == "Air" %}Carriage by air{% else %}Carriage by sea{% endif %}',
+	"""  <div class="gd" style="font-size:10.5px;line-height:1.6">
+  <table style="width:100%;margin-bottom:8px"><tr>
+    <td style="padding:0 12px 0 0;width:33%"><span class="lbl">Port of departure</span>{{ ctx.shipment.port_of_loading or "—" }}</td>
+    <td style="padding:0 12px 0 0;width:33%"><span class="lbl">Port of discharge</span>{{ ctx.shipment.port_of_discharge or "—" }}</td>
+    <td style="padding:0"><span class="lbl">Destination</span>{{ ctx.shipment.final_destination or ctx.destination_country or "—" }}</td>
+  </tr></table>
+  <p style="margin:0">We hereby certify that the contents of this consignment are fully and accurately described above by their proper names, and are properly classified, packed, marked and labelled, and in all respects in proper condition for transport. We further certify that the goods are <b>not dangerous goods</b> and are <b>not hazardous</b> for carriage by {% if ctx.shipment.mode == "Air" %}air{% else %}sea{% endif %}. We acknowledge that we may be liable for any loss or damage resulting from a mis-statement or omission, and agree that the carrier may rely upon this certificate.</p>
+  </div>""" + EFX_LINES + """  <div class="gd" style="border-top:0.7px solid #b9bec8;font-size:10px">Total net weight: <b>{% if ctx.net_total_wt %}{{ "%g"|format(ctx.net_total_wt) }} Kg{% else %}as per packing list{% endif %}</b>{% if ctx.iec_number %} &nbsp;&middot;&nbsp; IEC <span class="mono">{{ ctx.iec_number }}</span>{% endif %}</div>""",
+)
+
+
+FORM_SDF = _efx_letter(
+	"Form SDF", "Declaration under the Foreign Exchange Management Act, 1999",
+	"""  <div class="gd" style="font-size:10px;line-height:1.6">
+  <table style="width:100%;margin-bottom:8px"><tr>
+    <td style="padding:0 12px 0 0;width:50%"><span class="lbl">Shipping bill no &amp; date</span>{% if ctx.shipment.shipping_bill_number %}<span class="mono">{{ ctx.shipment.shipping_bill_number }}</span>{% if ctx.shipment.shipping_bill_date %} &middot; {{ frappe.utils.formatdate(ctx.shipment.shipping_bill_date, "dd MMM yyyy") }}{% endif %}{% else %}—{% endif %}</td>
+    <td style="padding:0"><span class="lbl">Invoice no &amp; date</span>{% if ctx.invoice_number %}<span class="mono">{{ ctx.invoice_number }}</span>{% if ctx.invoice_date %} &middot; {{ frappe.utils.formatdate(ctx.invoice_date, "dd MMM yyyy") }}{% endif %}{% else %}—{% endif %}</td>
+  </tr></table>
+  <p style="margin:0 0 6px"><b>1.</b> I/We hereby declare that I/We am/are the <b>seller / consignor</b> of the goods in respect of which this declaration is made, that the particulars given in the shipping bill stated above are true, and that &mdash; (a) the value as contracted with the buyer is the same as the full export value declared in the above shipping bill; (b) where the full export value is not ascertainable at the time of export, the value declared is that which I/We, having regard to the prevailing market conditions, expect to receive on the sale of the goods in the overseas market.</p>
+  <p style="margin:0 0 6px"><b>2.</b> I/We undertake that I/We will deliver to the bank named herein{% if ctx.ad_bank %} &mdash; <b>{{ ctx.ad_bank }}</b>{% endif %} the foreign exchange representing the full export value of the goods on or before the due date, in the manner prescribed in the Foreign Exchange Management (Export of Goods and Services) Regulations.</p>
+  <p style="margin:0"><b>3.</b> I/We am/are resident in India and have a place of business in India. &nbsp; <b>4.</b> I/We am/are not in the Caution List of the Reserve Bank of India.</p>
+  </div>
+  <table class="grid" style="border-top:1.4px solid #16181d"><tr>
+    <td style="width:55%"><span class="lbl">Name &amp; address of exporter</span><b>{{ ctx.company_name }}</b>{% if ctx.exporter_address %}<div class="addr muted">{{ ctx.exporter_address | e }}</div>{% endif %}{% if ctx.iec_number %}<div>IEC <span class="mono">{{ ctx.iec_number }}</span></div>{% endif %}</td>
+    <td><span class="lbl">FOB value (INR)</span><b>{% if ctx.fob_value_inr %}{{ frappe.utils.fmt_money(ctx.fob_value_inr, currency="INR") }}{% else %}—{% endif %}</b>{% if ctx.ad_bank %}<div style="margin-top:5px"><span class="lbl">Authorised dealer bank</span>{{ ctx.ad_bank }}</div>{% endif %}</td>
+  </tr></table>
+  <div class="gd" style="border-top:0.7px solid #b9bec8"><span class="lbl">For Authorised Dealer's use</span><div style="height:50px"></div><div class="muted" style="font-size:8.4px">To be completed by the AD bank: uniform code number; date of negotiation / receipt for collection; currency &amp; amount realised; credit to Nostro / debit to NR-Rupee account; period of return reported to the Reserve Bank of India.</div></div>""",
+)
+
+
+DRAWBACK_DECL = _efx_letter(
+	"Drawback / DEEC Declaration", "Appendix-III &mdash; to be filed for export goods under claim for drawback",
+	"""  <div class="gd" style="font-size:9.6px;line-height:1.55">
+  <div style="margin-bottom:6px"><span class="lbl">Shipping bill no &amp; date</span>{% if ctx.shipment.shipping_bill_number %}<span class="mono">{{ ctx.shipment.shipping_bill_number }}</span>{% if ctx.shipment.shipping_bill_date %} &middot; {{ frappe.utils.formatdate(ctx.shipment.shipping_bill_date, "dd MMM yyyy") }}{% endif %}{% else %}—{% endif %}</div>
+  <p style="margin:0 0 5px">We, <b>{{ ctx.company_name }}</b>{% if ctx.iec_number %} (IEC <span class="mono">{{ ctx.iec_number }}</span>){% endif %}, hereby declare in respect of the export goods covered by the above shipping bill that &mdash;</p>
+  <p style="margin:0 0 4px"><b>(i)</b> the quality and specification of the goods are in accordance with the terms of the export contract entered into with the buyer / consignee; <b>(ii)</b> there is no change in the manufacturing formula or in the quantum per unit of the imported / indigenous materials utilised in the manufacture of the export goods; <b>(iii)</b> the export goods have not been manufactured / exported availing the procedure under rule 18 or sub-rule (2) of rule 19 of the Central Excise Rules, nor in discharge of an export obligation under a duty-exemption / advance authorisation except as separately declared; <b>(iv)</b> the drawback amount claimed is more than 1% of the FOB value of the export, or, where it is less than 1%, it exceeds &#8377; 500.</p>
+  <p style="margin:0">We undertake to repatriate the export proceeds within the period prescribed and to submit the Bank Realisation Certificate (eBRC) to the Assistant Commissioner (Drawback); failing realisation within the said period, to refund the drawback received against this shipping bill.</p>
+  </div>
+  <table class="lines">
+    <thead><tr><th style="width:22px">Sr</th><th>Item (as described in the invoice)</th><th style="width:90px">HS code</th><th class="r" style="width:130px">Present market value</th></tr></thead>
+    <tbody>{% for row in ctx.lines %}<tr><td class="c mono">{{ loop.index }}</td><td><b>{{ row.item_name }}</b></td><td class="mono">{{ row.hs_code or "—" }}</td><td class="r mono">{% if ctx.currency %}{{ frappe.utils.fmt_money(row.amount, currency=ctx.currency) }}{% else %}—{% endif %}</td></tr>{% endfor %}</tbody>
+  </table>""",
+)
+
+
+EXPORT_VALUE_DECL = _efx_letter(
+	"Export Value Declaration", "Annexure-A &mdash; Customs Valuation (Determination of Value of Export Goods) Rules, 2007",
+	"""  <div class="gd" style="font-size:10px;line-height:1.55">
+  <table style="width:100%;margin-bottom:8px"><tr>
+    <td style="padding:0 12px 0 0;width:50%"><span class="lbl">Shipping bill no &amp; date</span>{% if ctx.shipment.shipping_bill_number %}<span class="mono">{{ ctx.shipment.shipping_bill_number }}</span>{% if ctx.shipment.shipping_bill_date %} &middot; {{ frappe.utils.formatdate(ctx.shipment.shipping_bill_date, "dd MMM yyyy") }}{% endif %}{% else %}—{% endif %}</td>
+    <td style="padding:0"><span class="lbl">Invoice no &amp; date</span>{% if ctx.invoice_number %}<span class="mono">{{ ctx.invoice_number }}</span>{% if ctx.invoice_date %} &middot; {{ frappe.utils.formatdate(ctx.invoice_date, "dd MMM yyyy") }}{% endif %}{% else %}—{% endif %}</td>
+  </tr></table>
+  <table style="width:100%">
+    <tr><td style="padding:3px 8px 3px 0;width:46%;border-bottom:0.5px solid #e3e6ea">1. Nature of transaction</td><td style="padding:3px 0;border-bottom:0.5px solid #e3e6ea"><b>Sale</b></td></tr>
+    <tr><td style="padding:3px 8px 3px 0;border-bottom:0.5px solid #e3e6ea">2. Method of valuation</td><td style="padding:3px 0;border-bottom:0.5px solid #e3e6ea"><b>Rule 3</b> &mdash; transaction value</td></tr>
+    <tr><td style="padding:3px 8px 3px 0;border-bottom:0.5px solid #e3e6ea">3. Whether seller and buyer are related</td><td style="padding:3px 0;border-bottom:0.5px solid #e3e6ea"><b>No</b></td></tr>
+    <tr><td style="padding:3px 8px 3px 0;border-bottom:0.5px solid #e3e6ea">4. Terms of delivery</td><td style="padding:3px 0;border-bottom:0.5px solid #e3e6ea">{% if ctx.incoterm %}{{ ctx.incoterm }}{% if ctx.named_place %} &middot; {{ ctx.named_place }}{% endif %}{% else %}—{% endif %}</td></tr>
+    <tr><td style="padding:3px 8px 3px 0;border-bottom:0.5px solid #e3e6ea">5. Terms of payment</td><td style="padding:3px 0;border-bottom:0.5px solid #e3e6ea">{{ ctx.payment_terms or "—" }}</td></tr>
+    <tr><td style="padding:3px 8px 3px 0">6. Declared export value</td><td style="padding:3px 0"><b>{% if ctx.currency %}{{ frappe.utils.fmt_money(ctx.grand_total, currency=ctx.currency) }}{% else %}—{% endif %}</b>{% if ctx.fob_value_inr %} <span class="muted">&middot; FOB {{ frappe.utils.fmt_money(ctx.fob_value_inr, currency="INR") }}</span>{% endif %}</td></tr>
+  </table>
+  <p style="margin:8px 0 0">I/We hereby declare that the information furnished above is true, complete and correct in every respect, and undertake to bring to the notice of the proper officer any particulars subsequently coming to my/our knowledge which would have a bearing on the valuation of the export goods.</p>
+  </div>""",
+)
+
+
 def _efx_txn_sign(left=""):
 	"""EFX signatory band for the transactional documents (uses `ex` =
 	exporter_profile(), which the SO / PO / PFI templates set at the top)."""
@@ -633,6 +703,7 @@ def write_format(
 		"standard": "Yes",
 	}
 	path = os.path.join(BASE, folder, folder + ".json")
+	os.makedirs(os.path.dirname(path), exist_ok=True)
 	with open(path, "w") as f:
 		json.dump(payload, f, indent=1, sort_keys=True, ensure_ascii=False)
 		f.write("\n")
@@ -655,6 +726,10 @@ if __name__ == "__main__":
 	)
 	write_format("exportflow_bill_of_exchange", "ExportFlow Bill of Exchange", BILL_OF_EXCHANGE, modified=REDESIGN)
 	write_format("exportflow_covering_schedule", "ExportFlow Covering Schedule", COVERING_SCHEDULE, modified=REDESIGN)
+	write_format("exportflow_non_hazardous_cargo", "ExportFlow Non-Hazardous Cargo", NON_HAZARDOUS, modified=REDESIGN)
+	write_format("exportflow_form_sdf", "ExportFlow Form SDF", FORM_SDF, modified=REDESIGN)
+	write_format("exportflow_drawback_declaration", "ExportFlow Drawback Declaration", DRAWBACK_DECL, modified=REDESIGN)
+	write_format("exportflow_export_value_declaration", "ExportFlow Export Value Declaration", EXPORT_VALUE_DECL, modified=REDESIGN)
 	write_format(
 		"exportflow_sales_order", "ExportFlow Sales Order", SALES_ORDER,
 		doc_type="Sales Order", modified=REDESIGN,

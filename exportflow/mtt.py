@@ -38,6 +38,11 @@ SUPPRESSED_DOCS = frozenset(
 		"State Drug Controller Export NOC",
 		"eBRC",
 		"GST Supplier Compliance Pack",
+		# India-customs / FEMA-export declarations — a merchanting trade files none
+		# of these (goods never enter India); the carrier non-haz cert still applies
+		"Form SDF",
+		"Drawback / DEEC Declaration",
+		"Export Value Declaration",
 	}
 )
 

@@ -138,11 +138,12 @@ def document_print_context(name: str):
 	named_places = []
 	payment_terms = None
 	total = 0.0
+	fob_inr = 0.0
 	net_total_wt = tare_total_wt = gross_total_wt = 0.0
 	pkg_total = 0
 	for row in shipment.items:
 		so_line = frappe.db.get_value(
-			"Sales Order Item", row.so_detail, ["rate", "parent"], as_dict=True
+			"Sales Order Item", row.so_detail, ["rate", "base_rate", "parent"], as_dict=True
 		) or frappe._dict()
 		so = (
 			frappe.db.get_value(
@@ -175,6 +176,9 @@ def document_print_context(name: str):
 		rate = flt(so_line.rate)
 		amount = flt(rate * flt(row.qty), 2)
 		total += amount
+		# FOB in INR (the SO line's company-currency rate) — the FEMA / drawback
+		# declarations state the export value in rupees
+		fob_inr += flt(so_line.get("base_rate")) * flt(row.qty)
 		# attach this line's packing groups + roll up its weights
 		line_packs = packs_by_item.get(row.item_code, [])
 		line_net = flt(sum(g.net for g in line_packs), 2)
@@ -320,6 +324,12 @@ def document_print_context(name: str):
 
 	incoterm_label = shipment.incoterm or ("FOB" if not (freight or insurance) else "CIF")
 
+	# AD bank for the FEMA / SDF declaration — the merchanting AD bank, else the
+	# bank named on a realization booked against this shipment
+	ad_bank = shipment.get("mtt_ad_bank") or frappe.db.get_value(
+		"Export Realization", {"shipment": shipment.name}, "ad_bank"
+	)
+
 	return frappe._dict(
 		instance=inst,
 		shipment=shipment,
@@ -357,6 +367,8 @@ def document_print_context(name: str):
 		freight=freight,
 		insurance=insurance,
 		grand_total=grand_total,
+		fob_value_inr=flt(fob_inr, 2),
+		ad_bank=ad_bank,
 		net_total_wt=flt(net_total_wt, 2),
 		tare_total_wt=flt(tare_total_wt, 2),
 		gross_total_wt=flt(gross_total_wt, 2),

@@ -182,6 +182,33 @@ class TestDocuments(IntegrationTestCase):
 		self.assertTrue(ctx["has_bank"])
 		self.assertEqual(ctx["bank"]["account_no"], "8801301100000008")
 		self.assertEqual(ctx["incoterm"], "CIF")
+		# FOB in INR (company currency) for the FEMA / drawback declarations
+		self.assertIsNotNone(ctx["fob_value_inr"])
+		self.assertGreater(ctx["fob_value_inr"], 0)
+
+	def test_statutory_declarations_on_every_shipment(self):
+		"""The four statutory declarations are on every shipment's checklist by
+		default and are Generated (have a Document-Instance print format → the
+		client can produce the PDF in-app)."""
+		so, customer, _s = self.make_deal()
+		shp = self.make_shipment(so, customer)
+		types = doc_types_on(shp)
+		for t in (
+			"Non-Hazardous Cargo Certificate",
+			"Form SDF",
+			"Drawback / DEEC Declaration",
+			"Export Value Declaration",
+		):
+			self.assertIn(t, types, f"{t} missing from the base checklist")
+			dt = frappe.db.get_value(
+				"Document Type", t, ["origin", "default_print_format"], as_dict=True
+			)
+			self.assertEqual(dt.origin, "Generated")
+			self.assertTrue(dt.default_print_format, f"{t} has no print format")
+			self.assertEqual(
+				frappe.db.get_value("Print Format", dt.default_print_format, "doc_type"),
+				"Document Instance",
+			)
 
 	def test_incoterm_condition_and_lapse(self):
 		so, customer, _s = self.make_deal()
