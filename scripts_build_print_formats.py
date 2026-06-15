@@ -422,87 +422,27 @@ COVERING_SCHEDULE = _efx_letter(
 )
 
 
-SALES_ORDER = """{%- set ex = exporter_profile() -%}
-{%- set cust_addr = party_address("Customer", doc.customer) -%}
-{%- set dest = frappe.db.get_value("Customer", doc.customer, "destination_country") -%}
-<style>
-  .ef-so { font-family: Helvetica, Arial, sans-serif; font-size: 12px; color: #1a2030; line-height: 1.5; }
-  .ef-so h1 { font-size: 20px; letter-spacing: .14em; margin: 0 0 2px; }
-  .ef-so .muted { color: #586273; }
-  .ef-so .mono { font-family: Menlo, Consolas, monospace; }
-  .ef-so .head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #1a2030; padding-bottom: 10px; margin-bottom: 14px; }
-  .ef-so table.meta { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
-  .ef-so table.meta td { vertical-align: top; padding: 0 8px 0 0; width: 50%; }
-  .ef-so .blk { border: 1px solid #dcdfe6; padding: 9px 11px; min-height: 86px; }
-  .ef-so .blk .lbl { font-size: 9.5px; text-transform: uppercase; letter-spacing: .08em; color: #586273; margin-bottom: 4px; }
-  .ef-so table.kv { width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 12px; }
-  .ef-so table.kv td { padding: 2px 8px 2px 0; }
-  .ef-so table.kv td.k { color: #586273; white-space: nowrap; width: 120px; }
-  .ef-so table.items { width: 100%; border-collapse: collapse; margin: 6px 0 0; }
-  .ef-so table.items th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; border-top: 1px solid #1a2030; border-bottom: 1px solid #1a2030; padding: 6px 8px; }
-  .ef-so table.items td { border-bottom: 1px solid #e7e9ee; padding: 6px 8px; vertical-align: top; }
-  .ef-so table.items .r { text-align: right; }
-  .ef-so table.totals { width: 45%; margin-left: auto; margin-top: 8px; border-collapse: collapse; }
-  .ef-so table.totals td { padding: 3px 8px; }
-  .ef-so table.totals .r { text-align: right; }
-  .ef-so table.totals .grand td { font-weight: bold; font-size: 14px; border-top: 2px solid #1a2030; }
-  .ef-so .terms { margin-top: 16px; white-space: pre-wrap; }
-  .ef-so .terms .lbl { font-size: 9.5px; text-transform: uppercase; letter-spacing: .08em; color: #586273; margin-bottom: 4px; }
-  .ef-so .foot { margin-top: 26px; display: flex; justify-content: space-between; align-items: flex-end; }
-  .ef-so .sig { margin-top: 50px; border-top: 1px solid #1a2030; width: 220px; padding-top: 4px; font-size: 10.5px; }
-</style>
-<div class="ef-so">
-  <div class="head">
-    <div>
-      <h1>SALES ORDER</h1>
-      <div class="muted">Export order confirmation</div>
-    </div>
-    <div style="text-align:right">
-      <div class="mono" style="font-size:14px"><b>{{ doc.name }}</b></div>
-      <div class="muted">Date: <span class="mono">{{ frappe.utils.formatdate(doc.transaction_date, "dd MMM yyyy") }}</span></div>
-      {% if doc.delivery_date %}<div class="muted">Delivery by: <span class="mono">{{ frappe.utils.formatdate(doc.delivery_date, "dd MMM yyyy") }}</span></div>{% endif %}
-      {% if doc.docstatus == 0 %}<div class="muted"><b>DRAFT</b></div>{% endif %}
-    </div>
-  </div>
-
-  <table class="meta"><tr>
-    <td><div class="blk">
-      <div class="lbl">Exporter / Seller</div>
-      {% if ex.logo %}<img src="{{ ex.logo | e }}" style="max-height:42px;max-width:170px;margin-bottom:5px;display:block">{% endif %}
-      <b>{{ ex.company_name }}</b><br>
-      {% if ex.address %}<span class="muted" style="white-space:pre-wrap">{{ ex.address | e }}</span><br>{% endif %}
-      {% if ex.gstin %}GSTIN: <span class="mono">{{ ex.gstin }}</span><br>{% endif %}
-      {% if ex.iec %}IEC: <span class="mono">{{ ex.iec }}</span>{% endif %}
-    </div></td>
-    <td><div class="blk">
-      <div class="lbl">Customer / Buyer</div>
-      <b>{{ doc.customer_name or doc.customer }}</b><br>
-      {% if cust_addr %}<span class="muted" style="white-space:pre-wrap">{{ cust_addr | e }}</span><br>{% endif %}
-      {% if dest %}<span class="muted">Country of final destination:</span> {{ dest }}{% endif %}
-    </div></td>
+def _efx_txn_sign(left=""):
+	"""EFX signatory band for the transactional documents (uses `ex` =
+	exporter_profile(), which the SO / PO / PFI templates set at the top)."""
+	return """
+  <table class="grid" style="border-top:1.4px solid #16181d"><tr>
+    <td style="width:58%">""" + (left or "&nbsp;") + """</td>
+    <td class="sigbox"><div class="muted" style="font-size:9px">For <b>{{ ex.company_name }}</b></div><div class="sigline">{% if ex.signatory_name %}{{ ex.signatory_name }}{% if ex.signatory_designation %} &middot; {{ ex.signatory_designation }}{% endif %} &mdash; {% endif %}Authorised signatory</div></td>
   </tr></table>
+"""
 
-  <table class="kv">
-    <tr>
-      <td class="k">Currency</td><td class="mono">{{ doc.currency }}</td>
-      <td class="k">Incoterm</td><td>{% if doc.incoterm %}{{ doc.incoterm }}{% if doc.named_place %} · {{ doc.named_place }}{% endif %}{% else %}—{% endif %}</td>
-    </tr>
-    {% if doc.po_no or doc.payment_terms_template %}
-    <tr>
-      <td class="k">Buyer's ref</td><td class="mono">{{ doc.po_no or "—" }}</td>
-      <td class="k">Payment terms</td><td>{{ doc.payment_terms_template or "—" }}</td>
-    </tr>
-    {% endif %}
-  </table>
 
-  <table class="items">
-    <thead><tr><th style="width:26px">#</th><th>Description</th><th>HSN</th><th class="r">Qty</th><th class="r">Rate</th><th class="r">Amount ({{ doc.currency }})</th></tr></thead>
+# EFX line + totals tables for SO / PO (doc.items with HSN, doc.taxes)
+EFX_TXN_LINES = """
+  <table class="lines">
+    <thead><tr><th style="width:22px">Sr</th><th>Description</th><th style="width:84px">HSN</th><th class="r" style="width:80px">Qty</th><th class="r" style="width:90px">Rate</th><th class="r" style="width:106px">Amount ({{ doc.currency }})</th></tr></thead>
     <tbody>
     {% for row in doc.items %}
       <tr>
-        <td class="mono">{{ loop.index }}</td>
-        <td><b>{{ row.item_name }}</b>{% if row.item_code != row.item_name %}<br><span class="muted mono" style="font-size:10px">{{ row.item_code }}</span>{% endif %}</td>
-        <td class="mono">{{ row.get("gst_hsn_code") or "" }}</td>
+        <td class="c mono">{{ loop.index }}</td>
+        <td><b>{{ row.item_name }}</b>{% if row.item_code != row.item_name %} <span class="muted mono" style="font-size:8.6px">{{ row.item_code }}</span>{% endif %}{% if row.get("sales_order") %}<div class="muted" style="font-size:8.6px">for {{ row.sales_order }}</div>{% endif %}</td>
+        <td class="mono">{{ row.get("gst_hsn_code") or "—" }}</td>
         <td class="r mono">{{ frappe.utils.flt(row.qty) }} {{ row.uom or "" }}</td>
         <td class="r mono">{{ frappe.utils.fmt_money(row.rate, currency=doc.currency) }}</td>
         <td class="r mono">{{ frappe.utils.fmt_money(row.amount, currency=doc.currency) }}</td>
@@ -510,31 +450,146 @@ SALES_ORDER = """{%- set ex = exporter_profile() -%}
     {% endfor %}
     </tbody>
   </table>
-
-  <table class="totals">
-    <tr><td class="muted">Net total</td><td class="r mono">{{ frappe.utils.fmt_money(doc.net_total, currency=doc.currency) }}</td></tr>
-    {% for tax in doc.taxes %}
-    <tr><td class="muted">{{ tax.description }}{% if tax.rate %} @ {{ frappe.utils.flt(tax.rate) }}%{% endif %}</td><td class="r mono">{{ frappe.utils.fmt_money(tax.base_tax_amount_after_discount_amount or tax.tax_amount, currency=doc.currency) }}</td></tr>
-    {% endfor %}
-    <tr class="grand"><td>Grand total</td><td class="r mono">{{ frappe.utils.fmt_money(doc.grand_total, currency=doc.currency) }}</td></tr>
-    <tr><td colspan="2" class="muted" style="font-size:10.5px">{{ frappe.utils.money_in_words(doc.grand_total, doc.currency) }}</td></tr>
-  </table>
-
-  {% if doc.terms %}
-  <div class="terms">
-    <div class="lbl">Terms &amp; conditions{% if doc.tc_name %} · {{ doc.tc_name }}{% endif %}</div>{{ doc.terms | striptags }}
-  </div>
-  {% endif %}
-
-  <div class="foot">
-    <div class="muted" style="font-size:10.5px">This sales order is system generated by ExportFlow.</div>
-    <div>
-      <div class="muted" style="font-size:10.5px">For {{ ex.company_name }}</div>
-      <div class="sig">{% if ex.signatory_name %}{{ ex.signatory_name }}{% if ex.signatory_designation %} · {{ ex.signatory_designation }}{% endif %}<br>{% endif %}Authorised signatory</div>
-    </div>
-  </div>
-</div>
 """
+
+EFX_TXN_TOTALS = """
+  <table>
+    <tr>
+      <td style="width:55%;border-right:0.7px solid #b9bec8;vertical-align:bottom">
+        <div class="words"><span class="lbl">Amount in words</span>{{ frappe.utils.money_in_words(doc.grand_total, doc.currency) }}</div>
+      </td>
+      <td>
+        <table class="tot">
+          <tr><td>Net total</td><td class="r mono">{{ frappe.utils.fmt_money(doc.net_total, currency=doc.currency) }}</td></tr>
+          {% for tax in doc.taxes %}<tr><td>{{ tax.description }}{% if tax.rate %} @ {{ frappe.utils.flt(tax.rate) }}%{% endif %}</td><td class="r mono">{{ frappe.utils.fmt_money(tax.base_tax_amount_after_discount_amount or tax.tax_amount, currency=doc.currency) }}</td></tr>{% endfor %}
+          <tr class="g"><td>Grand total</td><td class="r mono">{{ frappe.utils.fmt_money(doc.grand_total, currency=doc.currency) }}</td></tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+"""
+
+_TERMS = """
+  {% if doc.terms %}<div class="gd" style="border-top:0.7px solid #b9bec8;white-space:pre-wrap;font-size:9.6px"><span class="lbl">Terms &amp; conditions{% if doc.tc_name %} &middot; {{ doc.tc_name }}{% endif %}</span>{{ doc.terms | striptags }}</div>{% endif %}
+"""
+
+_SYS_GEN = '<span class="muted" style="font-size:8.6px">System generated by ExportFlow.</span>'
+
+
+SALES_ORDER = (
+	'{%- set ex = exporter_profile() -%}\n'
+	'{%- set cust_addr = party_address("Customer", doc.customer) -%}\n'
+	'{%- set dest = frappe.db.get_value("Customer", doc.customer, "destination_country") -%}\n'
+	+ EFX_CSS + """
+<div class="efx"><div class="doc">
+  <div class="title">Sales Order<small>Export order confirmation{% if doc.docstatus == 0 %} &middot; DRAFT{% endif %}</small></div>
+  <table class="grid">
+    <tr class="seam">
+      <td style="width:58%"><span class="lbl">Exporter / Seller</span>{% if ex.logo %}<img class="logo" src="{{ ex.logo|e }}">{% endif %}<b>{{ ex.company_name }}</b>{% if ex.address %}<div class="addr muted">{{ ex.address|e }}</div>{% endif %}<div style="margin-top:3px">{% if ex.iec %}IEC <span class="mono">{{ ex.iec }}</span>{% endif %}{% if ex.gstin %} &nbsp; GSTIN <span class="mono">{{ ex.gstin }}</span>{% endif %}</div></td>
+      <td>
+        <table style="width:100%">
+          <tr><td class="lbl" style="border:0;padding:0 0 1px">Order no &amp; date</td></tr>
+          <tr><td style="border:0;padding:0 0 5px"><b class="mono">{{ doc.name }}</b> &middot; {{ frappe.utils.formatdate(doc.transaction_date, "dd MMM yyyy") }}</td></tr>
+          {% if doc.delivery_date %}<tr><td class="lbl" style="border:0;padding:0 0 1px">Delivery by</td></tr><tr><td style="border:0;padding:0">{{ frappe.utils.formatdate(doc.delivery_date, "dd MMM yyyy") }}</td></tr>{% endif %}
+        </table>
+      </td>
+    </tr>
+    <tr class="seam">
+      <td><span class="lbl">Customer / Buyer</span><b>{{ doc.customer_name or doc.customer }}</b>{% if cust_addr %}<div class="addr muted">{{ cust_addr|e }}</div>{% endif %}{% if dest %}<div class="muted">Country of final destination: {{ dest }}</div>{% endif %}</td>
+      <td>
+        <table style="width:100%">
+          <tr><td class="lbl" style="border:0;padding:0 0 1px">Currency / incoterm</td></tr>
+          <tr><td style="border:0;padding:0 0 5px"><span class="mono">{{ doc.currency }}</span>{% if doc.incoterm %} &middot; {{ doc.incoterm }}{% if doc.named_place %} ({{ doc.named_place }}){% endif %}{% endif %}</td></tr>
+          {% if doc.po_no %}<tr><td class="lbl" style="border:0;padding:0 0 1px">Buyer's ref</td></tr><tr><td style="border:0;padding:0 0 5px"><span class="mono">{{ doc.po_no }}</span></td></tr>{% endif %}
+          {% if doc.payment_terms_template %}<tr><td class="lbl" style="border:0;padding:0 0 1px">Payment terms</td></tr><tr><td style="border:0;padding:0">{{ doc.payment_terms_template }}</td></tr>{% endif %}
+        </table>
+      </td>
+    </tr>
+  </table>
+""" + EFX_TXN_LINES + EFX_TXN_TOTALS + _TERMS + _efx_txn_sign(_SYS_GEN) + """
+</div></div>
+"""
+)
+
+
+PURCHASE_ORDER = (
+	'{%- set ex = exporter_profile() -%}\n'
+	'{%- set sup_addr = party_address("Supplier", doc.supplier) -%}\n'
+	'{%- set sos = doc.items | map(attribute="sales_order") | select | unique | list -%}\n'
+	+ EFX_CSS + """
+<div class="efx"><div class="doc">
+  <div class="title">Purchase Order<small>{% if doc.merchant_export_scheme %}Merchant export &mdash; concessional 0.1% GST (Notification 41/2017-IGST(R)){% else %}Procurement order{% endif %}{% if doc.docstatus == 0 %} &middot; DRAFT{% endif %}</small></div>
+  <table class="grid">
+    <tr class="seam">
+      <td style="width:58%"><span class="lbl">Buyer</span>{% if ex.logo %}<img class="logo" src="{{ ex.logo|e }}">{% endif %}<b>{{ ex.company_name }}</b>{% if ex.address %}<div class="addr muted">{{ ex.address|e }}</div>{% endif %}<div style="margin-top:3px">{% if ex.gstin %}GSTIN <span class="mono">{{ ex.gstin }}</span>{% endif %}{% if ex.iec %} &nbsp; IEC <span class="mono">{{ ex.iec }}</span>{% endif %}</div></td>
+      <td>
+        <table style="width:100%">
+          <tr><td class="lbl" style="border:0;padding:0 0 1px">PO no &amp; date</td></tr>
+          <tr><td style="border:0;padding:0 0 5px"><b class="mono">{{ doc.name }}</b> &middot; {{ frappe.utils.formatdate(doc.transaction_date, "dd MMM yyyy") }}</td></tr>
+          {% if doc.schedule_date %}<tr><td class="lbl" style="border:0;padding:0 0 1px">Required by</td></tr><tr><td style="border:0;padding:0">{{ frappe.utils.formatdate(doc.schedule_date, "dd MMM yyyy") }}</td></tr>{% endif %}
+        </table>
+      </td>
+    </tr>
+    <tr class="seam">
+      <td><span class="lbl">Supplier</span><b>{{ doc.supplier_name }}</b>{% if sup_addr %}<div class="addr muted">{{ sup_addr|e }}</div>{% endif %}{% if doc.get("supplier_gstin") %}<div>GSTIN <span class="mono">{{ doc.supplier_gstin }}</span></div>{% endif %}</td>
+      <td><span class="lbl">Delivery</span>{% if sos %}Against sales order{{ "s" if sos|length > 1 else "" }} <span class="mono">{{ sos|join(", ") }}</span> &mdash; drop-ship direct to the port of shipment.{% else %}As advised.{% endif %}</td>
+    </tr>
+  </table>
+""" + EFX_TXN_LINES + EFX_TXN_TOTALS + _TERMS + _efx_txn_sign(_SYS_GEN) + """
+</div></div>
+"""
+)
+
+
+PRO_FORMA = (
+	'{%- set ex = exporter_profile() -%}\n'
+	'{%- set so = frappe.get_doc("Sales Order", doc.sales_order) -%}\n'
+	'{%- set bank = frappe.get_doc("Bank Account", doc.bank_account) if doc.bank_account else None -%}\n'
+	'{%- set rows = doc.items if doc.items else so.get("items") -%}\n'
+	'{%- set cust_addr = party_address("Customer", doc.customer) -%}\n'
+	+ EFX_CSS + """
+<div class="efx"><div class="doc">
+  <div class="title">Pro Forma Invoice<small>Not a tax invoice &mdash; issued for advance payment / LC establishment</small></div>
+  <table class="grid">
+    <tr class="seam">
+      <td style="width:58%"><span class="lbl">Exporter</span>{% if ex.logo %}<img class="logo" src="{{ ex.logo|e }}">{% endif %}<b>{{ ex.company_name }}</b>{% if ex.address %}<div class="addr muted">{{ ex.address|e }}</div>{% endif %}<div style="margin-top:3px">{% if ex.iec %}IEC <span class="mono">{{ ex.iec }}</span>{% endif %}{% if ex.gstin %} &nbsp; GSTIN <span class="mono">{{ ex.gstin }}</span>{% endif %}</div></td>
+      <td>
+        <table style="width:100%">
+          <tr><td class="lbl" style="border:0;padding:0 0 1px">PFI no &amp; date</td></tr>
+          <tr><td style="border:0;padding:0 0 5px"><b class="mono">{{ doc.name }}</b> &middot; {{ frappe.utils.formatdate(doc.pfi_date, "dd MMM yyyy") }}</td></tr>
+          {% if doc.stage_description %}<tr><td style="border:0;padding:0" class="muted">{{ doc.stage_description }}</td></tr>{% endif %}
+        </table>
+      </td>
+    </tr>
+    <tr class="seam">
+      <td><span class="lbl">Buyer</span><b>{{ doc.customer_name or doc.customer }}</b>{% if cust_addr %}<div class="addr muted">{{ cust_addr|e }}</div>{% endif %}</td>
+      <td>
+        <table style="width:100%">
+          <tr><td class="lbl" style="border:0;padding:0 0 1px">Sales order</td></tr>
+          <tr><td style="border:0;padding:0 0 5px"><span class="mono">{{ doc.sales_order }}</span></td></tr>
+          {% if so.incoterm %}<tr><td class="lbl" style="border:0;padding:0 0 1px">Incoterm</td></tr><tr><td style="border:0;padding:0 0 5px">{{ so.incoterm }}{% if so.named_place %} &middot; {{ so.named_place }}{% endif %}</td></tr>{% endif %}
+          {% if doc.expected_payment_method %}<tr><td class="lbl" style="border:0;padding:0 0 1px">Payment by</td></tr><tr><td style="border:0;padding:0">{{ doc.expected_payment_method }}</td></tr>{% endif %}
+        </table>
+      </td>
+    </tr>
+  </table>
+  {% if doc.basis == "Percentage of SO" %}<div class="gd muted" style="border-bottom:0.7px solid #b9bec8">Stage value: {{ doc.get_formatted("percentage") }}% of sales order value {{ frappe.utils.fmt_money(so.grand_total, currency=doc.currency) }}</div>{% endif %}
+  <table class="lines">
+    <thead><tr><th style="width:22px">Sr</th><th>Description</th><th class="r" style="width:80px">Qty</th><th class="r" style="width:90px">Rate</th><th class="r" style="width:106px">Amount ({{ doc.currency }})</th></tr></thead>
+    <tbody>
+    {% if rows %}{% for row in rows %}<tr><td class="c mono">{{ loop.index }}</td><td><b>{{ row.item_name or row.item_code }}</b></td><td class="r mono">{{ frappe.utils.flt(row.qty) }} {{ row.uom or "" }}</td><td class="r mono">{{ frappe.utils.fmt_money(row.rate, currency=doc.currency) }}</td><td class="r mono">{{ frappe.utils.fmt_money(row.amount, currency=doc.currency) }}</td></tr>{% endfor %}{% else %}<tr><td class="c mono">1</td><td>As per sales order <span class="mono">{{ doc.sales_order }}</span></td><td class="r">&mdash;</td><td class="r">&mdash;</td><td class="r mono">{{ frappe.utils.fmt_money(doc.amount, currency=doc.currency) }}</td></tr>{% endif %}
+    </tbody>
+  </table>
+  <table>
+    <tr>
+      <td style="width:55%;border-right:0.7px solid #b9bec8;vertical-align:bottom"><div class="words"><span class="lbl">Amount in words</span>{{ frappe.utils.money_in_words(doc.amount, doc.currency) }}</div></td>
+      <td><table class="tot"><tr class="g"><td>Amount payable</td><td class="r mono">{{ frappe.utils.fmt_money(doc.amount, currency=doc.currency) }}</td></tr></table></td>
+    </tr>
+  </table>
+""" + _efx_txn_sign('{% if bank %}<span class="lbl">Remit to</span><b>{{ bank.account_name }}</b>{% if bank.bank %} &middot; {{ bank.bank }}{% endif %}{% if bank.bank_account_no %}<div>A/c <span class="mono">{{ bank.bank_account_no }}</span></div>{% endif %}{% if bank.iban %}<div>IBAN <span class="mono">{{ bank.iban }}</span></div>{% endif %}{% if bank.get("branch_code") %}<div>SWIFT/IFSC <span class="mono">{{ bank.branch_code }}</span></div>{% endif %}{% endif %}{% if doc.terms %}<div class="muted" style="white-space:pre-wrap;margin-top:6px">{{ doc.terms | e }}</div>{% endif %}') + """
+</div></div>
+"""
+)
 
 
 def write_format(
@@ -601,9 +656,14 @@ if __name__ == "__main__":
 	write_format("exportflow_bill_of_exchange", "ExportFlow Bill of Exchange", BILL_OF_EXCHANGE, modified=REDESIGN)
 	write_format("exportflow_covering_schedule", "ExportFlow Covering Schedule", COVERING_SCHEDULE, modified=REDESIGN)
 	write_format(
-		"exportflow_sales_order",
-		"ExportFlow Sales Order",
-		SALES_ORDER,
-		doc_type="Sales Order",
-		modified="2026-06-14 14:00:00.000000",
+		"exportflow_sales_order", "ExportFlow Sales Order", SALES_ORDER,
+		doc_type="Sales Order", modified=REDESIGN,
+	)
+	write_format(
+		"exportflow_purchase_order", "ExportFlow Purchase Order", PURCHASE_ORDER,
+		doc_type="Purchase Order", modified=REDESIGN,
+	)
+	write_format(
+		"pro_forma_invoice", "Pro Forma Invoice", PRO_FORMA,
+		doc_type="Pro Forma Invoice", modified=REDESIGN,
 	)
