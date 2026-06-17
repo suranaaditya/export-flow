@@ -15,6 +15,7 @@ import {
 	docCkTone,
 	docIsBlockingNow,
 	docIsDone,
+	isGeneratableDoc,
 	parseServerError,
 	type DocInstanceRow,
 	type DocStatus,
@@ -93,10 +94,35 @@ export function DocumentChecklist({ shipment }: { shipment: string }) {
 	);
 	const [open, setOpen] = useState<DocInstanceRow | null>(null);
 	const [adding, setAdding] = useState(false);
+	const { call: generate } = useFrappePostCall<{
+		message: { file_url: string; status: DocStatus; document_number: string | null };
+	}>(API.generateDocument);
+	const [genName, setGenName] = useState<string | null>(null);
+	const [genErr, setGenErr] = useState<{ name: string; msg: string } | null>(null);
 
 	const docs = data?.message.documents ?? [];
 	const types = data?.message.document_types ?? [];
 	const done = docs.filter(docIsDone).length;
+	// origin + print format decide whether ExportFlow can produce the PDF itself
+	const typeMap = new Map(types.map((t) => [t.name, t] as [string, DocTypeOption]));
+
+	async function onGenerateRow(d: DocInstanceRow) {
+		setGenErr(null);
+		setGenName(d.name);
+		try {
+			await generate({ name: d.name });
+			await mutate();
+		} catch (e) {
+			setGenErr({ name: d.name, msg: parseServerError(e) });
+		} finally {
+			setGenName(null);
+		}
+	}
+
+	function openDoc(d: DocInstanceRow) {
+		setGenErr(null);
+		setOpen(d);
+	}
 
 	const grouped = useMemo(
 		() =>
@@ -150,52 +176,78 @@ export function DocumentChecklist({ shipment }: { shipment: string }) {
 					{grouped.map((g) => (
 						<div key={g.label}>
 							<div className="docgrp">{g.label}</div>
-							{g.rows.map((d) => (
-								<div
-									className="drow"
-									key={d.name}
-									style={{ cursor: 'pointer' }}
-									role="button"
-									tabIndex={0}
-									onClick={() => setOpen(d)}
-									onKeyDown={(e) => {
-										if (e.key === 'Enter' || e.key === ' ') {
-											e.preventDefault();
-											setOpen(d);
-										}
-									}}
-								>
-									<CkIcon doc={d} />
-									<div className="nm">
-										<div className="t1">{d.document_type}</div>
-										<div className="t2">{rowDetail(d)}</div>
-									</div>
-									<span className="who">{d.responsible_party ?? '—'}</span>
-									{d.file ? (
-										<a
-											className="act"
-											href={d.file}
-											target="_blank"
-											rel="noreferrer"
-											onClick={(e) => e.stopPropagation()}
-										>
-											View PDF
-										</a>
-									) : (
-										<a
-											className="act"
-											href="#"
-											onClick={(e) => {
+							{g.rows.map((d) => {
+								const canGen = isGeneratableDoc(typeMap.get(d.document_type));
+								return (
+									<div
+										className="drow"
+										key={d.name}
+										style={{ cursor: 'pointer' }}
+										role="button"
+										tabIndex={0}
+										onClick={() => openDoc(d)}
+										onKeyDown={(e) => {
+											if (e.key === 'Enter' || e.key === ' ') {
 												e.preventDefault();
-												e.stopPropagation();
-												setOpen(d);
-											}}
+												openDoc(d);
+											}
+										}}
+									>
+										<CkIcon doc={d} />
+										<div className="nm">
+											<div className="t1">{d.document_type}</div>
+											<div className="t2">
+												{rowDetail(d)}
+												{genErr?.name === d.name && (
+													<span style={{ color: 'var(--err)', fontWeight: 500 }}>
+														{' · '}
+														{genErr.msg}
+													</span>
+												)}
+											</div>
+										</div>
+										<span className="who">{d.responsible_party ?? '—'}</span>
+										<span
+											className="dacts"
+											onClick={(e) => e.stopPropagation()}
+											onKeyDown={(e) => e.stopPropagation()}
 										>
-											Update
-										</a>
-									)}
-								</div>
-							))}
+											{d.file && (
+												<a className="act" href={d.file} target="_blank" rel="noreferrer">
+													View PDF
+												</a>
+											)}
+											{canGen ? (
+												<button
+													type="button"
+													className="act"
+													disabled={genName === d.name}
+													onClick={() => void onGenerateRow(d)}
+												>
+													{genName === d.name
+														? 'Generating…'
+														: d.file
+															? 'Regenerate'
+															: 'Generate PDF'}
+												</button>
+											) : (
+												!d.file && (
+													<a
+														className="act"
+														href="#"
+														onClick={(e) => {
+															e.preventDefault();
+															openDoc(d);
+														}}
+													>
+														Update
+													</a>
+												)
+											)}
+										</span>
+									</div>
+								);
+							})}
 						</div>
 					))}
 				</div>
@@ -243,7 +295,7 @@ export function DocumentModal({
 	onChanged?: () => void;
 }) {
 	const type = types.find((t) => t.name === doc.document_type);
-	const canGenerate = type?.origin === 'Generated' && !!type?.default_print_format;
+	const canGenerate = isGeneratableDoc(type);
 	// LC presentation / GST deadlines stamp this automatically on engine rows
 	const dueLocked = doc.source !== 'Manual';
 

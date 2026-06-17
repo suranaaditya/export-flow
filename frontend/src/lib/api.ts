@@ -828,6 +828,19 @@ export interface DocTypeOption {
 	origin: 'Generated' | 'Tracked';
 	responsible_party: string | null;
 	default_print_format: string | null;
+	format_doc_type: string | null;
+}
+
+/** ExportFlow can produce the PDF from the checklist only when the type is
+ *  Generated AND its print format targets Document Instance — the Pro Forma
+ *  Invoice format targets its own doctype and is produced from the PFI screen. */
+export function isGeneratableDoc(t: DocTypeOption | undefined): boolean {
+	return (
+		!!t &&
+		t.origin === 'Generated' &&
+		!!t.default_print_format &&
+		t.format_doc_type === 'Document Instance'
+	);
 }
 
 export interface ShipmentDocumentsData {

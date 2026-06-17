@@ -1824,6 +1824,33 @@ INSTANCE_LIST_FIELDS = [
 ]
 
 
+def _doc_type_options():
+	"""Document Type catalog for the pickers + generate gating. format_doc_type
+	is the target doctype of the type's print format — only Document-Instance
+	formats can be generated from the checklist (the Pro Forma Invoice format
+	targets its own doctype and is produced from the PFI screen instead)."""
+	types = frappe.get_all(
+		"Document Type",
+		fields=["name", "category", "origin", "responsible_party", "default_print_format"],
+		order_by="category asc, name asc",
+		limit_page_length=300,
+	)
+	formats = list({t.default_print_format for t in types if t.default_print_format})
+	fmt_dt = (
+		{
+			r.name: r.doc_type
+			for r in frappe.get_all(
+				"Print Format", filters={"name": ["in", formats]}, fields=["name", "doc_type"]
+			)
+		}
+		if formats
+		else {}
+	)
+	for t in types:
+		t["format_doc_type"] = fmt_dt.get(t.default_print_format)
+	return types
+
+
 @frappe.whitelist()
 def get_shipment_documents(shipment: str) -> dict:
 	"""The shipment checklist card: every instance plus the type catalog for
@@ -1838,12 +1865,7 @@ def get_shipment_documents(shipment: str) -> dict:
 			order_by="creation asc",
 			limit_page_length=300,
 		),
-		"document_types": frappe.get_all(
-			"Document Type",
-			fields=["name", "category", "origin", "responsible_party", "default_print_format"],
-			order_by="category asc, name asc",
-			limit_page_length=300,
-		),
+		"document_types": _doc_type_options(),
 	}
 
 
@@ -1859,12 +1881,7 @@ def get_documents_workspace() -> dict:
 			order_by="modified desc",
 			limit_page_length=500,
 		),
-		"document_types": frappe.get_all(
-			"Document Type",
-			fields=["name", "category", "origin", "responsible_party", "default_print_format"],
-			order_by="category asc, name asc",
-			limit_page_length=300,
-		),
+		"document_types": _doc_type_options(),
 	}
 
 
