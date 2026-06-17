@@ -105,7 +105,8 @@ EFX_CSS = """
   .efx .title small { display: block; font-size: 8px; letter-spacing: .14em; font-weight: 500; color: #6b7280; margin-top: 2px; }
   .efx table { width: 100%; border-collapse: collapse; }
   .efx td, .efx th { vertical-align: top; }
-  .efx .grid td { border: 0.7px solid #b9bec8; padding: 5px 9px; }
+  .efx .grid td { border: 0.7px solid #b9bec8; padding: 3px 9px; }
+  .efx .grid td table td { padding-top: 0 !important; padding-bottom: 2px !important; line-height: 1.3 !important; }
   .efx .seam td { border-bottom: 1.4px solid #16181d; }
   .efx .lbl { font-size: 7.6px; text-transform: uppercase; letter-spacing: .06em; color: #8a909c; font-weight: 600; margin-bottom: 2px; display: block; }
   .efx b { font-weight: 700; }
@@ -169,7 +170,7 @@ LH_EX = _letterhead("ex.logo", "ex.company_name", "ex.letterhead_addr", "ex.lett
 def _efx_head(title, subtitle, show_money_meta=True):
 	meta = """
         {% if ctx.buyer_order_no %}<tr><td class="lbl" style="border:0;padding:0 0 1px">Buyer's order no &amp; date</td></tr>
-        <tr><td style="border:0;padding:0 0 5px"><span class="mono">{{ ctx.buyer_order_no }}</span>{% if ctx.buyer_order_date %} &middot; {{ frappe.utils.formatdate(ctx.buyer_order_date, "dd MMM yyyy") }}{% endif %}</td></tr>{% endif %}
+        <tr><td style="border:0;padding:0 0 3px"><span class="mono">{{ ctx.buyer_order_no }}</span>{% if ctx.buyer_order_date %} &middot; {{ frappe.utils.formatdate(ctx.buyer_order_date, "dd MMM yyyy") }}{% endif %}</td></tr>{% endif %}
         {% if ctx.ad_code %}<tr><td class="lbl" style="border:0;padding:0 0 1px">AD code</td></tr><tr><td style="border:0;padding:0"><span class="mono">{{ ctx.ad_code }}</span>{% if ctx.shipment.port_of_loading %} &middot; {{ ctx.shipment.port_of_loading }}{% endif %}</td></tr>{% endif %}
 """
 	return ('{%- set ctx = document_print_context(doc.name) -%}\n' + EFX_CSS + """
@@ -186,7 +187,7 @@ def _efx_head(title, subtitle, show_money_meta=True):
       <td>
         <table style="width:100%">
           <tr><td class="lbl" style="border:0;padding:0 0 1px">Invoice no &amp; date</td></tr>
-          <tr><td style="border:0;padding:0 0 5px"><b class="mono">{{ doc.document_number or doc.name }}</b>{% if doc.document_date %} &middot; {{ frappe.utils.formatdate(doc.document_date, "dd MMM yyyy") }}{% endif %}</td></tr>
+          <tr><td style="border:0;padding:0 0 3px"><b class="mono">{{ doc.document_number or doc.name }}</b>{% if doc.document_date %} &middot; {{ frappe.utils.formatdate(doc.document_date, "dd MMM yyyy") }}{% endif %}</td></tr>
 """ + meta + """
         </table>
       </td>
@@ -283,7 +284,7 @@ COMMERCIAL_INVOICE = _efx_head("Commercial Invoice", "Customs &amp; bank negotia
     <tr>
       <td style="width:58%">
         <span class="lbl">Bank details for remittance</span>
-        {% if ctx.has_bank %}<table style="width:100%;font-size:9.4px">
+        {% if ctx.has_bank %}<table style="width:100%;font-size:9.4px;line-height:1.2">
           {% if ctx.bank.name %}<tr><td style="border:0;padding:1px 8px 1px 0;width:88px" class="muted">Bank</td><td style="border:0;padding:1px 0">{{ ctx.bank.name }}{% if ctx.bank.branch %}, {{ ctx.bank.branch | e }}{% endif %}</td></tr>{% endif %}
           {% if ctx.bank.account_no %}<tr><td style="border:0;padding:1px 8px 1px 0" class="muted">Account no</td><td style="border:0;padding:1px 0"><span class="mono">{{ ctx.bank.account_no }}</span></td></tr>{% endif %}
           {% if ctx.bank.ifsc or ctx.bank.swift %}<tr><td style="border:0;padding:1px 8px 1px 0" class="muted">IFSC / SWIFT</td><td style="border:0;padding:1px 0"><span class="mono">{{ ctx.bank.ifsc or "—" }}</span> / <span class="mono">{{ ctx.bank.swift or "—" }}</span></td></tr>{% endif %}
@@ -591,7 +592,7 @@ SALES_ORDER = (
       <td>
         <table style="width:100%">
           <tr><td class="lbl" style="border:0;padding:0 0 1px">Order no &amp; date</td></tr>
-          <tr><td style="border:0;padding:0 0 5px"><b class="mono">{{ doc.name }}</b> &middot; {{ frappe.utils.formatdate(doc.transaction_date, "dd MMM yyyy") }}</td></tr>
+          <tr><td style="border:0;padding:0 0 3px"><b class="mono">{{ doc.name }}</b> &middot; {{ frappe.utils.formatdate(doc.transaction_date, "dd MMM yyyy") }}</td></tr>
           {% if doc.delivery_date %}<tr><td class="lbl" style="border:0;padding:0 0 1px">Delivery by</td></tr><tr><td style="border:0;padding:0">{{ frappe.utils.formatdate(doc.delivery_date, "dd MMM yyyy") }}</td></tr>{% endif %}
         </table>
       </td>
@@ -601,8 +602,8 @@ SALES_ORDER = (
       <td>
         <table style="width:100%">
           <tr><td class="lbl" style="border:0;padding:0 0 1px">Currency / incoterm</td></tr>
-          <tr><td style="border:0;padding:0 0 5px"><span class="mono">{{ doc.currency }}</span>{% if doc.incoterm %} &middot; {{ doc.incoterm }}{% if doc.named_place %} ({{ doc.named_place }}){% endif %}{% endif %}</td></tr>
-          {% if doc.po_no %}<tr><td class="lbl" style="border:0;padding:0 0 1px">Buyer's ref</td></tr><tr><td style="border:0;padding:0 0 5px"><span class="mono">{{ doc.po_no }}</span></td></tr>{% endif %}
+          <tr><td style="border:0;padding:0 0 3px"><span class="mono">{{ doc.currency }}</span>{% if doc.incoterm %} &middot; {{ doc.incoterm }}{% if doc.named_place %} ({{ doc.named_place }}){% endif %}{% endif %}</td></tr>
+          {% if doc.po_no %}<tr><td class="lbl" style="border:0;padding:0 0 1px">Buyer's ref</td></tr><tr><td style="border:0;padding:0 0 3px"><span class="mono">{{ doc.po_no }}</span></td></tr>{% endif %}
           {% if doc.payment_terms_template %}<tr><td class="lbl" style="border:0;padding:0 0 1px">Payment terms</td></tr><tr><td style="border:0;padding:0">{{ doc.payment_terms_template }}</td></tr>{% endif %}
         </table>
       </td>
@@ -627,7 +628,7 @@ PURCHASE_ORDER = (
       <td>
         <table style="width:100%">
           <tr><td class="lbl" style="border:0;padding:0 0 1px">PO no &amp; date</td></tr>
-          <tr><td style="border:0;padding:0 0 5px"><b class="mono">{{ doc.name }}</b> &middot; {{ frappe.utils.formatdate(doc.transaction_date, "dd MMM yyyy") }}</td></tr>
+          <tr><td style="border:0;padding:0 0 3px"><b class="mono">{{ doc.name }}</b> &middot; {{ frappe.utils.formatdate(doc.transaction_date, "dd MMM yyyy") }}</td></tr>
           {% if doc.schedule_date %}<tr><td class="lbl" style="border:0;padding:0 0 1px">Required by</td></tr><tr><td style="border:0;padding:0">{{ frappe.utils.formatdate(doc.schedule_date, "dd MMM yyyy") }}</td></tr>{% endif %}
         </table>
       </td>
@@ -658,7 +659,7 @@ PRO_FORMA = (
       <td>
         <table style="width:100%">
           <tr><td class="lbl" style="border:0;padding:0 0 1px">PFI no &amp; date</td></tr>
-          <tr><td style="border:0;padding:0 0 5px"><b class="mono">{{ doc.name }}</b> &middot; {{ frappe.utils.formatdate(doc.pfi_date, "dd MMM yyyy") }}</td></tr>
+          <tr><td style="border:0;padding:0 0 3px"><b class="mono">{{ doc.name }}</b> &middot; {{ frappe.utils.formatdate(doc.pfi_date, "dd MMM yyyy") }}</td></tr>
           {% if doc.stage_description %}<tr><td style="border:0;padding:0" class="muted">{{ doc.stage_description }}</td></tr>{% endif %}
         </table>
       </td>
@@ -668,8 +669,8 @@ PRO_FORMA = (
       <td>
         <table style="width:100%">
           <tr><td class="lbl" style="border:0;padding:0 0 1px">Sales order</td></tr>
-          <tr><td style="border:0;padding:0 0 5px"><span class="mono">{{ doc.sales_order }}</span></td></tr>
-          {% if so.incoterm %}<tr><td class="lbl" style="border:0;padding:0 0 1px">Incoterm</td></tr><tr><td style="border:0;padding:0 0 5px">{{ so.incoterm }}{% if so.named_place %} &middot; {{ so.named_place }}{% endif %}</td></tr>{% endif %}
+          <tr><td style="border:0;padding:0 0 3px"><span class="mono">{{ doc.sales_order }}</span></td></tr>
+          {% if so.incoterm %}<tr><td class="lbl" style="border:0;padding:0 0 1px">Incoterm</td></tr><tr><td style="border:0;padding:0 0 3px">{{ so.incoterm }}{% if so.named_place %} &middot; {{ so.named_place }}{% endif %}</td></tr>{% endif %}
           {% if doc.expected_payment_method %}<tr><td class="lbl" style="border:0;padding:0 0 1px">Payment by</td></tr><tr><td style="border:0;padding:0">{{ doc.expected_payment_method }}</td></tr>{% endif %}
         </table>
       </td>
@@ -716,10 +717,10 @@ def write_format(
 		"html": html,
 		"idx": 0,
 		"line_breaks": 0,
-		"margin_bottom": 15.0,
+		"margin_bottom": 9.0,
 		"margin_left": 15.0,
 		"margin_right": 15.0,
-		"margin_top": 15.0,
+		"margin_top": 7.0,
 		# bump on every edit — frappe only re-syncs a standard print format
 		# when the file's modified stamp is newer than the DB record
 		"modified": modified,
@@ -745,7 +746,7 @@ def write_format(
 if __name__ == "__main__":
 	# every format shares the bordered EFX style + the letterhead banner — one stamp;
 	# bump it on any edit so migrate re-syncs the standard print formats
-	REDESIGN = "2026-06-17 18:00:00.000000"
+	REDESIGN = "2026-06-17 21:00:00.000000"
 	write_format(
 		"exportflow_commercial_invoice", "ExportFlow Commercial Invoice", COMMERCIAL_INVOICE, modified=REDESIGN
 	)
