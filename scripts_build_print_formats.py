@@ -121,14 +121,42 @@ EFX_CSS = """
   .efx table.lines tfoot td { border: 0.7px solid #b9bec8; border-top: 1.4px solid #16181d; padding: 6px 7px; font-weight: 700; }
   .efx .gd { padding: 6px 9px; font-size: 9.6px; }
   .efx .gd b { letter-spacing: .02em; }
-  .efx .words { font-size: 9.6px; padding: 6px 9px; border-top: 0.7px solid #b9bec8; }
+  .efx .words { font-size: 9.6px; padding: 6px 9px; }
   .efx .tot td { padding: 3px 9px; font-size: 10px; }
   .efx .tot .g td { font-weight: 700; font-size: 11.5px; border-top: 1.4px solid #16181d; }
   .efx .sigbox { height: 70px; position: relative; }
   .efx .sigline { position: absolute; bottom: 6px; left: 9px; right: 9px; border-top: 0.7px solid #16181d; padding-top: 3px; font-size: 8.4px; }
   .efx .logo { max-height: 38px; max-width: 168px; margin-bottom: 5px; display: block; }
+  .efx table.lh { width: 100%; border-collapse: collapse; border-bottom: 2px solid #16181d; margin-bottom: 11px; }
+  .efx table.lh td { vertical-align: bottom; padding: 1px 3px 9px; }
+  .efx table.lh td.lh-logo { width: 232px; }
+  .efx table.lh img { max-height: 60px; max-width: 222px; display: block; }
+  .efx td.lh-id { text-align: right; font-size: 9.2px; color: #3b4250; line-height: 1.5; }
+  .efx td.lh-id .nm { font-size: 14px; font-weight: 700; color: #16181d; letter-spacing: .01em; margin-bottom: 1px; }
+  .efx td.lh-id .addr { white-space: pre-wrap; }
 </style>
 """
+
+# Letterhead banner — logo on the left, the exporter's branded identity on the
+# right, a rule below: the client's own letterhead style. Sits above the bordered
+# document box on every format. Two variants because the shipment formats carry
+# ctx.* (document_print_context) while the SO / PO / PFI carry ex.* (exporter_profile).
+def _letterhead(logo, name, addr):
+	t = """
+  <table class="lh"><tr>
+    <td class="lh-logo">{% if @LOGO@ %}<img src="{{ @LOGO@ | e }}">{% endif %}</td>
+    <td class="lh-id">
+      <div class="nm">{{ @NAME@ }}</div>
+      {% if @ADDR@ %}<div class="addr">{{ @ADDR@ | e }}</div>{% endif %}
+    </td>
+  </tr></table>
+"""
+	return t.replace("@LOGO@", logo).replace("@NAME@", name).replace("@ADDR@", addr)
+
+
+LH_CTX = _letterhead("ctx.logo", "ctx.company_name", "ctx.exporter_address")
+LH_EX = _letterhead("ex.logo", "ex.company_name", "ex.address")
+
 
 # Shared top of the invoice / packing list: exporter + invoice meta, consignee /
 # buyer, origin / destination, route. Composed per format with its own title.
@@ -139,16 +167,14 @@ def _efx_head(title, subtitle, show_money_meta=True):
         {% if ctx.ad_code %}<tr><td class="lbl" style="border:0;padding:0 0 1px">AD code</td></tr><tr><td style="border:0;padding:0"><span class="mono">{{ ctx.ad_code }}</span>{% if ctx.shipment.port_of_loading %} &middot; {{ ctx.shipment.port_of_loading }}{% endif %}</td></tr>{% endif %}
 """
 	return ('{%- set ctx = document_print_context(doc.name) -%}\n' + EFX_CSS + """
-<div class="efx"><div class="doc">
+<div class="efx">""" + LH_CTX + """<div class="doc">
   <div class="title">""" + title + """<small>""" + subtitle + """</small></div>
 
   <table class="grid">
     <tr class="seam">
       <td style="width:58%">
         <span class="lbl">Exporter</span>
-        {% if ctx.logo %}<img class="logo" src="{{ ctx.logo | e }}">{% endif %}
         <b>{{ ctx.company_name }}</b>
-        {% if ctx.exporter_address %}<div class="addr muted">{{ ctx.exporter_address | e }}</div>{% endif %}
         <div style="margin-top:3px">{% if ctx.iec_number %}IEC <span class="mono">{{ ctx.iec_number }}</span>{% endif %}{% if ctx.gstin %} &nbsp; GSTIN <span class="mono">{{ ctx.gstin }}</span>{% endif %}</div>
       </td>
       <td>
@@ -222,7 +248,7 @@ COMMERCIAL_INVOICE = _efx_head("Commercial Invoice", "Customs &amp; bank negotia
   {% if ctx.currency %}
   <table>
     <tr>
-      <td style="width:55%;border-right:0.7px solid #b9bec8;vertical-align:top">
+      <td style="width:58%;border-right:0.7px solid #b9bec8;vertical-align:top">
         <div class="words"><span class="lbl">Amount in words</span>{{ ctx.grand_total_in_words }}</div>
         {% if ctx.taxable_value_inr %}<div class="gd" style="border-top:0.7px solid #b9bec8"><span class="lbl">Taxable value (INR)</span>{{ frappe.utils.fmt_money(ctx.taxable_value_inr, currency="INR") }} <span class="muted">@ {{ "%g"|format(ctx.shipment.inr_rate) }}/{{ ctx.currency }}</span> &nbsp;&middot;&nbsp; IGST @ {{ "%g"|format(ctx.igst_rate) }}% = {{ frappe.utils.fmt_money(ctx.igst_amount, currency="INR") }}</div>{% endif %}
       </td>
@@ -329,10 +355,10 @@ def _efx_letter(title, subtitle, body, sign_left=""):
 	free-prose body and the signatory band. Shared by the declaration / banking
 	documents that print from a shipment's Document Instance."""
 	return ('{%- set ctx = document_print_context(doc.name) -%}\n' + EFX_CSS + """
-<div class="efx"><div class="doc">
+<div class="efx">""" + LH_CTX + """<div class="doc">
   <div class="title">""" + title + """<small>""" + subtitle + """</small></div>
   <table class="grid"><tr class="seam">
-    <td style="width:60%"><span class="lbl">Exporter</span>{% if ctx.logo %}<img class="logo" src="{{ ctx.logo|e }}">{% endif %}<b>{{ ctx.company_name }}</b>{% if ctx.exporter_address %}<div class="addr muted">{{ ctx.exporter_address|e }}</div>{% endif %}<div style="margin-top:3px">{% if ctx.iec_number %}IEC <span class="mono">{{ ctx.iec_number }}</span>{% endif %}{% if ctx.gstin %} &nbsp; GSTIN <span class="mono">{{ ctx.gstin }}</span>{% endif %}</div></td>
+    <td style="width:58%"><span class="lbl">Exporter</span><b>{{ ctx.company_name }}</b><div style="margin-top:3px">{% if ctx.iec_number %}IEC <span class="mono">{{ ctx.iec_number }}</span>{% endif %}{% if ctx.gstin %} &nbsp; GSTIN <span class="mono">{{ ctx.gstin }}</span>{% endif %}</div></td>
     <td><span class="lbl">Reference</span><b class="mono">{{ doc.document_number or doc.name }}</b>{% if doc.document_date %}<div class="muted">Date {{ frappe.utils.formatdate(doc.document_date, "dd MMM yyyy") }}</div>{% endif %}{% if ctx.invoice_number %}<div class="muted" style="margin-top:3px">Against invoice <span class="mono">{{ ctx.invoice_number }}</span></div>{% endif %}</td>
   </tr></table>
 """ + body + _efx_sign(sign_left) + """
@@ -401,7 +427,7 @@ BILL_OF_EXCHANGE = _efx_letter(
   {% else %}<p class="muted" style="margin:0">Shipment lines are priced in more than one currency &mdash; issue this bill manually.</p>{% endif %}
   </div>
   <table class="grid" style="border-top:0.7px solid #b9bec8"><tr>
-    <td style="width:50%"><span class="lbl">To (drawee)</span><b>{{ ctx.lc.issuing_bank if ctx.lc and ctx.lc.issuing_bank else ctx.customer_name }}</b>{% if ctx.lc %}<div class="muted">For account of: {{ ctx.customer_name }}</div>{% endif %}</td>
+    <td style="width:58%"><span class="lbl">To (drawee)</span><b>{{ ctx.lc.issuing_bank if ctx.lc and ctx.lc.issuing_bank else ctx.customer_name }}</b>{% if ctx.lc %}<div class="muted">For account of: {{ ctx.customer_name }}</div>{% endif %}</td>
     <td><span class="lbl">Drawer</span><b>{{ ctx.company_name }}</b>{% if ctx.exporter_address %}<div class="addr muted">{{ ctx.exporter_address | e }}</div>{% endif %}</td>
   </tr></table>""",
 )
@@ -450,7 +476,7 @@ FORM_SDF = _efx_letter(
   <p style="margin:0"><b>3.</b> I/We am/are resident in India and have a place of business in India. &nbsp; <b>4.</b> I/We am/are not in the Caution List of the Reserve Bank of India.</p>
   </div>
   <table class="grid" style="border-top:1.4px solid #16181d"><tr>
-    <td style="width:55%"><span class="lbl">Name &amp; address of exporter</span><b>{{ ctx.company_name }}</b>{% if ctx.exporter_address %}<div class="addr muted">{{ ctx.exporter_address | e }}</div>{% endif %}{% if ctx.iec_number %}<div>IEC <span class="mono">{{ ctx.iec_number }}</span></div>{% endif %}</td>
+    <td style="width:58%"><span class="lbl">Name &amp; address of exporter</span><b>{{ ctx.company_name }}</b>{% if ctx.exporter_address %}<div class="addr muted">{{ ctx.exporter_address | e }}</div>{% endif %}{% if ctx.iec_number %}<div>IEC <span class="mono">{{ ctx.iec_number }}</span></div>{% endif %}</td>
     <td><span class="lbl">FOB value (INR)</span><b>{% if ctx.fob_value_inr %}{{ frappe.utils.fmt_money(ctx.fob_value_inr, currency="INR") }}{% else %}—{% endif %}</b>{% if ctx.ad_bank %}<div style="margin-top:5px"><span class="lbl">Authorised dealer bank</span>{{ ctx.ad_bank }}</div>{% endif %}</td>
   </tr></table>
   <div class="gd" style="border-top:0.7px solid #b9bec8"><span class="lbl">For Authorised Dealer's use</span><div style="height:50px"></div><div class="muted" style="font-size:8.4px">To be completed by the AD bank: uniform code number; date of negotiation / receipt for collection; currency &amp; amount realised; credit to Nostro / debit to NR-Rupee account; period of return reported to the Reserve Bank of India.</div></div>""",
@@ -525,7 +551,7 @@ EFX_TXN_LINES = """
 EFX_TXN_TOTALS = """
   <table>
     <tr>
-      <td style="width:55%;border-right:0.7px solid #b9bec8;vertical-align:bottom">
+      <td style="width:58%;border-right:0.7px solid #b9bec8;vertical-align:bottom">
         <div class="words"><span class="lbl">Amount in words</span>{{ frappe.utils.money_in_words(doc.grand_total, doc.currency) }}</div>
       </td>
       <td>
@@ -551,11 +577,11 @@ SALES_ORDER = (
 	'{%- set cust_addr = party_address("Customer", doc.customer) -%}\n'
 	'{%- set dest = frappe.db.get_value("Customer", doc.customer, "destination_country") -%}\n'
 	+ EFX_CSS + """
-<div class="efx"><div class="doc">
+<div class="efx">""" + LH_EX + """<div class="doc">
   <div class="title">Sales Order<small>Export order confirmation{% if doc.docstatus == 0 %} &middot; DRAFT{% endif %}</small></div>
   <table class="grid">
     <tr class="seam">
-      <td style="width:58%"><span class="lbl">Exporter / Seller</span>{% if ex.logo %}<img class="logo" src="{{ ex.logo|e }}">{% endif %}<b>{{ ex.company_name }}</b>{% if ex.address %}<div class="addr muted">{{ ex.address|e }}</div>{% endif %}<div style="margin-top:3px">{% if ex.iec %}IEC <span class="mono">{{ ex.iec }}</span>{% endif %}{% if ex.gstin %} &nbsp; GSTIN <span class="mono">{{ ex.gstin }}</span>{% endif %}</div></td>
+      <td style="width:58%"><span class="lbl">Exporter / Seller</span><b>{{ ex.company_name }}</b><div style="margin-top:3px">{% if ex.iec %}IEC <span class="mono">{{ ex.iec }}</span>{% endif %}{% if ex.gstin %} &nbsp; GSTIN <span class="mono">{{ ex.gstin }}</span>{% endif %}</div></td>
       <td>
         <table style="width:100%">
           <tr><td class="lbl" style="border:0;padding:0 0 1px">Order no &amp; date</td></tr>
@@ -587,11 +613,11 @@ PURCHASE_ORDER = (
 	'{%- set sup_addr = party_address("Supplier", doc.supplier) -%}\n'
 	'{%- set sos = doc.items | map(attribute="sales_order") | select | unique | list -%}\n'
 	+ EFX_CSS + """
-<div class="efx"><div class="doc">
+<div class="efx">""" + LH_EX + """<div class="doc">
   <div class="title">Purchase Order<small>{% if doc.merchant_export_scheme %}Merchant export &mdash; concessional 0.1% GST (Notification 41/2017-IGST(R)){% else %}Procurement order{% endif %}{% if doc.docstatus == 0 %} &middot; DRAFT{% endif %}</small></div>
   <table class="grid">
     <tr class="seam">
-      <td style="width:58%"><span class="lbl">Buyer</span>{% if ex.logo %}<img class="logo" src="{{ ex.logo|e }}">{% endif %}<b>{{ ex.company_name }}</b>{% if ex.address %}<div class="addr muted">{{ ex.address|e }}</div>{% endif %}<div style="margin-top:3px">{% if ex.gstin %}GSTIN <span class="mono">{{ ex.gstin }}</span>{% endif %}{% if ex.iec %} &nbsp; IEC <span class="mono">{{ ex.iec }}</span>{% endif %}</div></td>
+      <td style="width:58%"><span class="lbl">Buyer</span><b>{{ ex.company_name }}</b><div style="margin-top:3px">{% if ex.gstin %}GSTIN <span class="mono">{{ ex.gstin }}</span>{% endif %}{% if ex.iec %} &nbsp; IEC <span class="mono">{{ ex.iec }}</span>{% endif %}</div></td>
       <td>
         <table style="width:100%">
           <tr><td class="lbl" style="border:0;padding:0 0 1px">PO no &amp; date</td></tr>
@@ -618,11 +644,11 @@ PRO_FORMA = (
 	'{%- set rows = doc.items if doc.items else so.get("items") -%}\n'
 	'{%- set cust_addr = party_address("Customer", doc.customer) -%}\n'
 	+ EFX_CSS + """
-<div class="efx"><div class="doc">
+<div class="efx">""" + LH_EX + """<div class="doc">
   <div class="title">Pro Forma Invoice<small>Not a tax invoice &mdash; issued for advance payment / LC establishment</small></div>
   <table class="grid">
     <tr class="seam">
-      <td style="width:58%"><span class="lbl">Exporter</span>{% if ex.logo %}<img class="logo" src="{{ ex.logo|e }}">{% endif %}<b>{{ ex.company_name }}</b>{% if ex.address %}<div class="addr muted">{{ ex.address|e }}</div>{% endif %}<div style="margin-top:3px">{% if ex.iec %}IEC <span class="mono">{{ ex.iec }}</span>{% endif %}{% if ex.gstin %} &nbsp; GSTIN <span class="mono">{{ ex.gstin }}</span>{% endif %}</div></td>
+      <td style="width:58%"><span class="lbl">Exporter</span><b>{{ ex.company_name }}</b><div style="margin-top:3px">{% if ex.iec %}IEC <span class="mono">{{ ex.iec }}</span>{% endif %}{% if ex.gstin %} &nbsp; GSTIN <span class="mono">{{ ex.gstin }}</span>{% endif %}</div></td>
       <td>
         <table style="width:100%">
           <tr><td class="lbl" style="border:0;padding:0 0 1px">PFI no &amp; date</td></tr>
@@ -652,7 +678,7 @@ PRO_FORMA = (
   </table>
   <table>
     <tr>
-      <td style="width:55%;border-right:0.7px solid #b9bec8;vertical-align:bottom"><div class="words"><span class="lbl">Amount in words</span>{{ frappe.utils.money_in_words(doc.amount, doc.currency) }}</div></td>
+      <td style="width:58%;border-right:0.7px solid #b9bec8;vertical-align:bottom"><div class="words"><span class="lbl">Amount in words</span>{{ frappe.utils.money_in_words(doc.amount, doc.currency) }}</div></td>
       <td><table class="tot"><tr class="g"><td>Amount payable</td><td class="r mono">{{ frappe.utils.fmt_money(doc.amount, currency=doc.currency) }}</td></tr></table></td>
     </tr>
   </table>
@@ -711,11 +737,9 @@ def write_format(
 
 
 if __name__ == "__main__":
-	# the logo was added to the Exporter block (these three) — bump their stamp;
-	# the formats below keep their old stamp so migrate doesn't needlessly re-sync
-	NEW = "2026-06-14 14:00:00.000000"
-	# the bordered professional redesign (data-fidelity build) — newer stamp
-	REDESIGN = "2026-06-15 12:00:00.000000"
+	# every format shares the bordered EFX style + the letterhead banner — one stamp;
+	# bump it on any edit so migrate re-syncs the standard print formats
+	REDESIGN = "2026-06-17 12:00:00.000000"
 	write_format(
 		"exportflow_commercial_invoice", "ExportFlow Commercial Invoice", COMMERCIAL_INVOICE, modified=REDESIGN
 	)
