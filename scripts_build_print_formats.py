@@ -99,6 +99,9 @@ SIGNATURE = """
 
 EFX_CSS = """
 <style>
+  .print-format { margin-top: 6mm; margin-bottom: 8mm; margin-left: 12mm; margin-right: 12mm; }
+  body { margin: 0 !important; }
+  div.print-format { margin: 0 !important; padding: 0 !important; }
   .efx { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #16181d; font-size: 10.5px; line-height: 1.4; }
   .efx .doc { border: 1.4px solid #16181d; }
   .efx .title { text-align: center; font-weight: 700; font-size: 14px; letter-spacing: .2em; text-transform: uppercase; padding: 7px 8px 6px; border-bottom: 1.4px solid #16181d; }
@@ -746,7 +749,7 @@ def write_format(
 if __name__ == "__main__":
 	# every format shares the bordered EFX style + the letterhead banner — one stamp;
 	# bump it on any edit so migrate re-syncs the standard print formats
-	REDESIGN = "2026-06-17 21:00:00.000000"
+	REDESIGN = "2026-06-17 22:00:00.000000"
 	write_format(
 		"exportflow_commercial_invoice", "ExportFlow Commercial Invoice", COMMERCIAL_INVOICE, modified=REDESIGN
 	)
