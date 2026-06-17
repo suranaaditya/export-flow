@@ -56,6 +56,40 @@ def _logo_data_uri() -> str | None:
 		return None
 
 
+def _app_img_uri(filename: str) -> str | None:
+	"""A static image shipped in the app (exportflow/public/img) as a base64 data URI —
+	read straight from disk so it embeds inline in wkhtmltopdf (the certification badge
+	strip + the brand rule on the letterhead, which must render identically every time)."""
+	try:
+		import base64
+		import mimetypes
+
+		path = frappe.get_app_path("exportflow", "public", "img", filename)
+		with open(path, "rb") as f:
+			data = f.read()
+		mime = mimetypes.guess_type(filename)[0] or "image/png"
+		return f"data:{mime};base64,{base64.b64encode(data).decode()}"
+	except Exception:
+		return None
+
+
+def _letterhead_address(exporter_address: str | None):
+	"""Split the free-text exporter address into a one-line address + a contact line
+	for the centred letterhead block (street + city on one line, the 'Tel ... · email'
+	line separate)."""
+	import re
+
+	lines = [ln.strip().rstrip(",").strip() for ln in (exporter_address or "").split("\n") if ln.strip()]
+	# match a real contact line ("Tel ...", "Phone:", "Fax", "Email") on a word
+	# boundary so a state like "Telangana" is NOT mistaken for the phone line
+	def _is_contact(ln):
+		return bool(re.match(r"^(tel|phone|ph|mob|mobile|fax|e-?mail)\b", ln, re.I))
+
+	contact = next((ln for ln in lines if _is_contact(ln)), "")
+	addr = ", ".join(ln for ln in lines if not _is_contact(ln))
+	return addr, contact
+
+
 def party_address(party_type: str, party: str) -> str | None:
 	"""Default address of a party as clean multi-line PLAIN text — for the PO / SO
 	print blocks. get_address_display returns <br>-joined HTML, which | striptags
@@ -80,15 +114,20 @@ def exporter_profile():
 	jinja method."""
 	settings = frappe.get_single("ExportFlow Settings")
 	company = exportflow_company()
+	lh_addr, lh_contact = _letterhead_address(settings.exporter_address)
 	return frappe._dict(
 		company_name=frappe.db.get_value("Company", company, "company_name") or company,
 		address=settings.exporter_address,
+		letterhead_addr=lh_addr,
+		letterhead_contact=lh_contact,
 		gstin=settings.gstin,
 		iec=settings.iec_number,
 		lut=settings.lut_number,
 		signatory_name=settings.signatory_name,
 		signatory_designation=settings.signatory_designation,
 		logo=_logo_data_uri(),
+		cert_badges=_app_img_uri("mn_certs.png"),
+		gradient_rule=_app_img_uri("mn_rule.png"),
 	)
 
 
@@ -330,12 +369,17 @@ def document_print_context(name: str):
 		"Export Realization", {"shipment": shipment.name}, "ad_bank"
 	)
 
+	lh_addr, lh_contact = _letterhead_address(settings.exporter_address)
 	return frappe._dict(
 		instance=inst,
 		shipment=shipment,
 		company_name=company_name,
 		logo=_logo_data_uri(),
+		cert_badges=_app_img_uri("mn_certs.png"),
+		gradient_rule=_app_img_uri("mn_rule.png"),
 		exporter_address=settings.exporter_address,
+		letterhead_addr=lh_addr,
+		letterhead_contact=lh_contact,
 		iec_number=settings.iec_number,
 		gstin=settings.gstin,
 		ad_code=ad_code,

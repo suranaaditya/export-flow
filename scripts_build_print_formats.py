@@ -127,13 +127,16 @@ EFX_CSS = """
   .efx .sigbox { height: 70px; position: relative; }
   .efx .sigline { position: absolute; bottom: 6px; left: 9px; right: 9px; border-top: 0.7px solid #16181d; padding-top: 3px; font-size: 8.4px; }
   .efx .logo { max-height: 38px; max-width: 168px; margin-bottom: 5px; display: block; }
-  .efx table.lh { width: 100%; border-collapse: collapse; border-bottom: 2px solid #16181d; margin-bottom: 11px; }
-  .efx table.lh td { vertical-align: bottom; padding: 1px 3px 9px; }
-  .efx table.lh td.lh-logo { width: 232px; }
-  .efx table.lh img { max-height: 60px; max-width: 222px; display: block; }
-  .efx td.lh-id { text-align: right; font-size: 9.2px; color: #3b4250; line-height: 1.5; }
-  .efx td.lh-id .nm { font-size: 14px; font-weight: 700; color: #16181d; letter-spacing: .01em; margin-bottom: 1px; }
-  .efx td.lh-id .addr { white-space: pre-wrap; }
+  .efx table.lh { width: 100%; border-collapse: collapse; }
+  .efx table.lh td { vertical-align: middle; padding: 0; }
+  .efx table.lh td.lh-logo { width: 104px; }
+  .efx table.lh td.lh-logo img { height: 46px; max-width: 100px; display: block; }
+  .efx td.lh-id { text-align: center; }
+  .efx td.lh-id .nm { font-size: 15px; font-weight: 700; color: #16181d; letter-spacing: .015em; }
+  .efx td.lh-id .addr { font-size: 8.6px; color: #41485a; line-height: 1.62; margin-top: 2px; }
+  .efx td.lh-certs { width: 166px; text-align: right; white-space: nowrap; }
+  .efx td.lh-certs img { height: 38px; vertical-align: middle; }
+  .efx .lh-rule img { width: 100%; height: 3px; display: block; margin: 8px 0 11px; }
 </style>
 """
 
@@ -141,21 +144,24 @@ EFX_CSS = """
 # right, a rule below: the client's own letterhead style. Sits above the bordered
 # document box on every format. Two variants because the shipment formats carry
 # ctx.* (document_print_context) while the SO / PO / PFI carry ex.* (exporter_profile).
-def _letterhead(logo, name, addr):
+def _letterhead(logo, name, addr, contact, certs, rule):
 	t = """
   <table class="lh"><tr>
     <td class="lh-logo">{% if @LOGO@ %}<img src="{{ @LOGO@ | e }}">{% endif %}</td>
     <td class="lh-id">
       <div class="nm">{{ @NAME@ }}</div>
-      {% if @ADDR@ %}<div class="addr">{{ @ADDR@ | e }}</div>{% endif %}
+      {% if @ADDR@ %}<div class="addr">{{ @ADDR@ | e }}{% if @CONTACT@ %}<br>{{ @CONTACT@ | e }}{% endif %}</div>{% endif %}
     </td>
+    <td class="lh-certs">{% if @CERTS@ %}<img src="{{ @CERTS@ | e }}">{% endif %}</td>
   </tr></table>
+  {% if @RULE@ %}<div class="lh-rule"><img src="{{ @RULE@ | e }}"></div>{% else %}<div style="height:2px;background:#16181d;margin:8px 0 11px"></div>{% endif %}
 """
-	return t.replace("@LOGO@", logo).replace("@NAME@", name).replace("@ADDR@", addr)
+	return (t.replace("@LOGO@", logo).replace("@NAME@", name).replace("@ADDR@", addr)
+	        .replace("@CONTACT@", contact).replace("@CERTS@", certs).replace("@RULE@", rule))
 
 
-LH_CTX = _letterhead("ctx.logo", "ctx.company_name", "ctx.exporter_address")
-LH_EX = _letterhead("ex.logo", "ex.company_name", "ex.address")
+LH_CTX = _letterhead("ctx.logo", "ctx.company_name", "ctx.letterhead_addr", "ctx.letterhead_contact", "ctx.cert_badges", "ctx.gradient_rule")
+LH_EX = _letterhead("ex.logo", "ex.company_name", "ex.letterhead_addr", "ex.letterhead_contact", "ex.cert_badges", "ex.gradient_rule")
 
 
 # Shared top of the invoice / packing list: exporter + invoice meta, consignee /
@@ -537,7 +543,7 @@ EFX_TXN_LINES = """
     {% for row in doc.items %}
       <tr>
         <td class="c mono">{{ loop.index }}</td>
-        <td><b>{{ row.item_name }}</b>{% if row.item_code != row.item_name %} <span class="muted mono" style="font-size:8.6px">{{ row.item_code }}</span>{% endif %}{% if row.get("sales_order") %}<div class="muted" style="font-size:8.6px">for {{ row.sales_order }}</div>{% endif %}</td>
+        <td><b>{{ row.item_name }}</b>{% if row.item_code != row.item_name %} <span class="muted mono" style="font-size:8.6px">{{ row.item_code }}</span>{% endif %}</td>
         <td class="mono">{{ row.get("gst_hsn_code") or "—" }}</td>
         <td class="r mono">{{ frappe.utils.flt(row.qty) }} {{ row.uom or "" }}</td>
         <td class="r mono">{{ frappe.utils.fmt_money(row.rate, currency=doc.currency) }}</td>
@@ -628,7 +634,7 @@ PURCHASE_ORDER = (
     </tr>
     <tr class="seam">
       <td><span class="lbl">Supplier</span><b>{{ doc.supplier_name }}</b>{% if sup_addr %}<div class="addr muted">{{ sup_addr|e }}</div>{% endif %}{% if doc.get("supplier_gstin") %}<div>GSTIN <span class="mono">{{ doc.supplier_gstin }}</span></div>{% endif %}</td>
-      <td><span class="lbl">Delivery</span>{% if sos %}Against sales order{{ "s" if sos|length > 1 else "" }} <span class="mono">{{ sos|join(", ") }}</span> &mdash; drop-ship direct to the port of shipment.{% else %}As advised.{% endif %}</td>
+      <td><span class="lbl">Delivery</span>{% if sos %}Drop-ship &mdash; deliver direct to the port of shipment.{% else %}As advised.{% endif %}</td>
     </tr>
   </table>
 """ + EFX_TXN_LINES + EFX_TXN_TOTALS + _TERMS + _efx_txn_sign(_SYS_GEN) + """
@@ -739,7 +745,7 @@ def write_format(
 if __name__ == "__main__":
 	# every format shares the bordered EFX style + the letterhead banner — one stamp;
 	# bump it on any edit so migrate re-syncs the standard print formats
-	REDESIGN = "2026-06-17 12:00:00.000000"
+	REDESIGN = "2026-06-17 18:00:00.000000"
 	write_format(
 		"exportflow_commercial_invoice", "ExportFlow Commercial Invoice", COMMERCIAL_INVOICE, modified=REDESIGN
 	)
