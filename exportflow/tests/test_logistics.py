@@ -25,9 +25,28 @@ from exportflow.api import (
 )
 from exportflow.exportflow.doctype.export_shipment.export_shipment import (
 	AIR_MILESTONES,
+	MERCHANTING_MILESTONES,
 	SEA_MILESTONES,
 )
+from exportflow.mtt import MERCHANTING
 from exportflow.tests.test_dropship import _suffix, make_customer, make_supplier
+
+
+def _completed(doc, milestone: str) -> bool:
+	return any(m.completed for m in doc.milestones if m.milestone == milestone)
+
+
+def _resolve_blockers(shipment: str) -> None:
+	"""Clear the base Shipping Bill / ADC NOC blocks by moving each blocking
+	Document Instance to its minimum unblock status."""
+	for di in frappe.get_all(
+		"Document Instance",
+		filters={"shipment": shipment, "blocking": 1},
+		fields=["name", "min_unblock_status"],
+	):
+		frappe.db.set_value(
+			"Document Instance", di.name, "status", di.min_unblock_status or "Received"
+		)
 
 
 def make_plain_item(name: str) -> str:
@@ -206,12 +225,13 @@ class TestLogistics(IntegrationTestCase):
 		self.assertEqual(flt(line["draft_qty"]), 40.0)
 		self.assertEqual(flt(line["remaining"]), 60.0)
 
-	def make_test_shipment(self, so, customer, qty=60, mode="Sea", so_row=None):
+	def make_test_shipment(self, so, customer, qty=60, mode="Sea", so_row=None, trade_type=None):
 		row = so_row or so.items[0]
 		return create_shipment(
 			{
 				"customer": customer,
 				"mode": mode,
+				"trade_type": trade_type,
 				"items": [
 					{
 						"item_code": row.item_code,
@@ -230,7 +250,8 @@ class TestLogistics(IntegrationTestCase):
 		shp1 = self.make_test_shipment(so, customer, qty=60)
 		doc = frappe.get_doc("Export Shipment", shp1["name"])
 		self.assertEqual([m.milestone for m in doc.milestones], SEA_MILESTONES)
-		self.assertEqual(doc.current_milestone, "Planned")
+		# a freshly-booked shipment is auto-advanced through "At Port/CFS"
+		self.assertEqual(doc.current_milestone, "Customs Filed")
 
 		# second shipment within the remaining 40 is fine
 		shp2 = self.make_test_shipment(so, customer, qty=40)
@@ -258,26 +279,119 @@ class TestLogistics(IntegrationTestCase):
 		shp = self.make_test_shipment(so, customer, qty=10)
 		doc = frappe.get_doc("Export Shipment", shp["name"])
 		rows = doc.milestones
+		# on-creation auto-advance: the first three steps are done, current is the
+		# next pending one (Customs Filed)
+		self.assertTrue(all(m.completed for m in rows[:3]))
+		self.assertEqual(doc.current_milestone, "Customs Filed")
 
-		# cannot skip ahead
+		# cannot skip ahead past the current pending step
 		with self.assertRaises(frappe.ValidationError):
-			set_shipment_milestone(doc.name, rows[2].name, 1)
+			set_shipment_milestone(doc.name, rows[5].name, 1)
 
-		current = set_shipment_milestone(doc.name, rows[0].name, 1)
-		self.assertEqual(current, "Goods Dispatched")
-		current = set_shipment_milestone(doc.name, rows[1].name, 1, actual_date=nowdate())
-		self.assertEqual(current, "At Port/CFS")
+		current = set_shipment_milestone(doc.name, rows[3].name, 1, actual_date=nowdate())
+		self.assertEqual(current, "Let Export Order")
 
 		doc.reload()
-		self.assertTrue(doc.milestones[0].completed)
-		self.assertEqual(str(doc.milestones[1].actual_date), nowdate())
+		self.assertTrue(doc.milestones[3].completed)
+		self.assertEqual(str(doc.milestones[3].actual_date), nowdate())
 
-		# cannot un-complete the first while the second is done
+		# cannot un-complete an earlier step while a later one is done
 		with self.assertRaises(frappe.ValidationError):
-			set_shipment_milestone(doc.name, rows[0].name, 0)
+			set_shipment_milestone(doc.name, rows[2].name, 0)
 
-		current = set_shipment_milestone(doc.name, rows[1].name, 0)
-		self.assertEqual(current, "Goods Dispatched")
+		# un-complete the latest completed step
+		current = set_shipment_milestone(doc.name, rows[3].name, 0)
+		self.assertEqual(current, "Customs Filed")
+
+	def test_creation_seeds_initial_progress(self):
+		"""A shipment is never booked in advance — on creation the pre-departure
+		steps are auto-completed (client rule 2026-06-18)."""
+		so, customer, _s1, _s2 = self.setup_deal(qty_a=30)
+
+		sea = frappe.get_doc(
+			"Export Shipment", self.make_test_shipment(so, customer, qty=10)["name"]
+		)
+		self.assertTrue(_completed(sea, "At Port/CFS"))
+		self.assertFalse(_completed(sea, "Customs Filed"))
+		self.assertEqual(sea.current_milestone, "Customs Filed")
+
+		air = frappe.get_doc(
+			"Export Shipment", self.make_test_shipment(so, customer, qty=10, mode="Air")["name"]
+		)
+		self.assertTrue(_completed(air, "At Airport/CFS"))
+		self.assertEqual(air.current_milestone, "Customs Filed")
+
+		merch = frappe.get_doc(
+			"Export Shipment",
+			self.make_test_shipment(so, customer, qty=10, trade_type=MERCHANTING)["name"],
+		)
+		self.assertEqual([m.milestone for m in merch.milestones], MERCHANTING_MILESTONES)
+		self.assertTrue(_completed(merch, "Booked"))
+		self.assertEqual(merch.current_milestone, "Shipped from Origin")
+
+	def test_fast_forward_respects_blocking(self):
+		"""A document fact carries the earlier pending steps, but a milestone
+		gated by an unresolved blocking document is never forced."""
+		so, customer, _s1, _s2 = self.setup_deal(qty_a=10)
+		doc = frappe.get_doc(
+			"Export Shipment", self.make_test_shipment(so, customer, qty=10)["name"]
+		)
+		self.assertEqual(doc.current_milestone, "Customs Filed")
+
+		# the B/L date proves departure — it carries the pending "Customs Filed",
+		# but "Let Export Order" is blocked by the base Shipping Bill / ADC NOC
+		doc.bl_number = "BL-FF-1"
+		doc.bl_date = nowdate()
+		doc.save()
+		doc.reload()
+		self.assertTrue(_completed(doc, "Customs Filed"), "carried the earlier pending step")
+		self.assertFalse(_completed(doc, "Let Export Order"), "blocked milestone not forced")
+		self.assertFalse(_completed(doc, "Shipped on Board"))
+		self.assertEqual(doc.current_milestone, "Let Export Order")
+
+	def test_fast_forward_clean_after_unblock(self):
+		"""With the blockers resolved, the customs / LEO / departure facts
+		fast-forward the whole chain, carrying every earlier pending step."""
+		so, customer, _s1, _s2 = self.setup_deal(qty_a=10)
+		doc = frappe.get_doc(
+			"Export Shipment", self.make_test_shipment(so, customer, qty=10)["name"]
+		)
+		_resolve_blockers(doc.name)
+
+		doc.reload()
+		doc.shipping_bill_number = "SB-FF-2"
+		doc.shipping_bill_date = nowdate()
+		doc.leo_date = nowdate()
+		doc.bl_number = "BL-FF-2"
+		doc.bl_date = nowdate()
+		doc.save()
+		doc.reload()
+		for milestone in (
+			"Customs Filed",
+			"Let Export Order",
+			"Container Stuffed/Gated In",
+			"Shipped on Board",
+		):
+			self.assertTrue(_completed(doc, milestone), milestone)
+		self.assertEqual(doc.current_milestone, "Arrived Destination")
+
+	def test_fast_forward_merchanting(self):
+		"""Merchanting departure completes "Shipped from Origin" (no Indian
+		customs steps to carry)."""
+		so, customer, _s1, _s2 = self.setup_deal(qty_a=10)
+		doc = frappe.get_doc(
+			"Export Shipment",
+			self.make_test_shipment(so, customer, qty=10, trade_type=MERCHANTING)["name"],
+		)
+		self.assertEqual(doc.current_milestone, "Shipped from Origin")
+
+		doc.bl_number = "BL-MTT-1"
+		doc.bl_date = nowdate()
+		doc.save()
+		doc.reload()
+		self.assertTrue(_completed(doc, "Booked"))
+		self.assertTrue(_completed(doc, "Shipped from Origin"))
+		self.assertEqual(doc.current_milestone, "Arrived at Destination")
 
 	def test_standalone_po_form(self):
 		"""The full PO form: header details + terms, SO-linked and free lines

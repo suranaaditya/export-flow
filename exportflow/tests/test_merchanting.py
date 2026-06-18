@@ -12,6 +12,7 @@ from exportflow.api import (
 	get_shipment_finance,
 	set_shipment_milestone,
 )
+from exportflow.exportflow.doctype.export_shipment.export_shipment import MERCHANTING_MILESTONES
 from exportflow.mtt import EXPORT_FROM_INDIA, MERCHANTING, clocks, is_merchanting
 from exportflow.setup import seed_checklist_rules, seed_document_types
 from exportflow.tests.test_dropship import _suffix, make_customer, make_supplier
@@ -97,20 +98,20 @@ class TestMerchanting(IntegrationTestCase):
 		self.assertFalse(SUPPRESSED & types, "suppressed docs must be removed on switch")
 		self.assertTrue(KEPT <= types, "commercial docs survive the switch")
 
-	def test_merchanting_leo_milestone_not_blocked(self):
-		"""With Shipping Bill / ADC NOC suppressed, nothing gates Let Export
-		Order on a merchanting shipment."""
+	def test_merchanting_simple_milestone_set(self):
+		"""Merchanting uses the simpler 4-step set (no Indian customs) and nothing
+		gates it — the India blocking docs are suppressed. "Booked" is
+		auto-completed on creation; the rest walk cleanly to "Completed"."""
 		so, customer = self.make_deal()
 		shp = self.make_shipment(so, customer, trade_type=MERCHANTING)
 		doc = frappe.get_doc("Export Shipment", shp)
-		# walk up to and through Let Export Order
+		self.assertEqual([m.milestone for m in doc.milestones], MERCHANTING_MILESTONES)
+		self.assertEqual(doc.current_milestone, "Shipped from Origin")
 		for m in doc.milestones:
 			set_shipment_milestone(shp, m.name, 1)
-			if m.milestone == "Let Export Order":
-				break
 		doc.reload()
-		leo = next(m for m in doc.milestones if m.milestone == "Let Export Order")
-		self.assertTrue(leo.completed, "LEO must complete — no blocking docs on merchanting")
+		self.assertTrue(all(m.completed for m in doc.milestones))
+		self.assertEqual(doc.current_milestone, "Completed")
 
 	# ---------------------------------------------------------------- incentives
 
@@ -227,10 +228,11 @@ class TestMerchanting(IntegrationTestCase):
 
 	# ---------------------------------------------------------------- review regressions
 
-	def test_switch_with_progressed_blocking_unblocks_leo(self):
+	def test_switch_with_progressed_blocking_relinquished(self):
 		"""Review finding #1: switching a shipment whose Shipping Bill was already
-		progressed (so it is relinquished, not deleted) must still drop its
-		milestone gate — else Let Export Order is permanently blocked."""
+		progressed (so it is relinquished, not deleted) must drop its milestone
+		gate — else the chain is permanently frozen. With merchanting's simpler set
+		there is no Let Export Order at all, and the walk runs clean to Completed."""
 		from exportflow.checklist import milestone_blockers
 
 		so, customer = self.make_deal()
@@ -245,17 +247,19 @@ class TestMerchanting(IntegrationTestCase):
 		doc.trade_type = MERCHANTING
 		doc.save(ignore_permissions=True)
 
+		# the relinquished Shipping Bill no longer gates any milestone
 		self.assertEqual(
-			milestone_blockers(shp, "Let Export Order"), [], "no suppressed doc may gate LEO"
+			milestone_blockers(shp, "Let Export Order"), [], "no suppressed doc may gate a milestone"
 		)
 		doc.reload()
+		self.assertEqual([m.milestone for m in doc.milestones], MERCHANTING_MILESTONES)
 		for m in doc.milestones:
 			set_shipment_milestone(shp, m.name, 1)
-			if m.milestone == "Let Export Order":
-				break
 		doc.reload()
-		leo = next(m for m in doc.milestones if m.milestone == "Let Export Order")
-		self.assertTrue(leo.completed)
+		self.assertTrue(
+			all(m.completed for m in doc.milestones), "the chain is not frozen by the old Shipping Bill"
+		)
+		self.assertEqual(doc.current_milestone, "Completed")
 
 	def test_partial_realization_net_fx(self):
 		"""Review finding #2: a partial receipt must not collapse proceeds to the

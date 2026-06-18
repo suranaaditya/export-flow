@@ -32,11 +32,45 @@ AIR_MILESTONES = [
 	"Delivered",
 ]
 
-# the GST export clock stops at this milestone (§4.3)
+# Merchanting (third-country) trades never touch Indian customs, so they get a
+# simpler chain with no Customs Filed / Let Export Order steps (client decision
+# 2026-06-18). The goods still ship A→B on a B/L or AWB, so "Shipped from
+# Origin" is the departure step that the bl/awb date completes.
+MERCHANTING_MILESTONES = [
+	"Booked",
+	"Shipped from Origin",
+	"Arrived at Destination",
+	"Delivered",
+]
+
+# every standard seed set — used by the reseed guard to tell a mode/trade-type
+# switch apart from a grid the user hand-edited (which must be left alone)
+KNOWN_MILESTONE_SETS = (SEA_MILESTONES, AIR_MILESTONES, MERCHANTING_MILESTONES)
+
+# the GST/FEMA export clock stops at this milestone (§4.3) — keyed by mode for an
+# India export, fixed for merchanting (see export_milestone_name)
 EXPORT_MILESTONE = {"Sea": "Shipped on Board", "Air": "Departed"}
+MERCHANTING_EXPORT_MILESTONE = "Shipped from Origin"
+
+# the pre-departure step a freshly-booked shipment has already reached (the
+# client never books in advance — by booking, the goods are at the port/CFS or,
+# for merchanting, booked at origin)
+INITIAL_MILESTONE = {"Sea": "At Port/CFS", "Air": "At Airport/CFS"}
+MERCHANTING_INITIAL_MILESTONE = "Booked"
+
+# the pre-departure steps that seed_initial_progress auto-completes on creation —
+# these are NOT real progress, so they must not freeze a mode / trade-type change
+# (which reseeds the grid). Only a completion BEYOND this set blocks a reseed.
+AUTO_SEEDED_MILESTONES = frozenset(
+	{"Planned", "Goods Dispatched", "At Port/CFS", "At Airport/CFS", "Booked"}
+)
 
 
-def milestones_for(mode: str) -> list[str]:
+def milestones_for(mode: str, trade_type=None) -> list[str]:
+	from exportflow.mtt import is_merchanting
+
+	if is_merchanting(trade_type):
+		return MERCHANTING_MILESTONES
 	return SEA_MILESTONES if mode == "Sea" else AIR_MILESTONES
 
 
@@ -53,6 +87,7 @@ class ExportShipment(Document):
 		self.derive_trade_type_from_pos()
 		self.apply_merchanting_cha()
 		self.seed_milestones()
+		self.seed_initial_progress()
 		self.validate_items()
 		self.validate_packs()
 		self.apply_mtt_import_facts()
@@ -207,24 +242,72 @@ class ExportShipment(Document):
 				self.assert_milestone_not_blocked(m.milestone)
 
 	def seed_milestones(self):
-		expected = milestones_for(self.mode)
-		other_mode = AIR_MILESTONES if expected is SEA_MILESTONES else SEA_MILESTONES
+		expected = milestones_for(self.mode, self.trade_type)
 		current = [m.milestone for m in self.milestones]
+		self._fresh_milestones = False
 		if not current:
 			for name in expected:
 				self.append("milestones", {"milestone": name})
-		elif current == expected or current != other_mode:
-			# matches this mode, or a custom grid the user edited — leave it
+			# auto-advance the pre-departure steps only on a brand-new booking — an
+			# EXISTING record that reached here with an empty grid (rows deleted in
+			# the desk, a bulk import) gets its grid back but must NOT be
+			# back-stamped with today's date
+			self._fresh_milestones = self.is_new()
 			return
-		else:
-			# a genuine mode switch before anything happened: reseed
-			if any(m.completed for m in self.milestones):
-				frappe.throw(
-					_("Cannot change mode after milestones are underway — create a new shipment instead")
+		if current == expected:
+			return
+		if current not in KNOWN_MILESTONE_SETS:
+			# a custom grid the user hand-edited — leave it alone
+			return
+		# a genuine mode / trade-type switch between standard sets: reseed, but
+		# only while no REAL progress has been made (the auto-seeded pre-departure
+		# steps don't count — they are re-applied on the new set below)
+		if any(
+			m.completed and m.milestone not in AUTO_SEEDED_MILESTONES for m in self.milestones
+		):
+			frappe.throw(
+				_(
+					"Cannot change mode or trade type after milestones are underway — "
+					"create a new shipment instead"
 				)
-			self.milestones = []
-			for name in expected:
-				self.append("milestones", {"milestone": name})
+			)
+		self.milestones = []
+		for name in expected:
+			self.append("milestones", {"milestone": name})
+		self._fresh_milestones = True
+
+	def seed_initial_progress(self):
+		"""Client rule (2026-06-18): a shipment is never booked in advance — by
+		booking, the goods are already at the port/CFS (India export) or booked at
+		origin (merchanting). When the grid is first seeded (creation) OR reseeded
+		by a mode / trade-type switch, auto-complete the pre-departure steps so the
+		timeline opens realistically. Runs only on a fresh (re)seed and only when
+		nothing is completed yet — never disturbs progress in flight.
+
+		NB the pre-departure steps are completed directly (not via set_milestone),
+		so they are not blocker-checked. This is safe with the default catalog
+		(blocking docs gate only "Let Export Order"); a custom checklist rule must
+		never set a pre-departure milestone as its blocked_milestone."""
+		if not getattr(self, "_fresh_milestones", False):
+			return
+		if any(m.completed for m in self.milestones):
+			return
+		from exportflow.mtt import is_merchanting
+
+		target = (
+			MERCHANTING_INITIAL_MILESTONE
+			if is_merchanting(self.trade_type)
+			else INITIAL_MILESTONE.get(self.mode)
+		)
+		names = [m.milestone for m in self.milestones]
+		if target not in names:
+			return
+		booked = frappe.utils.nowdate()
+		for m in self.milestones[: names.index(target) + 1]:
+			m.completed = 1
+			if not m.actual_date:
+				m.actual_date = booked
+		self.set_current_milestone()
 
 	def validate_items(self):
 		if not self.items:
@@ -368,10 +451,141 @@ class ExportShipment(Document):
 				)
 			)
 
+	def export_milestone_name(self) -> str | None:
+		"""The departure milestone that stops the export clock — fixed for a
+		merchanting trade (no Indian customs), mode-dependent otherwise."""
+		from exportflow.mtt import is_merchanting
+
+		if is_merchanting(self.trade_type):
+			return MERCHANTING_EXPORT_MILESTONE
+		return EXPORT_MILESTONE.get(self.mode)
+
 	def export_completed_on(self):
 		"""Actual date of the export milestone (GST clock stop), if reached."""
-		target = EXPORT_MILESTONE.get(self.mode)
+		target = self.export_milestone_name()
 		for m in self.milestones:
 			if m.milestone == target and m.completed:
 				return m.actual_date
 		return None
+
+
+def advance_milestones_from_facts(doc, method=None):
+	"""Export Shipment on_update: a document fact proves the goods passed a
+	milestone, so complete it and every earlier still-pending step (the chain is
+	strictly sequential — a late fact carries the earlier steps with it).
+
+	Triggers, only when the date is newly set this save:
+	  shipping_bill_date → Customs Filed      (India export only)
+	  leo_date           → Let Export Order   (India export only)
+	  bl_date  (Sea)     → Shipped on Board  / "Shipped from Origin" (merchanting)
+	  awb_date (Air)     → Departed          / "Shipped from Origin" (merchanting)
+
+	Routed through set_milestone so the sequential + blocking guards hold; a
+	milestone gated by an unresolved blocking document is skipped silently (never
+	blocks the save). Idempotent — already-completed steps are passed over."""
+	before = doc.get_doc_before_save()
+	if not before:
+		return
+	try:
+		_advance_from_facts(doc, before)
+	except Exception:
+		frappe.log_error(
+			title=f"Milestone auto-advance failed: {doc.name}", message=frappe.get_traceback()
+		)
+
+
+def _advance_from_facts(doc, before):
+	from exportflow.mtt import is_merchanting
+
+	merch = is_merchanting(doc.trade_type)
+	names = [m.milestone for m in doc.milestones]
+
+	def newly_set(field):
+		return doc.get(field) and not before.get(field)
+
+	# (target milestone, the date that proves it) for each fired trigger
+	fired: list[tuple[str, str]] = []
+	if not merch:
+		if newly_set("shipping_bill_date"):
+			fired.append(("Customs Filed", doc.shipping_bill_date))
+		if newly_set("leo_date"):
+			fired.append(("Let Export Order", doc.leo_date))
+	dep_field = "awb_date" if doc.mode == "Air" else "bl_date"
+	if newly_set(dep_field):
+		departed = MERCHANTING_EXPORT_MILESTONE if merch else EXPORT_MILESTONE.get(doc.mode)
+		if departed:
+			fired.append((departed, doc.get(dep_field)))
+
+	targets = [(t, d) for t, d in fired if t in names]
+	if not targets:
+		return
+
+	# complete up to the furthest proven milestone, carrying earlier pending steps;
+	# stamp each step with its own fact date when one fired for it, else the
+	# furthest date (a safe upper bound — it happened no later). Index by POSITION,
+	# not label — a hand-edited grid may repeat a milestone name, which would make
+	# names.index() resolve the wrong row.
+	fact_date = {t: d for t, d in targets}
+	furthest_idx = max(i for i, m in enumerate(doc.milestones) if m.milestone in fact_date)
+	furthest_date = fact_date[doc.milestones[furthest_idx].milestone]
+
+	for i, m in enumerate(doc.milestones):
+		if i > furthest_idx:
+			break
+		if m.completed:
+			continue
+		when = fact_date.get(m.milestone) or furthest_date
+		try:
+			doc.set_milestone(m.name, True, when)
+		except frappe.ValidationError:
+			# gated by an unresolved blocking document — stop here, never force it.
+			# drop the throw's message so it doesn't surface as an error toast on an
+			# otherwise-successful save
+			if frappe.message_log:
+				frappe.message_log.pop()
+			break
+
+
+def reseed_merchanting_milestones(name: str):
+	"""A shipment can flip to merchanting after booking (a third-country PO is
+	submitted later) — that path uses db_set without re-running validate, so the
+	milestone grid still carries the India-export set. Bring it to the merchanting
+	set, but only while nothing has been completed and the grid is still a
+	recognised standard set (never disturb a hand-edited or in-progress grid)."""
+	rows = frappe.get_all(
+		"Shipment Milestone",
+		filters={"parent": name, "parenttype": "Export Shipment"},
+		fields=["milestone", "completed"],
+		order_by="idx asc",
+	)
+	# real progress (beyond the auto-seeded pre-departure steps) means we cannot
+	# safely remap the grid — leave it for the user
+	if not rows or any(
+		r.completed and r.milestone not in AUTO_SEEDED_MILESTONES for r in rows
+	):
+		return
+	current = [r.milestone for r in rows]
+	if current == MERCHANTING_MILESTONES or current not in (SEA_MILESTONES, AIR_MILESTONES):
+		return
+
+	created = frappe.db.get_value("Export Shipment", name, "creation")
+	booked = frappe.utils.getdate(created) if created else frappe.utils.nowdate()
+	frappe.db.delete("Shipment Milestone", {"parent": name, "parenttype": "Export Shipment"})
+	for i, milestone in enumerate(MERCHANTING_MILESTONES):
+		done = milestone == MERCHANTING_INITIAL_MILESTONE
+		frappe.get_doc(
+			{
+				"doctype": "Shipment Milestone",
+				"parent": name,
+				"parenttype": "Export Shipment",
+				"parentfield": "milestones",
+				"idx": i + 1,
+				"milestone": milestone,
+				"completed": 1 if done else 0,
+				"actual_date": booked if done else None,
+			}
+		).insert(ignore_permissions=True)
+	# current milestone is the first still-pending step after the booked one
+	frappe.db.set_value(
+		"Export Shipment", name, "current_milestone", MERCHANTING_MILESTONES[1], update_modified=False
+	)

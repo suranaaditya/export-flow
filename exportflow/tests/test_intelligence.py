@@ -35,6 +35,7 @@ from exportflow.tasks import (
 	send_document_due_alerts,
 	send_email_digest,
 	send_gst_alerts,
+	send_realization_alerts,
 )
 from exportflow.tests.test_documents import instance_of
 from exportflow.tests.test_dropship import _suffix, make_customer, make_supplier
@@ -443,6 +444,55 @@ class TestIntelligence(IntegrationTestCase):
 		# export date pulled from B/L; due = +15 months
 		self.assertEqual(getdate(rel.due_date), getdate(add_months(add_days(nowdate(), -500), 15)))
 		self.assertTrue(rel.is_overdue(), "past the FEMA window with no realization")
+
+	def test_realization_overdue_auto_stamp(self):
+		"""The daily clock stamps the 'Overdue' status the doctype offers but
+		nothing wrote, and reverses it when the due date is later extended."""
+		so, customer, _s = self.make_deal()
+		shp = self.make_shipment(so, customer)
+		rel = frappe.get_doc(
+			{
+				"doctype": "Export Realization",
+				"export_invoice": f"MNG-OD-{_suffix()}",
+				"shipment": shp,
+				"status": "Awaiting Realization",
+				"currency": "USD",
+				"invoice_value": 1000,
+				"export_date": add_days(nowdate(), -500),  # due = +15mo, in the past
+			}
+		).insert(ignore_permissions=True)
+		self.assertTrue(getdate(rel.due_date) < getdate(nowdate()))
+
+		send_realization_alerts()
+		self.assertEqual(frappe.db.get_value("Export Realization", rel.name, "status"), "Overdue")
+
+		# extend the due date past today → the next run reverses the auto-stamp
+		frappe.db.set_value("Export Realization", rel.name, "due_date", add_days(nowdate(), 30))
+		send_realization_alerts()
+		self.assertEqual(
+			frappe.db.get_value("Export Realization", rel.name, "status"), "Awaiting Realization"
+		)
+
+	def test_realization_overdue_preserves_progress(self):
+		"""A deliberate 'Partially Realized' status is NOT overwritten with
+		Overdue — the stamp is lossless (Awaiting ↔ Overdue only)."""
+		so, customer, _s = self.make_deal()
+		shp = self.make_shipment(so, customer)
+		rel = frappe.get_doc(
+			{
+				"doctype": "Export Realization",
+				"export_invoice": f"MNG-PR-{_suffix()}",
+				"shipment": shp,
+				"status": "Partially Realized",
+				"currency": "USD",
+				"invoice_value": 1000,
+				"export_date": add_days(nowdate(), -500),
+			}
+		).insert(ignore_permissions=True)
+		send_realization_alerts()
+		self.assertEqual(
+			frappe.db.get_value("Export Realization", rel.name, "status"), "Partially Realized"
+		)
 
 	def test_finance_workspace_and_dashboard(self):
 		so, customer, supplier = self.make_deal(qty=10)

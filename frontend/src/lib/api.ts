@@ -157,6 +157,7 @@ export const API = {
 	updateDocInstance: 'exportflow.api.update_document_instance',
 	attachDocFile: 'exportflow.api.attach_document_file',
 	generateDocument: 'exportflow.api.generate_document',
+	generateAllDocuments: 'exportflow.api.generate_shipment_documents',
 	checklistRules: 'exportflow.api.get_checklist_rules',
 	dashboard: 'exportflow.api.get_dashboard',
 	salesDashboard: 'exportflow.api.get_sales_dashboard',

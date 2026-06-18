@@ -97,17 +97,31 @@ export function DocumentChecklist({ shipment }: { shipment: string }) {
 	const { call: generate } = useFrappePostCall<{
 		message: { file_url: string; status: DocStatus; document_number: string | null };
 	}>(API.generateDocument);
+	const { call: generateAll } = useFrappePostCall<{
+		message: {
+			results: { name: string; document_type: string; ok: boolean; error?: string }[];
+			generated: number;
+			failed: number;
+		};
+	}>(API.generateAllDocuments);
 	const [genName, setGenName] = useState<string | null>(null);
 	const [genErr, setGenErr] = useState<{ name: string; msg: string } | null>(null);
+	const [bulkBusy, setBulkBusy] = useState(false);
+	const [bulkMsg, setBulkMsg] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null);
 
 	const docs = data?.message.documents ?? [];
 	const types = data?.message.document_types ?? [];
 	const done = docs.filter(docIsDone).length;
 	// origin + print format decide whether ExportFlow can produce the PDF itself
 	const typeMap = new Map(types.map((t) => [t.name, t] as [string, DocTypeOption]));
+	// rows the "Generate all" pass would actually produce (Pending + generatable)
+	const pendingGeneratable = docs.filter(
+		(d) => d.status === 'Pending' && isGeneratableDoc(typeMap.get(d.document_type)),
+	).length;
 
 	async function onGenerateRow(d: DocInstanceRow) {
 		setGenErr(null);
+		setBulkMsg(null); // a per-row action supersedes the stale bulk banner
 		setGenName(d.name);
 		try {
 			await generate({ name: d.name });
@@ -116,6 +130,30 @@ export function DocumentChecklist({ shipment }: { shipment: string }) {
 			setGenErr({ name: d.name, msg: parseServerError(e) });
 		} finally {
 			setGenName(null);
+		}
+	}
+
+	async function onGenerateAll() {
+		setGenErr(null);
+		setBulkMsg(null);
+		setBulkBusy(true);
+		try {
+			const res = await generateAll({ shipment });
+			const { results, generated, failed } = res.message;
+			await mutate();
+			if (failed > 0) {
+				const failedTypes = Array.from(new Set(results.filter((r) => !r.ok).map((r) => r.document_type)));
+				const shown = failedTypes.slice(0, 2).join(', ') + (failedTypes.length > 2 ? '…' : '');
+				setBulkMsg({ tone: 'err', text: `Generated ${generated}, ${failed} failed: ${shown}` });
+			} else if (generated === 0) {
+				setBulkMsg({ tone: 'ok', text: 'Nothing to generate' });
+			} else {
+				setBulkMsg({ tone: 'ok', text: `Generated ${generated} document${generated === 1 ? '' : 's'}` });
+			}
+		} catch (e) {
+			setBulkMsg({ tone: 'err', text: parseServerError(e) });
+		} finally {
+			setBulkBusy(false);
 		}
 	}
 
@@ -141,7 +179,23 @@ export function DocumentChecklist({ shipment }: { shipment: string }) {
 				count={docs.length ? `${done} / ${docs.length}` : undefined}
 				bar={docs.length ? (done / docs.length) * 100 : undefined}
 				action={
-					<span style={{ display: 'flex', gap: 14 }}>
+					<span style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+						{bulkMsg && (
+							<span className={bulkMsg.tone === 'err' ? 'ferr' : 'fhint'} style={{ fontSize: 12 }}>
+								{bulkMsg.text}
+							</span>
+						)}
+						{pendingGeneratable > 0 && (
+							<a
+								href="#"
+								onClick={(e) => {
+									e.preventDefault();
+									if (!bulkBusy) void onGenerateAll();
+								}}
+							>
+								{bulkBusy ? 'Generating…' : 'Generate all'}
+							</a>
+						)}
 						<a
 							href="#"
 							onClick={(e) => {

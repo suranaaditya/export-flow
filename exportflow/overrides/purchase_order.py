@@ -65,6 +65,13 @@ def _resync_trade_types(shipments: list[str]):
 				frappe.db.set_value(
 					"Export Shipment", name, "trade_type", MERCHANTING, update_modified=False
 				)
+				# the db_set flip skips validate, so bring the milestone grid to the
+				# simpler merchanting set too (only when nothing has been completed)
+				from exportflow.exportflow.doctype.export_shipment.export_shipment import (
+					reseed_merchanting_milestones,
+				)
+
+				reseed_merchanting_milestones(name)
 		except Exception:
 			frappe.log_error(title="MTT trade-type resync failed", message=name)
 

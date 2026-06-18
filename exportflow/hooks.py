@@ -47,7 +47,14 @@ doc_events = {
 	"Export Shipment": {
 		"on_update": [
 			"exportflow.checklist.on_shipment_update",
+			# document facts (shipping bill / LEO / bl-awb date) fast-forward the
+			# milestone chain — runs after the checklist rebuild so the blocking
+			# state it respects is current
+			"exportflow.exportflow.doctype.export_shipment.export_shipment.advance_milestones_from_facts",
 			"exportflow.exportflow.doctype.export_realization.export_realization.resync_due_dates_for_shipment",
+			# the departure date fills the FEMA export_date on the auto-created
+			# realization shell (resync only moves an already-formula'd due)
+			"exportflow.exportflow.doctype.export_realization.export_realization.fill_export_dates_for_shipment",
 			# a fully-shipped drop-ship PO is delivered — flip its status so the SO advances
 			"exportflow.overrides.purchase_order.mark_covered_pos_delivered",
 		],

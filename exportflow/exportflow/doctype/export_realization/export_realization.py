@@ -57,6 +57,44 @@ def resync_due_dates_for_shipment(doc, method=None):
 			frappe.db.set_value("Export Realization", r.name, "due_date", new_exp, update_modified=False)
 
 
+def fill_export_dates_for_shipment(doc, method=None):
+	"""Export Shipment on_update hook (companion to the auto-created realization
+	shell): when the BL/AWB date is first entered, fill the FEMA export_date —
+	and the due date — on the shipment's realizations that are still waiting for
+	it. resync_due_dates_for_shipment only *moves* a due that already tracked a
+	formula, so it can never backfill a shell created at CI time with a blank
+	export_date; this closes that gap.
+
+	Only blank export_dates are filled (never overwrite a manual one); closed
+	realizations are left alone; the due date is set only when itself still blank
+	(a deliberate manual due survives)."""
+	before = doc.get_doc_before_save()
+	if not before:
+		return
+	dep_field = "awb_date" if doc.mode == "Air" else "bl_date"
+	dep_date = doc.get(dep_field)
+	if not dep_date or before.get(dep_field):
+		return  # only when the departure date is newly set
+
+	completion_months, _ = mtt_months(frappe.get_cached_doc("ExportFlow Settings"))
+	facts = {f: doc.get(f) for f in ("trade_type", "mtt_commencement_date", "etd")}
+	closed = ("Realized", "eBRC Closed", "Written Off", "Cancelled")
+	for r in frappe.get_all(
+		"Export Realization",
+		filters={
+			"shipment": doc.name,
+			"export_date": ["is", "not set"],
+			"status": ["not in", closed],
+		},
+		fields=["name", "currency", "due_date"],
+	):
+		updates = {"export_date": dep_date}
+		new_due = expected_due(facts, dep_date, r.currency, completion_months)
+		if new_due and not r.due_date:
+			updates["due_date"] = new_due
+		frappe.db.set_value("Export Realization", r.name, updates, update_modified=False)
+
+
 class ExportRealization(Document):
 	def validate(self):
 		if not self.company and self.shipment:

@@ -1931,11 +1931,29 @@ def update_document_instance(name: str, values) -> dict:
 				doc.document_type
 			)
 		)
+	prev_number = doc.document_number
 	for field, value in values.items():
 		if field in INSTANCE_DATE_FIELDS and not value:
 			value = None
 		doc.set(field, value)
 	doc.save()
+	# the auto-created realization is keyed on the Commercial Invoice number — if
+	# the user renumbers the CI, re-point its shell so regeneration stays
+	# idempotent (a stale number would orphan the shell and let a duplicate open)
+	if (
+		doc.document_type == "Commercial Invoice"
+		and doc.shipment
+		and prev_number
+		and prev_number != doc.document_number
+	):
+		for rel in frappe.get_all(
+			"Export Realization",
+			filters={"shipment": doc.shipment, "export_invoice": prev_number},
+			pluck="name",
+		):
+			frappe.db.set_value(
+				"Export Realization", rel, "export_invoice", doc.document_number, update_modified=False
+			)
 	return {"name": doc.name, "status": doc.status}
 
 
@@ -1955,6 +1973,123 @@ def attach_document_file(name: str, file_url: str) -> dict:
 	return {"file": file_url}
 
 
+def _auto_create_realization(doc) -> None:
+	"""A Commercial Invoice has been generated → ensure an Export Realization
+	shell exists for the shipment so the FEMA proceeds clock is tracked from the
+	moment the export value is known. Idempotent at the SHIPMENT level (one
+	auto-shell per shipment — never duplicates an imported/historical realization
+	nor a re-generation), gated by ExportFlow Settings.auto_create_realization, and
+	created for merchanting too (its realization tracks the MTT/EDPMS clock — unlike
+	incentives, which a merchanting trade cannot earn). The realization
+	controller fills customer and, once departed, export_date + the FEMA due
+	date. Never raises — the caller wraps it, and it must never block the PDF."""
+	# default ON: an unset Single field reads as None (the JSON default is not
+	# materialised in tabSingles until the doc is saved), so treat None as enabled
+	# and only skip on an explicit 0
+	enabled = frappe.db.get_single_value("ExportFlow Settings", "auto_create_realization")
+	if enabled is not None and not enabled:
+		return
+	if not doc.shipment or not doc.document_number:
+		return
+	# one auto-opened realization per shipment. Keying on the shipment (not the
+	# invoice number) is what makes this safe against the historical/imported
+	# realizations — those carry the MIS invoice number, so a per-(shipment,
+	# number) check would mint a DUPLICATE when an old shipment's CI is generated.
+	# A genuine second invoice on one shipment is added manually from the finance
+	# card; this automation only ensures the first shell exists.
+	if frappe.db.exists("Export Realization", {"shipment": doc.shipment}):
+		return
+	seed = _finance_seed(doc.shipment)
+	invoice_value = seed.get("invoice_value")
+	# seed the FX rate so a foreign-currency shell reports the right INR figure on
+	# the finance dashboards (expected_inr = invoice_value × conversion_rate);
+	# _finance_seed already carries both the FCY total and its INR equivalent, so
+	# rate = INR / FCY. Left blank when the value/currency is unknown (the
+	# dashboard then contributes 0 rather than a 1:1 mis-scaling).
+	conversion_rate = None
+	if seed.get("currency") and invoice_value:
+		conversion_rate = flt(flt(seed.get("fob_value_inr")) / flt(invoice_value), 6) or None
+	frappe.get_doc(
+		{
+			"doctype": "Export Realization",
+			"shipment": doc.shipment,
+			"export_invoice": doc.document_number,
+			"status": "Awaiting Realization",
+			# currency only when the shipment's sales orders agree; the FCY value
+			# is meaningful only within one currency (else both left blank)
+			"currency": seed.get("currency") or None,
+			"invoice_value": invoice_value or None,
+			"conversion_rate": conversion_rate,
+		}
+	).insert(ignore_permissions=True)
+
+
+@frappe.whitelist()
+def generate_shipment_documents(shipment: str) -> dict:
+	"""Generate every generatable document on a shipment in one pass. Generatable
+	= origin 'Generated' AND a print format that targets Document Instance (the
+	same gate the per-row Generate button uses). Rows already past Pending are
+	left untouched — re-generation stays a deliberate per-row choice. Returns a
+	per-document result so the UI can report partial success."""
+	frappe.has_permission("Export Shipment", "read", doc=shipment, throw=True)
+	frappe.has_permission("Document Instance", "write", throw=True)
+
+	type_map = {t["name"]: t for t in _doc_type_options()}
+	rows = frappe.get_all(
+		"Document Instance",
+		filters={"shipment": shipment},
+		fields=["name", "document_type", "status"],
+		order_by="creation asc",
+		limit_page_length=300,
+	)
+	results = []
+	for row in rows:
+		t = type_map.get(row.document_type)
+		generatable = bool(
+			t and t.get("origin") == "Generated" and t.get("format_doc_type") == "Document Instance"
+		)
+		if not generatable or row.status != "Pending":
+			continue
+		try:
+			res = generate_document(row.name)
+			results.append(
+				{
+					"name": row.name,
+					"document_type": row.document_type,
+					"ok": True,
+					"status": res.get("status"),
+				}
+			)
+		except frappe.PermissionError:
+			# an expected authz denial on a specific instance — report it as a
+			# failed row, but don't log it as an application error
+			results.append(
+				{
+					"name": row.name,
+					"document_type": row.document_type,
+					"ok": False,
+					"error": "Not permitted",
+				}
+			)
+		except Exception as e:
+			frappe.log_error(
+				title=f"Generate-all failed: {row.name}", message=frappe.get_traceback()
+			)
+			results.append(
+				{
+					"name": row.name,
+					"document_type": row.document_type,
+					"ok": False,
+					"error": str(e),
+				}
+			)
+	return {
+		"results": results,
+		"generated": sum(1 for r in results if r["ok"]),
+		"failed": sum(1 for r in results if not r["ok"]),
+	}
+
+
 @frappe.whitelist()
 def generate_document(name: str) -> dict:
 	"""§5.2: render the instance's print format to PDF, attach it, move
@@ -1962,6 +2097,10 @@ def generate_document(name: str) -> dict:
 	progress that happened after drafting."""
 	doc = frappe.get_doc("Document Instance", name)
 	doc.check_permission("write")
+	# serialise concurrent generation of the same instance (a double-clicked
+	# Generate, or a bulk pass overlapping a per-row generate) so the CI's
+	# realization shell is opened exactly once
+	frappe.db.get_value("Document Instance", name, "name", for_update=True)
 	dt = frappe.db.get_value(
 		"Document Type", doc.document_type, ["origin", "default_print_format"], as_dict=True
 	)
@@ -2004,6 +2143,18 @@ def generate_document(name: str) -> dict:
 	if doc.status == "Pending":
 		updates["status"] = "Drafted"
 	doc.db_set(updates)
+
+	# the export value is known the moment the Commercial Invoice exists — open
+	# its realization shell now (FEMA due date filled later, at departure). Must
+	# never block the PDF, so it is isolated.
+	if doc.document_type == "Commercial Invoice":
+		try:
+			_auto_create_realization(doc)
+		except Exception:
+			frappe.log_error(
+				title=f"Auto-create realization failed: {doc.name}", message=frappe.get_traceback()
+			)
+
 	return {
 		"file_url": file_doc.file_url,
 		"status": doc.status,
@@ -2517,6 +2668,13 @@ def get_shipment_finance_seed(shipment: str) -> dict:
 	save; export_date is previewed here only so the form shows it. Currency is
 	returned only when every line's sales order shares one (else the user picks)."""
 	frappe.has_permission("Export Shipment", "read", doc=shipment, throw=True)
+	return _finance_seed(shipment)
+
+
+def _finance_seed(shipment: str) -> dict:
+	"""The finance-seed math without the permission gate — shared by the
+	whitelisted endpoint above and the CI-driven realization auto-create (a
+	system action)."""
 	shp = frappe.db.get_value(
 		"Export Shipment",
 		shipment,

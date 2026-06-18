@@ -337,6 +337,21 @@ def send_realization_alerts(today=None) -> list[dict]:
 	):
 		try:
 			days_left = (getdate(r.due_date) - today).days
+			# auto-stamp the "Overdue" status the doctype offers but nothing wrote.
+			# Lossless: only flip the neutral "Awaiting Realization" ↔ "Overdue" so
+			# a deliberate "Lodged with Bank"/"Partially Realized" keeps its meaning
+			# (those still get the weekly overdue nag below). Write only on a real
+			# change to avoid modified-churn and notification noise.
+			if days_left < 0 and r.status == "Awaiting Realization":
+				frappe.db.set_value(
+					"Export Realization", r.name, "status", "Overdue", update_modified=False
+				)
+				r.status = "Overdue"
+			elif days_left >= 0 and r.status == "Overdue":
+				frappe.db.set_value(
+					"Export Realization", r.name, "status", "Awaiting Realization", update_modified=False
+				)
+				r.status = "Awaiting Realization"
 			if _should_alert(days_left, REALIZATION_ALERT_DAYS):
 				inv = r.export_invoice or r.name
 				merchanting = bool(

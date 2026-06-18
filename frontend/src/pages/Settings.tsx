@@ -421,6 +421,7 @@ function ExporterProfilePanel({ canEdit }: { canEdit: boolean }) {
 	const { data, error, isLoading, mutate } = useFrappeGetDoc<
 		Partial<ExporterProfile> & {
 			auto_cha_third_country?: 0 | 1;
+			auto_create_realization?: 0 | 1;
 			company_logo?: string | null;
 			logo_nav_height?: number;
 		}
@@ -432,6 +433,7 @@ function ExporterProfilePanel({ canEdit }: { canEdit: boolean }) {
 	const logoUri = useFrappeGetCall<{ message: { logo: string | null } }>(API.companyLogo, {});
 	const [form, setForm] = useState<ExporterProfile>(EMPTY_PROFILE);
 	const [autoCha, setAutoCha] = useState(false);
+	const [autoRealization, setAutoRealization] = useState(true);
 	const [navHeight, setNavHeight] = useState(28);
 	const [logo, setLogo] = useState<string | null>(null);
 	const [seeded, setSeeded] = useState(false);
@@ -448,6 +450,9 @@ function ExporterProfilePanel({ canEdit }: { canEdit: boolean }) {
 			),
 		}));
 		setAutoCha(!!data.auto_cha_third_country);
+		// default ON — an unset Single field comes back null/undefined, which must
+		// read as enabled (matching the backend), not as an unchecked toggle
+		setAutoRealization(data.auto_create_realization == null ? true : !!data.auto_create_realization);
 		setLogo(data.company_logo ?? null);
 		setNavHeight(Number(data.logo_nav_height) || 28);
 		setSeeded(true);
@@ -498,6 +503,7 @@ function ExporterProfilePanel({ canEdit }: { canEdit: boolean }) {
 				mtt_completion_months: Number(form.mtt_completion_months) || 9,
 				mtt_outlay_months: Number(form.mtt_outlay_months) || 4,
 				auto_cha_third_country: autoCha ? 1 : 0,
+				auto_create_realization: autoRealization ? 1 : 0,
 				logo_nav_height: navHeight || 28,
 			});
 			setSavedTick(true);
@@ -679,6 +685,16 @@ function ExporterProfilePanel({ canEdit }: { canEdit: boolean }) {
 									setAutoCha(v);
 								}}
 								label="Set CHA to “Third Country” automatically on merchanting shipments"
+							/>
+						</div>
+						<div className="span2">
+							<CheckInput
+								checked={autoRealization}
+								onChange={(v) => {
+									setSavedTick(false);
+									setAutoRealization(v);
+								}}
+								label="Open a bank realization automatically when a Commercial Invoice is generated"
 							/>
 						</div>
 					</div>
