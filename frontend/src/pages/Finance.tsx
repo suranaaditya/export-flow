@@ -3,6 +3,8 @@ import { useFrappeGetCall } from 'frappe-react-sdk';
 import { useNavigate } from 'react-router-dom';
 import { Icon, type IconName } from '@/components/Icon';
 import { IncentiveModal, RealizationModal } from '@/components/financeModals';
+import { TextInput } from '@/components/form';
+import { FilterBar, applyFilters, useFilterState, type FilterDef } from '@/components/FilterBar';
 import { Card, CHead, EmptyMsg, Tag } from '@/components/ui';
 import {
 	API,
@@ -30,6 +32,25 @@ function mttRowStatus(t: MTTTrade): { tone: 'ok' | 'pend' | 'err'; label: string
 
 const inr = (v: number | null | undefined) => (v == null ? '—' : fmtMoney(v, 'INR'));
 
+const INC_FILTERS: FilterDef<IncentiveRow>[] = [
+	{
+		key: 'scheme',
+		label: 'Scheme',
+		control: 'select',
+		get: (i) => i.scheme,
+		options: [
+			{ value: 'RoDTEP', label: 'RoDTEP' },
+			{ value: 'Duty Drawback', label: 'Duty Drawback' },
+		],
+	},
+	{ key: 'status', label: 'Status', control: 'select', get: (i) => i.status },
+];
+
+const REAL_FILTERS: FilterDef<RealizationRow>[] = [
+	{ key: 'status', label: 'Status', control: 'select', get: (r) => r.status },
+	{ key: 'overdue', label: 'Overdue only', control: 'toggle', get: (r) => !!r.overdue },
+];
+
 function Kpi({ icon, label, value, detail, tone }: { icon: IconName; label: string; value: string; detail: string; tone?: 'warn' | 'bad' }) {
 	return (
 		<div className="card kpi">
@@ -55,6 +76,25 @@ export function Finance() {
 	const kpis = d?.kpis ?? {};
 	const mttTrades = d?.mtt_trades ?? [];
 	const mttOverdue = (kpis.mtt_completion_overdue ?? 0) + (kpis.mtt_outlay_overdue ?? 0);
+
+	// one search box spans all three tables; status/scheme/overdue scope per table
+	const [query, setQuery] = useState('');
+	const incFilter = useFilterState();
+	const relFilter = useFilterState();
+	const q = query.trim().toLowerCase();
+	const hit = (...vals: (string | null | undefined)[]) =>
+		!q || vals.some((v) => (v ?? '').toLowerCase().includes(q));
+	const incSearched = (d?.incentives ?? []).filter((i) =>
+		hit(i.shipment, i.shipping_bill_no, i.scrip_number, i.scroll_number, i.scheme),
+	);
+	const incentives = applyFilters(incSearched, INC_FILTERS, incFilter.state);
+	const relSearched = (d?.realizations ?? []).filter((r) =>
+		hit(r.export_invoice, r.shipment, r.firc_no, r.ebrc_number, r.customer),
+	);
+	const realizations = applyFilters(relSearched, REAL_FILTERS, relFilter.state);
+	const mttFiltered = mttTrades.filter((t) => hit(t.shipment, t.customer_name));
+	const incFiltering = !!q || INC_FILTERS.some((f) => incFilter.state[f.key]);
+	const relFiltering = !!q || REAL_FILTERS.some((f) => relFilter.state[f.key]);
 	// create gates the "New" actions; write makes rows editable; delete is gated
 	// inside the modal — each is the user's real ERPNext permission
 	const can = d?.can;
@@ -92,6 +132,12 @@ export function Finance() {
 				)}
 			</div>
 
+			{!error && (
+				<div className="field" style={{ width: 300, margin: '2px 0 14px' }}>
+					<TextInput value={query} onChange={setQuery} placeholder="Search invoice, shipment, SB or eBRC" />
+				</div>
+			)}
+
 			{error ? (
 				<Card>
 					<div className="ferr" style={{ padding: '18px 20px' }}>{parseServerError(error)}</div>
@@ -102,20 +148,28 @@ export function Finance() {
 						<CHead
 							icon="shield"
 							title="Export incentives"
-							count={d ? `${d.incentives.length}` : undefined}
+							count={d ? `${incentives.length}` : undefined}
 							action={canIncNew ? <a href="#" onClick={(e) => { e.preventDefault(); setIncModal('new'); }}>New incentive</a> : undefined}
 						/>
+						{d && d.incentives.length > 0 && (
+							<div style={{ padding: '12px 18px 0' }}>
+								<FilterBar rows={incSearched} defs={INC_FILTERS} state={incFilter.state} onChange={incFilter.set} onClear={incFilter.clear} />
+							</div>
+						)}
 						{isLoading ? (
 							<div className="sub" style={{ padding: '14px 18px' }}>Loading…</div>
-						) : !d || d.incentives.length === 0 ? (
-							<EmptyMsg title="No incentives yet" text="RoDTEP and drawback claims per shipment land here." />
+						) : !d || incentives.length === 0 ? (
+							<EmptyMsg
+								title={incFiltering ? 'No matching incentives' : 'No incentives yet'}
+								text={incFiltering ? 'Try a different search or clear the filters.' : 'RoDTEP and drawback claims per shipment land here.'}
+							/>
 						) : (
 							<table className={canIncEdit ? 'clickable' : undefined}>
 								<thead>
 									<tr><th>Scheme</th><th>Shipment</th><th>SB no</th><th>Amount</th><th>Scroll / scrip</th><th>Status</th></tr>
 								</thead>
 								<tbody>
-									{d.incentives.map((i) => (
+									{incentives.map((i) => (
 										<tr key={i.name} onClick={canIncEdit ? () => setIncModal(i) : undefined}>
 											<td className="c1">{i.scheme}</td>
 											<td>{i.shipment ? <span className="id id-sm">{i.shipment}</span> : <span className="dim">—</span>}</td>
@@ -134,20 +188,28 @@ export function Finance() {
 						<CHead
 							icon="banknote"
 							title="Bank realization"
-							count={d ? `${d.realizations.length}` : undefined}
+							count={d ? `${realizations.length}` : undefined}
 							action={canRelNew ? <a href="#" onClick={(e) => { e.preventDefault(); setRelModal('new'); }}>New realization</a> : undefined}
 						/>
+						{d && d.realizations.length > 0 && (
+							<div style={{ padding: '12px 18px 0' }}>
+								<FilterBar rows={relSearched} defs={REAL_FILTERS} state={relFilter.state} onChange={relFilter.set} onClear={relFilter.clear} />
+							</div>
+						)}
 						{isLoading ? (
 							<div className="sub" style={{ padding: '14px 18px' }}>Loading…</div>
-						) : !d || d.realizations.length === 0 ? (
-							<EmptyMsg title="No realizations yet" text="Export-proceeds tracking (FIRC, eBRC, due dates) appears here." />
+						) : !d || realizations.length === 0 ? (
+							<EmptyMsg
+								title={relFiltering ? 'No matching realizations' : 'No realizations yet'}
+								text={relFiltering ? 'Try a different search or clear the filters.' : 'Export-proceeds tracking (FIRC, eBRC, due dates) appears here.'}
+							/>
 						) : (
 							<table className={canRelEdit ? 'clickable' : undefined}>
 								<thead>
 									<tr><th>Invoice</th><th>Shipment</th><th>Received</th><th>Due</th><th>eBRC</th><th>Status</th></tr>
 								</thead>
 								<tbody>
-									{d.realizations.map((r) => (
+									{realizations.map((r) => (
 										<tr key={r.name} onClick={canRelEdit ? () => setRelModal(r) : undefined}>
 											<td className="id">{r.export_invoice ?? r.name}</td>
 											<td>{r.shipment ? <span className="id id-sm">{r.shipment}</span> : <span className="dim">—</span>}</td>
@@ -162,9 +224,9 @@ export function Finance() {
 						)}
 					</Card>
 
-					{mttTrades.length > 0 && (
+					{mttFiltered.length > 0 && (
 						<Card accent>
-							<CHead icon="globe" title="Third-country / merchanting" count={`${mttTrades.length}`} />
+							<CHead icon="globe" title="Third-country / merchanting" count={`${mttFiltered.length}`} />
 							<table className="clickable">
 								<thead>
 									<tr>
@@ -177,7 +239,7 @@ export function Finance() {
 									</tr>
 								</thead>
 								<tbody>
-									{mttTrades.map((t) => {
+									{mttFiltered.map((t) => {
 										const st = mttRowStatus(t);
 										return (
 											<tr key={t.shipment} onClick={() => navigate(`/shipments/${t.shipment}`)}>
