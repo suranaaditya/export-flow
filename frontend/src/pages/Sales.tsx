@@ -142,7 +142,7 @@ export function Sales() {
 					}
 				/>
 				<Kpi
-					icon="rupee"
+					icon="download"
 					label="Received"
 					value={inr(kpis.pfi_received_inr)}
 					detail={
@@ -183,7 +183,7 @@ export function Sales() {
 						tone={kpis.incentive_pending_inr && kpis.incentive_pending_inr > 0 ? 'warn' : undefined}
 					/>
 					<Kpi
-						icon="banknote"
+						icon="circle-check"
 						label="Proceeds realized"
 						value={inr(kpis.realized_inr)}
 						detail={
