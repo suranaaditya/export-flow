@@ -94,11 +94,15 @@ export function FilterBar<Row>({
 				}
 				const opts = def.options ?? derived[def.key] ?? [];
 				const sel = state[def.key] ?? '';
+				// keep the active selection visible even if the search narrowed the
+				// derived options past it (else the control reads blank while still filtering)
+				const shown =
+					sel && !opts.some((o) => o.value === sel) ? [{ value: sel, label: sel }, ...opts] : opts;
 				return (
 					<div key={def.key} className={`fsel${sel ? ' on' : ''}`}>
 						<select value={sel} onChange={(e) => onChange(def.key, e.target.value)} aria-label={def.label}>
 							<option value="">{def.label}</option>
-							{opts.map((o) => (
+							{shown.map((o) => (
 								<option key={o.value} value={o.value}>
 									{o.label}
 								</option>

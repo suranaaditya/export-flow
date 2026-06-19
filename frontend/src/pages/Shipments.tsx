@@ -3,9 +3,36 @@ import { useFrappeGetCall } from 'frappe-react-sdk';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
 import { TextInput } from '@/components/form';
+import { FilterBar, applyFilters, useFilterState, type FilterDef } from '@/components/FilterBar';
 import { Card, CHead, EmptyMsg, Tag } from '@/components/ui';
 import { API, parseServerError, type ShipmentListRow } from '@/lib/api';
 import { fmtDate } from '@/lib/format';
+
+const SHIPMENT_FILTERS: FilterDef<ShipmentListRow>[] = [
+	{
+		key: 'mode',
+		label: 'Mode',
+		control: 'select',
+		get: (r) => r.mode,
+		options: [
+			{ value: 'Sea', label: 'Sea' },
+			{ value: 'Air', label: 'Air' },
+		],
+	},
+	{
+		key: 'trade',
+		label: 'Trade type',
+		control: 'select',
+		// an untagged shipment is an ordinary export — never let it vanish from the
+		// "Export from India" filter (the doctype default + the create path)
+		get: (r) => r.trade_type || 'Export from India',
+		options: [
+			{ value: 'Export from India', label: 'Export from India' },
+			{ value: 'Third-country / Merchanting', label: 'Merchanting' },
+		],
+	},
+	{ key: 'milestone', label: 'Milestone', control: 'select', get: (r) => r.current_milestone },
+];
 
 export function Shipments() {
 	const navigate = useNavigate();
@@ -17,16 +44,20 @@ export function Shipments() {
 	);
 	const all = data?.message;
 
-	const rows = useMemo(() => {
+	const { state, set, clear } = useFilterState();
+	const searched = useMemo(() => {
 		const list = all ?? [];
 		const q = query.trim().toLowerCase();
 		if (!q) return list;
 		return list.filter(
 			(r) =>
 				r.name.toLowerCase().includes(q) ||
-				(r.customer_name ?? '').toLowerCase().includes(q),
+				(r.customer_name ?? '').toLowerCase().includes(q) ||
+				(r.port_of_loading ?? '').toLowerCase().includes(q) ||
+				(r.port_of_discharge ?? '').toLowerCase().includes(q),
 		);
 	}, [all, query]);
+	const rows = useMemo(() => applyFilters(searched, SHIPMENT_FILTERS, state), [searched, state]);
 
 	return (
 		<main>
@@ -54,6 +85,14 @@ export function Shipments() {
 					<Icon name="plus" size={15} /> New shipment
 				</button>
 			</div>
+
+			<FilterBar
+				rows={searched}
+				defs={SHIPMENT_FILTERS}
+				state={state}
+				onChange={set}
+				onClear={clear}
+			/>
 
 			<Card accent>
 				<CHead icon="ship" title="Shipments" count={`${rows.length} shown`} />

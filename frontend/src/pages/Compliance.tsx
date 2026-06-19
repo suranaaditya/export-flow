@@ -9,6 +9,7 @@ import {
 } from 'frappe-react-sdk';
 import { Icon } from '@/components/Icon';
 import { Field, SearchSelect, SelectInput, TextArea, TextInput } from '@/components/form';
+import { FilterBar, applyFilters, useFilterState, type FilterDef } from '@/components/FilterBar';
 import { Card, CHead, EmptyMsg, Modal, Tag } from '@/components/ui';
 import { API, parseServerError } from '@/lib/api';
 import { daysUntil, fmtDate } from '@/lib/format';
@@ -49,8 +50,41 @@ function expiryChip(row: ComplianceRow): { tone: 'ok' | 'pend' | 'err'; label: s
 	return { tone: 'ok', label: 'Valid' };
 }
 
+/** Renewal bucket for filtering — mirrors the 60/30/7 alert tiers. */
+function renewalBucket(r: ComplianceRow): string {
+	if (r.status !== 'Active') return '';
+	if (!r.expiry_date) return 'No expiry';
+	const d = daysUntil(r.expiry_date);
+	if (d === null) return '';
+	if (d < 0) return 'Overdue';
+	if (d <= 7) return 'Within 7 days';
+	if (d <= 30) return 'Within 30 days';
+	if (d <= 60) return 'Within 60 days';
+	return 'Valid';
+}
+
+const COMPLIANCE_FILTERS: FilterDef<ComplianceRow>[] = [
+	{ key: 'type', label: 'Type', control: 'select', get: (r) => r.compliance_type },
+	{
+		key: 'renewal',
+		label: 'Renewal',
+		control: 'select',
+		get: renewalBucket,
+		options: [
+			{ value: 'Overdue', label: 'Overdue' },
+			{ value: 'Within 7 days', label: 'Within 7 days' },
+			{ value: 'Within 30 days', label: 'Within 30 days' },
+			{ value: 'Within 60 days', label: 'Within 60 days' },
+			{ value: 'Valid', label: 'Valid' },
+			{ value: 'No expiry', label: 'No expiry' },
+		],
+	},
+];
+
 export function Compliance() {
 	const [showArchived, setShowArchived] = useState(false);
+	const [query, setQuery] = useState('');
+	const { state, set, clear } = useFilterState();
 	const [modal, setModal] = useState<'new' | ComplianceRow | null>(null);
 
 	const perms = useFrappeGetCall<{
@@ -80,10 +114,22 @@ export function Compliance() {
 		},
 	);
 
-	const rows = useMemo(() => {
+	const base = useMemo(() => {
 		const all = data ?? [];
 		return showArchived ? all : all.filter((r) => r.status === 'Active');
 	}, [data, showArchived]);
+	const searched = useMemo(() => {
+		const q = query.trim().toLowerCase();
+		if (!q) return base;
+		return base.filter(
+			(r) =>
+				(r.title ?? '').toLowerCase().includes(q) ||
+				(r.reference_number ?? '').toLowerCase().includes(q) ||
+				(r.compliance_type ?? '').toLowerCase().includes(q) ||
+				(r.notes ?? '').toLowerCase().includes(q),
+		);
+	}, [base, query]);
+	const rows = useMemo(() => applyFilters(searched, COMPLIANCE_FILTERS, state), [searched, state]);
 
 	const expiring = (data ?? []).filter((r) => {
 		const days = r.status === 'Active' && r.expiry_date ? daysUntil(r.expiry_date) : null;
@@ -117,6 +163,11 @@ export function Compliance() {
 				</div>
 			)}
 
+			<div className="field" style={{ width: 280, margin: '4px 0 12px' }}>
+				<TextInput value={query} onChange={setQuery} placeholder="Search title, reference or type" />
+			</div>
+			<FilterBar rows={searched} defs={COMPLIANCE_FILTERS} state={state} onChange={set} onClear={clear} />
+
 			<div>
 				<Card accent>
 					<CHead
@@ -142,10 +193,17 @@ export function Compliance() {
 					) : error ? (
 						<div className="ferr" style={{ padding: '14px 18px' }}>{parseServerError(error)}</div>
 					) : rows.length === 0 ? (
-						<EmptyMsg
-							title="No records yet"
-							text="Add the IEC, GST registration, LUT, RCMC, drug licences, AD codes and bank details here."
-						/>
+						query.trim() || COMPLIANCE_FILTERS.some((dfn) => state[dfn.key]) ? (
+							<EmptyMsg
+								title="No matching records"
+								text="Try a different search, or clear the filters."
+							/>
+						) : (
+							<EmptyMsg
+								title="No records yet"
+								text="Add the IEC, GST registration, LUT, RCMC, drug licences, AD codes and bank details here."
+							/>
+						)
 					) : (
 						<table className={canWrite ? 'clickable' : undefined}>
 							<thead>

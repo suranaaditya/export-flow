@@ -514,7 +514,8 @@ footer b { color: var(--fg-3); font-weight: 500 }
 .fchip:hover { border-color: var(--hairline-2); color: var(--fg-1) }
 .fchip.on { background: var(--iris-tint); border-color: transparent; color: var(--iris); font-weight: 500 }
 .fsel { position: relative; display: inline-flex; align-items: center }
-.fsel select { appearance: none; -webkit-appearance: none; font-size: 12.5px; padding: 6px 28px 6px 13px; border-radius: 999px; border: 1px solid var(--hairline); background: var(--bg-card); color: var(--fg-2); cursor: pointer; transition: border-color .16s var(--ease), color .16s var(--ease) }
+.fsel select { appearance: none; -webkit-appearance: none; font-size: 12.5px; padding: 6px 28px 6px 13px; border-radius: 999px; border: 1px solid var(--hairline); background: var(--surface-1); color: var(--fg-2); cursor: pointer; transition: border-color .16s var(--ease), color .16s var(--ease) }
+.fsel option { background: var(--surface-1); color: var(--fg-1) }
 .fsel select:hover { border-color: var(--hairline-2); color: var(--fg-1) }
 .fsel.on select { background: var(--iris-tint); border-color: transparent; color: var(--iris); font-weight: 500 }
 .fsel svg { position: absolute; right: 10px; pointer-events: none; color: var(--fg-3) }

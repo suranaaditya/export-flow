@@ -3,6 +3,7 @@ import { useFrappeGetCall } from 'frappe-react-sdk';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
 import { TextInput } from '@/components/form';
+import { FilterBar, applyFilters, useFilterState, type FilterDef } from '@/components/FilterBar';
 import { Card, CHead, EmptyMsg, Tag } from '@/components/ui';
 import { API, parseServerError, poTone, urgencyTone, type POListRow } from '@/lib/api';
 import { daysUntil, fmtDate, fmtMoney } from '@/lib/format';
@@ -16,6 +17,36 @@ function GstClock({ row }: { row: POListRow }) {
 	return <Tag tone={tone}>Export by {fmtDate(row.gst_export_deadline)}</Tag>;
 }
 
+/** Actionable bucket for the 90-day merchant-export re-export clock. */
+function gstBucket(r: POListRow): string {
+	if (!r.merchant_export_scheme) return 'Not applicable';
+	if (!r.gst_export_deadline) return 'Awaiting invoice';
+	const d = daysUntil(r.gst_export_deadline);
+	if (d === null) return ''; // unparseable date — treat as on track, not <30d
+	if (d < 0) return 'Overdue';
+	if (d <= 30) return 'Due <30 days';
+	return ''; // on track (>30d) — not a selectable bucket
+}
+
+const PO_FILTERS: FilterDef<POListRow>[] = [
+	// the chip shows "Draft" for any unsubmitted PO regardless of raw status
+	{ key: 'status', label: 'Status', control: 'select', get: (r) => (r.docstatus === 0 ? 'Draft' : r.status) },
+	{ key: 'supplier', label: 'Supplier', control: 'select', get: (r) => r.supplier_name },
+	{
+		key: 'gst',
+		label: 'GST clock',
+		control: 'select',
+		get: gstBucket,
+		options: [
+			{ value: 'Overdue', label: 'Overdue' },
+			{ value: 'Due <30 days', label: 'Due <30 days' },
+			{ value: 'Awaiting invoice', label: 'Awaiting invoice' },
+			{ value: 'Not applicable', label: 'Not applicable' },
+		],
+	},
+	{ key: 'scheme', label: '0.1% scheme only', control: 'toggle', get: (r) => !!r.merchant_export_scheme },
+];
+
 export function Purchases() {
 	const navigate = useNavigate();
 	const [query, setQuery] = useState('');
@@ -25,7 +56,8 @@ export function Purchases() {
 		undefined,
 	);
 
-	const rows = useMemo(() => {
+	const { state, set, clear } = useFilterState();
+	const searched = useMemo(() => {
 		const all = data?.message ?? [];
 		const q = query.trim().toLowerCase();
 		if (!q) return all;
@@ -33,9 +65,11 @@ export function Purchases() {
 			(r) =>
 				r.name.toLowerCase().includes(q) ||
 				(r.supplier_name ?? '').toLowerCase().includes(q) ||
+				(r.supplier_invoice_no ?? '').toLowerCase().includes(q) ||
 				r.sales_orders.some((so) => so.toLowerCase().includes(q)),
 		);
 	}, [data, query]);
+	const rows = useMemo(() => applyFilters(searched, PO_FILTERS, state), [searched, state]);
 
 	return (
 		<main>
@@ -63,6 +97,8 @@ export function Purchases() {
 					<Icon name="plus" size={15} /> New purchase order
 				</button>
 			</div>
+
+			<FilterBar rows={searched} defs={PO_FILTERS} state={state} onChange={set} onClear={clear} />
 
 			<Card accent>
 				<CHead icon="cube" title="Purchase orders" count={`${rows.length} shown`} />
