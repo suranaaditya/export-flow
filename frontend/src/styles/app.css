@@ -533,7 +533,7 @@ footer b { color: var(--fg-3); font-weight: 500 }
 .rankrow { position: relative; padding: 11px 16px; border-bottom: 1px solid var(--hairline); transition: background .15s var(--ease) }
 .rankrow:last-child { border-bottom: 0 }
 .rankrow:hover { background: var(--row-hover) }
-.rrfill { position: absolute; top: 0; left: 0; bottom: 0; background: linear-gradient(90deg, var(--iris-tint), var(--cyan-tint)); pointer-events: none }
+.rrfill { position: absolute; top: 5px; left: 0; bottom: 5px; border-radius: 0 7px 7px 0; background: linear-gradient(90deg, var(--iris-tint), var(--cyan-tint)); pointer-events: none }
 .rrbody { position: relative; display: flex; align-items: center; gap: 11px }
 .rrnum { flex: none; width: 15px; text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 12px; color: var(--fg-3) }
 .rrname { min-width: 0; flex: 1 }
