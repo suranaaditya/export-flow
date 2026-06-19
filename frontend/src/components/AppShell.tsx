@@ -7,12 +7,12 @@ import { useTheme } from '@/lib/theme';
 
 const NAV_ITEMS: { to: string; label: string; icon: IconName }[] = [
 	{ to: '/', label: 'Dashboard', icon: 'layers' },
-	{ to: '/sales', label: 'Sales', icon: 'rupee' },
+	{ to: '/sales', label: 'Sales', icon: 'sparkle' },
 	{ to: '/sales-orders', label: 'Sales orders', icon: 'file-text' },
 	{ to: '/purchases', label: 'Purchases', icon: 'cube' },
 	{ to: '/shipments', label: 'Shipments', icon: 'ship' },
 	{ to: '/documents', label: 'Documents', icon: 'copy' },
-	{ to: '/finance', label: 'Finance', icon: 'banknote' },
+	{ to: '/finance', label: 'Finance', icon: 'rupee' },
 	{ to: '/compliance', label: 'Compliance', icon: 'shield-check' },
 ];
 
