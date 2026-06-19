@@ -31,7 +31,7 @@ function gstBucket(r: POListRow): string {
 const PO_FILTERS: FilterDef<POListRow>[] = [
 	// the chip shows "Draft" for any unsubmitted PO regardless of raw status
 	{ key: 'status', label: 'Status', control: 'select', get: (r) => (r.docstatus === 0 ? 'Draft' : r.status) },
-	{ key: 'supplier', label: 'Supplier', control: 'select', get: (r) => r.supplier_name },
+	{ key: 'supplier', label: 'Supplier', control: 'searchselect', get: (r) => r.supplier_name },
 	{
 		key: 'gst',
 		label: 'GST clock',

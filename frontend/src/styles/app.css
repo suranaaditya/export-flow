@@ -522,3 +522,8 @@ footer b { color: var(--fg-3); font-weight: 500 }
 .fsel.on svg { color: var(--iris) }
 .fclear { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 6px 11px; border-radius: 999px; border: 1px dashed var(--hairline-2); background: transparent; color: var(--fg-3); cursor: pointer; transition: color .16s var(--ease) }
 .fclear:hover { color: var(--err) }
+
+.fsearchsel { width: 200px }
+.fsearchsel .swrap { width: 100% }
+.fsearchsel .inp { height: 34px; font-size: 12.5px; border-radius: 999px }
+.fsearchsel.on .inp { border-color: var(--iris); color: var(--iris) }

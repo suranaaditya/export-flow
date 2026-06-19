@@ -3,6 +3,7 @@ import { useFrappeGetDocList } from 'frappe-react-sdk';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
 import { TextInput } from '@/components/form';
+import { FilterBar, applyFilters, useFilterState, type FilterDef } from '@/components/FilterBar';
 import { Card, CHead, EmptyMsg, Tag } from '@/components/ui';
 import { soTone } from '@/lib/api';
 import { fmtDate, fmtMoney } from '@/lib/format';
@@ -18,6 +19,13 @@ interface SOListRow {
 	status: string;
 	incoterm: string | null;
 }
+
+const SO_FILTERS: FilterDef<SOListRow>[] = [
+	{ key: 'status', label: 'Status', control: 'select', get: (r) => r.status },
+	{ key: 'customer', label: 'Customer', control: 'searchselect', get: (r) => r.customer_name },
+	{ key: 'currency', label: 'Currency', control: 'select', get: (r) => r.currency },
+	{ key: 'incoterm', label: 'Incoterm', control: 'select', get: (r) => r.incoterm ?? '' },
+];
 
 export function SalesOrders() {
 	const navigate = useNavigate();
@@ -40,16 +48,20 @@ export function SalesOrders() {
 		limit: 50,
 	});
 
-	const rows = useMemo(() => {
+	const { state, set, clear } = useFilterState();
+	const searched = useMemo(() => {
 		const all = data ?? [];
 		const q = query.trim().toLowerCase();
 		if (!q) return all;
 		return all.filter(
 			(r) =>
 				r.name.toLowerCase().includes(q) ||
-				(r.customer_name ?? '').toLowerCase().includes(q),
+				(r.customer_name ?? '').toLowerCase().includes(q) ||
+				(r.incoterm ?? '').toLowerCase().includes(q) ||
+				(r.currency ?? '').toLowerCase().includes(q),
 		);
 	}, [data, query]);
+	const rows = useMemo(() => applyFilters(searched, SO_FILTERS, state), [searched, state]);
 
 	return (
 		<main>
@@ -77,6 +89,8 @@ export function SalesOrders() {
 					<Icon name="plus" size={15} /> New sales order
 				</button>
 			</div>
+
+			<FilterBar rows={searched} defs={SO_FILTERS} state={state} onChange={set} onClear={clear} />
 
 			<Card accent>
 				<CHead icon="file-text" title="Sales orders" count={`${rows.length} shown`} />

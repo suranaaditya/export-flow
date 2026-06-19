@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react';
 import { Icon } from '@/components/Icon';
+import { SearchSelect } from '@/components/form';
 
 /** A config-driven filter bar for list views. Filters are applied CLIENT-SIDE
  *  over the already-fetched rows (the lists are bounded), so adding a filter is
- *  just a row-field accessor — no endpoint changes. */
-export type FilterControl = 'select' | 'toggle';
+ *  just a row-field accessor — no endpoint changes. `searchselect` is a type-ahead
+ *  dropdown for long option lists (customers, suppliers). */
+export type FilterControl = 'select' | 'toggle' | 'searchselect';
 
 export interface FilterDef<Row> {
 	key: string;
@@ -98,6 +100,19 @@ export function FilterBar<Row>({
 				// derived options past it (else the control reads blank while still filtering)
 				const shown =
 					sel && !opts.some((o) => o.value === sel) ? [{ value: sel, label: sel }, ...opts] : opts;
+				if (def.control === 'searchselect') {
+					// type-ahead for long option lists; the "All" row clears this filter
+					return (
+						<div key={def.key} className={`fsearchsel${sel ? ' on' : ''}`}>
+							<SearchSelect
+								value={sel}
+								onChange={(v) => onChange(def.key, v)}
+								options={[{ value: '', label: `All ${def.label.toLowerCase()}` }, ...shown]}
+								placeholder={def.label}
+							/>
+						</div>
+					);
+				}
 				return (
 					<div key={def.key} className={`fsel${sel ? ' on' : ''}`}>
 						<select value={sel} onChange={(e) => onChange(def.key, e.target.value)} aria-label={def.label}>

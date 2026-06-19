@@ -32,6 +32,7 @@ const SHIPMENT_FILTERS: FilterDef<ShipmentListRow>[] = [
 		],
 	},
 	{ key: 'milestone', label: 'Milestone', control: 'select', get: (r) => r.current_milestone },
+	{ key: 'customer', label: 'Customer', control: 'searchselect', get: (r) => r.customer_name },
 ];
 
 export function Shipments() {
