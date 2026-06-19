@@ -542,3 +542,19 @@ footer b { color: var(--fg-3); font-weight: 500 }
 .rrval { flex: none; text-align: right; white-space: nowrap }
 .rrval .data { display: block; font-size: 13.5px }
 .rrshare { display: block; font-size: 11px; color: var(--fg-3); margin-top: 1px }
+
+/* Reports — filterable register table */
+.repfilters { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 18px 4px }
+.repdates { display: flex; align-items: center; gap: 8px }
+.repdlb { font-size: 12px; color: var(--fg-3) }
+.reptable { overflow-x: auto }
+.reptable table { width: 100%; border-collapse: collapse; font-size: 12.5px; white-space: nowrap }
+.reptable thead th { text-align: left; font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--fg-3); font-weight: 600; padding: 9px 12px; border-bottom: 1px solid var(--hairline-2) }
+.reptable tbody td { padding: 8px 12px; border-bottom: 1px solid var(--hairline) }
+.reptable th.inr, .reptable th.num, .reptable th.pct, .reptable th.days,
+.reptable td.inr, .reptable td.num, .reptable td.pct, .reptable td.days { text-align: right }
+.reptable td.inr, .reptable td.num, .reptable td.pct, .reptable td.days { font-family: var(--font-mono); font-variant-numeric: tabular-nums }
+.reptable td.inr { color: var(--cyan); font-weight: 500 }
+.reptable tbody tr:hover td { background: var(--row-hover) }
+.reptable .reptot td { font-weight: 600; background: var(--bg-sunken); border-bottom: none }
+.reptable .reptot td.inr { color: var(--cyan) }

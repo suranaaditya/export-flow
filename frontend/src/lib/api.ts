@@ -173,7 +173,35 @@ export const API = {
 	closeOrder: 'exportflow.api.close_order',
 	reopenOrder: 'exportflow.api.reopen_order',
 	companyLogo: 'exportflow.api.get_company_logo',
+	reportList: 'exportflow.reports.report_list',
+	reportData: 'exportflow.reports.report_data',
 } as const;
+
+export type ReportColType = 'text' | 'id' | 'inr' | 'num' | 'pct' | 'date' | 'days' | 'tag';
+export interface ReportColumn {
+	key: string;
+	label: string;
+	type: ReportColType;
+}
+export interface ReportFilterDef {
+	key: string;
+	label: string;
+	control: 'daterange' | 'select' | 'searchselect' | 'toggle';
+	field: string;
+}
+export interface ReportData {
+	title: string;
+	columns: ReportColumn[];
+	filters: ReportFilterDef[];
+	rows: Record<string, string | number | boolean | null>[];
+	company: string | null;
+}
+export interface ReportCatalogItem {
+	key: string;
+	title: string;
+	sub: string;
+	icon: string;
+}
 
 // ---- Phase 6: export incentives + bank realization ----
 

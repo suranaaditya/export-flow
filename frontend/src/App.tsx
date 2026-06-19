@@ -15,6 +15,7 @@ import { NewPurchaseOrder } from '@/pages/NewPurchaseOrder';
 import { NewShipment } from '@/pages/NewShipment';
 import { PurchaseOrderDetail } from '@/pages/PurchaseOrderDetail';
 import { Purchases } from '@/pages/Purchases';
+import { Reports } from '@/pages/Reports';
 import { ShipmentDetail } from '@/pages/ShipmentDetail';
 import { SalesOrderDetail } from '@/pages/SalesOrderDetail';
 import { SalesOrders } from '@/pages/SalesOrders';
@@ -67,6 +68,7 @@ export default function App() {
 								<Route path="shipments/:id" element={<ShipmentDetail />} />
 								<Route path="documents" element={<Documents />} />
 								<Route path="finance" element={<Finance />} />
+								<Route path="reports" element={<Reports />} />
 								<Route path="compliance" element={<Compliance />} />
 								<Route path="settings" element={<Settings />} />
 							</Route>
