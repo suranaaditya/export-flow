@@ -44,51 +44,45 @@ function Kpi({
 	);
 }
 
-/** Horizontal bar row for the breakdown cards. */
+/** Ranked breakdown row: the whole row is a proportional fill (relative to the
+ *  top value) with a rank, name, value and share-of-total %. */
 function BarRow({
+	rank,
 	label,
 	sub,
 	value,
 	max,
+	total,
 	onClick,
 }: {
+	rank?: number;
 	label: string;
 	sub?: string;
 	value: number;
 	max: number;
+	total?: number;
 	onClick?: () => void;
 }) {
+	const fill = max ? Math.max(2, (value / max) * 100) : 0;
+	const share = total ? Math.round((value / total) * 100) : null;
 	return (
 		<div
-			className="row"
-			style={{ cursor: onClick ? 'pointer' : 'default', alignItems: 'center' }}
+			className="rankrow"
+			style={{ cursor: onClick ? 'pointer' : 'default' }}
 			onClick={onClick}
+			role={onClick ? 'button' : undefined}
 		>
-			<span className="tx">
-				<span className="t1" style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-					<span>{label}</span>
+			<span className="rrfill" style={{ width: `${fill}%` }} />
+			<span className="rrbody">
+				{rank != null && <span className="rrnum">{rank}</span>}
+				<span className="rrname">
+					<span className="rrlabel">{label}</span>
+					{sub && <span className="rrsub">{sub}</span>}
+				</span>
+				<span className="rrval">
 					<span className="data">{inr(value)}</span>
+					{share != null && <span className="rrshare">{share}% of exports</span>}
 				</span>
-				<span
-					className="seg"
-					style={{ marginTop: 6, height: 4, borderRadius: 3, background: 'var(--surface-3)' }}
-				>
-					<i
-						className="f"
-						style={{
-							display: 'block',
-							height: '100%',
-							borderRadius: 3,
-							width: `${max ? Math.max(3, (value / max) * 100) : 0}%`,
-							background: 'var(--brand-grad)',
-						}}
-					/>
-				</span>
-				{sub && (
-					<span className="t2" style={{ display: 'block', marginTop: 3 }}>
-						{sub}
-					</span>
-				)}
 			</span>
 		</div>
 	);
@@ -214,14 +208,16 @@ export function Sales() {
 						) : !d || d.by_customer.length === 0 ? (
 							<EmptyMsg title="No orders yet" text="Booked sales orders rank here by value." />
 						) : (
-							<div className="rows">
-								{d.by_customer.map((c) => (
+							<div className="ranklist">
+								{d.by_customer.map((c, i) => (
 									<BarRow
 										key={c.customer}
+										rank={i + 1}
 										label={c.customer}
 										sub={`${c.orders} order${c.orders === 1 ? '' : 's'}`}
 										value={c.value_inr}
 										max={custMax}
+										total={kpis.export_value_inr}
 									/>
 								))}
 							</div>
@@ -264,9 +260,16 @@ export function Sales() {
 						{!d || d.by_country.length === 0 ? (
 							<EmptyMsg title="No destinations yet" />
 						) : (
-							<div className="rows">
-								{d.by_country.map((c) => (
-									<BarRow key={c.country} label={c.country} value={c.value_inr} max={countryMax} />
+							<div className="ranklist">
+								{d.by_country.map((c, i) => (
+									<BarRow
+										key={c.country}
+										rank={i + 1}
+										label={c.country}
+										value={c.value_inr}
+										max={countryMax}
+										total={kpis.export_value_inr}
+									/>
 								))}
 							</div>
 						)}
