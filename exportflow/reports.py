@@ -205,6 +205,8 @@ GST_META = {
 
 def _rows_gst_export():
 	frappe.has_permission("Export Shipment", "read", throw=True)
+	from exportflow.mtt import is_merchanting
+
 	ships = frappe.get_all(
 		"Export Shipment", filters=_company_filter(),
 		fields=["name", "customer_name", "mode", "trade_type", "gst_export_mode", "igst_rate",
@@ -215,10 +217,11 @@ def _rows_gst_export():
 	rows = []
 	for s in ships:
 		export_date = s.awb_date if s.mode == "Air" else s.bl_date
-		gst_mode = "Merchanting (out of GST)" if (s.trade_type or "").startswith("Third") else (s.gst_export_mode or "—")
+		gst_mode = "Merchanting (out of GST)" if is_merchanting(s.trade_type) else (s.gst_export_mode or "—")
 		rows.append({
 			"shipment": s.name, "customer": s.customer_name, "mode": s.mode, "gst_mode": gst_mode,
-			"igst_rate": flt(s.igst_rate) or None, "shipping_bill_no": s.shipping_bill_number,
+			"igst_rate": flt(s.igst_rate) if s.igst_rate is not None else None,
+			"shipping_bill_no": s.shipping_bill_number,
 			"shipping_bill_date": s.shipping_bill_date, "leo_date": s.leo_date,
 			"export_date": export_date, "inr_value": value.get(s.name, 0.0),
 		})
@@ -255,7 +258,8 @@ def _rows_merchanting():
 	rels = {}
 	if merch:
 		for r in frappe.get_all(
-			"Export Realization", filters={"shipment": ["in", [m.name for m in merch]]},
+			"Export Realization",
+			filters=_company_filter({"shipment": ["in", [m.name for m in merch]]}),
 			fields=["shipment", "amount_received", "amount_received_inr", "invoice_value", "conversion_rate"],
 			limit_page_length=0,
 		):
@@ -311,13 +315,29 @@ def report_data(report: str) -> dict:
 	return {**meta, "rows": rows_fn(), "company": exportflow_company()}
 
 
+def _ind(n):
+	"""Indian digit grouping (lakh/crore) for a 2-decimal number — matches the
+	on-screen en-IN formatting so the PDF reads the same as the table."""
+	neg = flt(n) < 0
+	intp, dec = f"{abs(flt(n)):.2f}".split(".")
+	if len(intp) > 3:
+		last3, rest, parts = intp[-3:], intp[:-3], []
+		while len(rest) > 2:
+			parts.insert(0, rest[-2:])
+			rest = rest[:-2]
+		if rest:
+			parts.insert(0, rest)
+		intp = ",".join(parts) + "," + last3
+	return ("-" if neg else "") + intp + "." + dec
+
+
 def _fmt(value, ctype):
 	if value is None or value == "":
 		return ""
 	if ctype == "inr":
-		return f"₹{flt(value):,.2f}"
+		return f"₹{_ind(value)}"
 	if ctype == "num":
-		return f"{flt(value):,.2f}"
+		return _ind(value)
 	if ctype == "pct":
 		return f"{flt(value):g}%"
 	if ctype == "date":
@@ -328,6 +348,23 @@ def _fmt(value, ctype):
 	return str(value)
 
 
+def _xlsx_cell(value, ctype):
+	"""Spreadsheet cell: real numbers / dates so Excel can sum, sort and filter,
+	and formula-injection-guarded strings for free-text cells (a leading =,+,-,@
+	would otherwise become a live formula on open)."""
+	if value is None or value == "":
+		return None
+	if ctype in ("inr", "num"):
+		return flt(value)
+	if ctype == "date":
+		try:
+			return getdate(value)
+		except Exception:
+			return str(value)
+	s = _fmt(value, ctype)
+	return ("'" + s) if s[:1] in ("=", "+", "-", "@") else s
+
+
 @frappe.whitelist()
 def report_export(report: str, fmt: str = "xlsx", rows=None):
 	"""Format the on-screen (already filtered) rows into a downloadable file. The
@@ -335,6 +372,8 @@ def report_export(report: str, fmt: str = "xlsx", rows=None):
 	taken from the client (which the user already fetched via report_data)."""
 	if report not in REPORTS:
 		frappe.throw(_("Unknown report {0}").format(report))
+	if fmt not in ("xlsx", "pdf"):
+		frappe.throw(_("Unsupported export format {0}").format(fmt))
 	frappe.has_permission(*REPORT_PERM[report], throw=True)
 	meta, _rows_fn = REPORTS[report]
 	cols, title = meta["columns"], meta["title"]
@@ -383,10 +422,10 @@ def report_export(report: str, fmt: str = "xlsx", rows=None):
 	from frappe.utils.xlsxutils import make_xlsx
 
 	matrix = [[c["label"] for c in cols]]
-	matrix += [[_fmt(r.get(c["key"]), c["type"]) for c in cols] for r in data]
+	matrix += [[_xlsx_cell(r.get(c["key"]), c["type"]) for c in cols] for r in data]
 	if totals:
 		matrix.append([
-			_fmt(totals[c["key"]], c["type"]) if c["key"] in totals else ("Total" if i == 0 else "")
+			flt(totals[c["key"]]) if c["key"] in totals else ("Total" if i == 0 else None)
 			for i, c in enumerate(cols)
 		])
 	frappe.local.response.filename = f"{slug}-{stamp}.xlsx"

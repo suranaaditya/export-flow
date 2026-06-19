@@ -23,10 +23,14 @@ function fmtCell(value: Row[string], type: ReportColType): string {
 	return String(value);
 }
 
+// exact mapping (a substring test would mis-colour "Partially Realized" green and
+// "Not Applicable" neutral) — kept in step with realizationTone/incentiveTone
+const TAG_OK = ['realized', 'ebrc closed', 'completed', 'closed', 'credited', 'utilized', 'scrip generated'];
+const TAG_ERR = ['overdue', 'clock breached', 'written off', 'cancelled', 'not applicable'];
 function tagTone(status: string): 'ok' | 'pend' | 'err' {
-	const s = status.toLowerCase();
-	if (/(overdue|breach|written off|cancel)/.test(s)) return 'err';
-	if (/(realized|completed|closed|credited)/.test(s)) return 'ok';
+	const s = status.toLowerCase().trim();
+	if (TAG_OK.includes(s)) return 'ok';
+	if (TAG_ERR.includes(s)) return 'err';
 	return 'pend';
 }
 
@@ -46,7 +50,7 @@ async function downloadReport(report: string, fmt: 'xlsx' | 'pdf', rows: Row[]) 
 	const url = URL.createObjectURL(blob);
 	const a = document.createElement('a');
 	a.href = url;
-	a.download = `${report.replace(/_/g, '-')}-${new Date().toISOString().slice(0, 10)}.${fmt}`;
+	a.download = `${report.replace(/_/g, '-')}-${new Date().toLocaleDateString('en-CA')}.${fmt}`;
 	document.body.appendChild(a);
 	a.click();
 	a.remove();
@@ -58,6 +62,7 @@ export function ReportView({ report }: { report: string }) {
 	const d = data?.message;
 	const cols = useMemo(() => d?.columns ?? [], [d]);
 	const allRows = useMemo(() => (d?.rows ?? []) as Row[], [d]);
+	const idCol = cols.find((c) => c.type === 'id')?.key;
 
 	const [from, setFrom] = useState('');
 	const [to, setTo] = useState('');
@@ -178,7 +183,7 @@ export function ReportView({ report }: { report: string }) {
 								</thead>
 								<tbody>
 									{rows.map((r, i) => (
-										<tr key={i}>
+										<tr key={idCol && r[idCol] != null ? `${r[idCol]}-${i}` : i}>
 											{cols.map((c) => (
 												<td key={c.key} className={c.type}>
 													{c.type === 'tag' ? (
@@ -196,7 +201,7 @@ export function ReportView({ report }: { report: string }) {
 									))}
 									<tr className="reptot">
 										{cols.map((c, i) => (
-											<td key={c.key} className={c.type}>
+											<td key={c.key} className={c.key in totals ? c.type : ''}>
 												{c.key in totals ? fmtCell(totals[c.key], 'inr') : i === 0 ? 'Total' : ''}
 											</td>
 										))}
