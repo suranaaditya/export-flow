@@ -62,7 +62,7 @@ export function FilterBar<Row>({
 	const derived = useMemo(() => {
 		const map: Record<string, { value: string; label: string }[]> = {};
 		for (const def of defs) {
-			if (def.control === 'select' && !def.options) {
+			if ((def.control === 'select' || def.control === 'searchselect') && !def.options) {
 				const seen = new Set<string>();
 				for (const r of rows) {
 					const v = def.get(r);
