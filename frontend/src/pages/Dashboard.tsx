@@ -32,6 +32,14 @@ const DEADLINE_ICONS: Record<DeadlineRow['kind'], IconName> = {
 	mtt: 'globe',
 };
 
+/** Indian short money for INR figures: ₹14.41 Cr · ₹14.46 L · ₹8,400. */
+function fmtCr(inr: number): string {
+	if (!inr) return '₹0';
+	if (inr >= 1e7) return `₹${(inr / 1e7).toFixed(2)} Cr`;
+	if (inr >= 1e5) return `₹${(inr / 1e5).toFixed(2)} L`;
+	return `₹${Math.round(inr).toLocaleString('en-IN')}`;
+}
+
 function todayLine(): string {
 	return new Date().toLocaleDateString('en-GB', {
 		weekday: 'long',
@@ -87,6 +95,22 @@ export function Dashboard() {
 	const attention =
 		(kpis.docs_blocking ?? 0) + (kpis.lc_at_risk ?? 0) + (kpis.awaiting_leo ?? 0);
 
+	// the triage strip — only chips with a non-zero count show
+	const allAttn: { n: number; label: string; icon: IconName; tone: 'bad' | 'warn'; to: string }[] = [
+		{ n: kpis.docs_blocking ?? 0, label: 'blocked', icon: 'lock', tone: 'bad', to: '/documents' },
+		{ n: kpis.docs_due_soon ?? 0, label: 'docs due', icon: 'file', tone: 'warn', to: '/documents' },
+		{ n: kpis.gst_at_risk ?? 0, label: 'GST clocks', icon: 'clock', tone: 'warn', to: '/purchases' },
+		{ n: kpis.realizations_overdue ?? 0, label: 'realizations overdue', icon: 'banknote', tone: 'bad', to: '/finance' },
+	];
+	const attnChips = allAttn.filter((c) => c.n > 0);
+
+	const pipeline = d?.pipeline ?? [];
+	const pipeMax = Math.max(1, ...pipeline.map((p) => p.count));
+	const exportInr = kpis.export_value_inr ?? 0;
+	const realizedPct = exportInr > 0 ? Math.min(100, Math.round(((kpis.realized_inr ?? 0) / exportInr) * 100)) : 0;
+	const mttTotal = kpis.mtt_total ?? 0;
+	const shipTotal = kpis.shipments_total ?? 0;
+
 	return (
 		<main>
 			<div className="eyebrow">Operations · {todayLine()}</div>
@@ -113,6 +137,17 @@ export function Dashboard() {
 					</>
 				)}
 			</div>
+
+			{d && attnChips.length > 0 && (
+				<div className="attn">
+					<span className="attn-lb">Needs attention</span>
+					{attnChips.map((c) => (
+						<button key={c.label} type="button" className={`achip ${c.tone}`} onClick={() => navigate(c.to)}>
+							<Icon name={c.icon} size={13} /> <b>{c.n}</b> {c.label}
+						</button>
+					))}
+				</div>
+			)}
 
 			<div className="kpis">
 				<div className="card kpi">
@@ -204,6 +239,26 @@ export function Dashboard() {
 				</div>
 			</div>
 
+			{pipeline.some((p) => p.count > 0) && (
+				<div className="card pipe">
+					<div className="pipe-lb">Pipeline · live shipments by stage</div>
+					<div className="pipe-bars">
+						{pipeline.map((p) => (
+							<div className="pipe-col" key={p.stage} title={`${p.stage}: ${p.count}`}>
+								<i style={{ height: `${(p.count / pipeMax) * 100}%` }} />
+							</div>
+						))}
+					</div>
+					<div className="pipe-axis">
+						{pipeline.map((p) => (
+							<span key={p.stage}>
+								{p.stage} <b className="data">{p.count}</b>
+							</span>
+						))}
+					</div>
+				</div>
+			)}
+
 			<div className="grid">
 				<Card accent>
 					<CHead
@@ -290,6 +345,74 @@ export function Dashboard() {
 				</Card>
 
 				<div className="stack">
+					{(exportInr > 0 || d?.aging) && (
+						<Card>
+							<CHead icon="rupee" title="Realization" count={d ? fmtCr(exportInr) : undefined} />
+							<div className="finsnap">
+								<div className="fbar">
+									<i style={{ width: `${realizedPct}%` }} />
+								</div>
+								<div className="flegend">
+									<span>
+										Realized <b className="data">{fmtCr(kpis.realized_inr ?? 0)}</b>
+									</span>
+									<span className="dim">{realizedPct}%</span>
+									<span>
+										Outstanding <b className="data">{fmtCr(kpis.outstanding_inr ?? 0)}</b>
+									</span>
+								</div>
+								{d?.aging &&
+									d.aging.overdue + d.aging.d0_30 + d.aging.d30_60 + d.aging.d60p > 0 && (
+										<div className="aging">
+											{(
+												[
+													['Overdue', d.aging.overdue, 'bad'],
+													['0–30d', d.aging.d0_30, 'warn'],
+													['30–60d', d.aging.d30_60, 'mut'],
+													['60d+', d.aging.d60p, 'mut'],
+												] as const
+											).map(([lb, n, tone]) => (
+												<div className={`agecell ${tone}`} key={lb}>
+													<span className="an">{n}</span>
+													<span className="al">{lb}</span>
+												</div>
+											))}
+										</div>
+									)}
+							</div>
+						</Card>
+					)}
+
+					{d && mttTotal > 0 && (
+						<Card>
+							<CHead icon="globe" title="Merchanting" count={`${mttTotal} of ${shipTotal}`} />
+							<div className="finsnap">
+								<div className="fbar mtt">
+									<i style={{ width: `${shipTotal > 0 ? (mttTotal / shipTotal) * 100 : 0}%` }} />
+								</div>
+								<div className="flegend">
+									<span>
+										Merchanting <b className="data">{mttTotal}</b>
+									</span>
+									<span>
+										Export <b className="data">{Math.max(0, shipTotal - mttTotal)}</b>
+									</span>
+								</div>
+								<div className="mttclocks">
+									<span className={`mc ${(kpis.mtt_completion_overdue ?? 0) > 0 ? 'bad' : ''}`}>
+										<b>{kpis.mtt_completion_overdue ?? 0}</b> completion overdue
+									</span>
+									<span className={`mc ${(kpis.mtt_outlay_overdue ?? 0) > 0 ? 'bad' : ''}`}>
+										<b>{kpis.mtt_outlay_overdue ?? 0}</b> outlay overdue
+									</span>
+									<span className={`mc ${(kpis.mtt_fx_negative ?? 0) > 0 ? 'bad' : ''}`}>
+										<b>{kpis.mtt_fx_negative ?? 0}</b> FX-negative
+									</span>
+								</div>
+							</div>
+						</Card>
+					)}
+
 					{(!d || d.can.lc || d.can.po || d.can.compliance || d.can.shipment) && (
 						<Card>
 							<CHead icon="calendar" title="Deadlines" count="upcoming" />

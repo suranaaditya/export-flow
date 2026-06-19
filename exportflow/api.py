@@ -2875,6 +2875,9 @@ def get_dashboard() -> dict:
 		out["kpis"]["docs_with_cha"] = sum(
 			1 for d in open_docs if d.responsible_party == "CHA"
 		)
+		out["kpis"]["docs_due_soon"] = sum(
+			1 for d in open_docs if d.due_date and (getdate(d.due_date) - today).days <= 7
+		)
 
 		def doc_sort_key(d):
 			days = (getdate(d.due_date) - today).days if d.due_date else 9999
@@ -3067,6 +3070,103 @@ def get_dashboard() -> dict:
 			}
 			for p in open_pfis[:5]
 		]
+
+	# ---- finance snapshot + realization aging (FEMA proceeds clock) ------
+	if frappe.has_permission("Export Realization", "read"):
+		closed_rel = ("Realized", "eBRC Closed", "Written Off", "Cancelled")
+		export_inr = realized_inr = outstanding_inr = 0.0
+		aging = {"overdue": 0, "d0_30": 0, "d30_60": 0, "d60p": 0}
+		overdue_n = 0
+		for r in frappe.get_all(
+			"Export Realization",
+			filters=cf(),
+			fields=["status", "invoice_value", "conversion_rate", "amount_received_inr", "due_date"],
+			limit_page_length=0,
+		):
+			# conversion_rate falls back to 1 only when truly unset (an INR deal);
+			# the auto-created shells now seed it, so FCY values scale correctly
+			expected = flt(r.invoice_value) * (flt(r.conversion_rate) or 1.0)
+			export_inr += expected
+			realized_inr += flt(r.amount_received_inr)
+			if r.status not in closed_rel:
+				outstanding_inr += max(0.0, expected - flt(r.amount_received_inr))
+				if r.due_date:
+					d = (getdate(r.due_date) - today).days
+					if d < 0:
+						aging["overdue"] += 1
+						overdue_n += 1
+					elif d <= 30:
+						aging["d0_30"] += 1
+					elif d <= 60:
+						aging["d30_60"] += 1
+					else:
+						aging["d60p"] += 1
+		out["kpis"]["export_value_inr"] = flt(export_inr, 2)
+		out["kpis"]["realized_inr"] = flt(realized_inr, 2)
+		out["kpis"]["outstanding_inr"] = flt(outstanding_inr, 2)
+		out["kpis"]["realizations_overdue"] = overdue_n
+		out["aging"] = aging
+
+	# ---- merchanting (MTT) split + clock breaches + pipeline by stage ----
+	if can["shipment"]:
+		from exportflow.mtt import MERCHANTING
+
+		out["kpis"]["shipments_total"] = len(company_shipments)
+		out["kpis"]["mtt_total"] = frappe.db.count(
+			"Export Shipment", cf({"trade_type": MERCHANTING})
+		)
+
+		merch_all = frappe.get_all(
+			"Export Shipment",
+			filters=cf({"trade_type": MERCHANTING}),
+			fields=["name", *MTT_SHIPMENT_FIELDS],
+			limit_page_length=0,
+		)
+		if merch_all:
+			rbs: dict[str, list] = {}
+			for r in frappe.get_all(
+				"Export Realization",
+				filters={"shipment": ["in", [m.name for m in merch_all]]},
+				fields=["shipment", "amount_received", "amount_received_inr", "invoice_value", "conversion_rate"],
+				limit_page_length=0,
+			):
+				rbs.setdefault(r.shipment, []).append(r)
+			c_over = o_over = fx_neg = 0
+			for shp in merch_all:
+				b = _mtt_block(shp, rbs.get(shp.name, []))
+				if not b:
+					continue
+				if not b["completed"] and (b["completion_days"] or 0) < 0:
+					c_over += 1
+				if b["outlay_open"] and (b["outlay_days"] or 0) < 0:
+					o_over += 1
+				if b["net_fx_profit_inr"] is not None and b["net_fx_profit_inr"] < 0:
+					fx_neg += 1
+			out["kpis"]["mtt_completion_overdue"] = c_over
+			out["kpis"]["mtt_outlay_overdue"] = o_over
+			out["kpis"]["mtt_fx_negative"] = fx_neg
+
+		# coarse, mode-agnostic stages so the pipeline reads at a glance
+		stage_of = {
+			"Planned": "Booked", "Booked": "Booked", "Goods Dispatched": "Booked",
+			"At Port/CFS": "At port", "At Airport/CFS": "At port",
+			"Customs Filed": "Customs", "Let Export Order": "Customs",
+			"Container Stuffed/Gated In": "Shipped", "Cargo Accepted": "Shipped",
+			"Shipped on Board": "Shipped", "Departed": "Shipped", "Shipped from Origin": "Shipped",
+			"Arrived Destination": "Arrived", "Arrived at Destination": "Arrived",
+		}
+		stages = ["Booked", "At port", "Customs", "Shipped", "Arrived"]
+		counts = {s: 0 for s in stages}
+		for row in frappe.get_all(
+			"Export Shipment",
+			filters=cf({"current_milestone": ["!=", "Completed"]}),
+			fields=["current_milestone"],
+			limit_page_length=0,
+		):
+			bucket = stage_of.get(row.current_milestone)
+			if bucket:
+				counts[bucket] += 1
+		out["pipeline"] = [{"stage": s, "count": counts[s]} for s in stages]
 
 	# the UI hides card groups the role cannot read — "no access" must not
 	# masquerade as "nothing pending"

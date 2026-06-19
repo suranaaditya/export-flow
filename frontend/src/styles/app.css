@@ -468,3 +468,42 @@ footer b { color: var(--fg-3); font-weight: 500 }
   .setnav { position: static; flex-direction: row; flex-wrap: wrap; margin-bottom: 6px }
   .setnav a .lbl { flex: 0 }
 }
+
+/* Dashboard command center — attention strip */
+.attn { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 18px }
+.attn-lb { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--fg-3); margin-right: 2px }
+.achip { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; padding: 6px 13px; border-radius: 999px; border: 1px solid transparent; cursor: pointer; transition: transform .18s var(--spring), filter .16s var(--ease) }
+.achip b { font-family: var(--font-mono); font-variant-numeric: tabular-nums }
+.achip:hover { transform: translateY(-1px); filter: brightness(.97) }
+.achip.bad { background: var(--err-bg); color: var(--err) }
+.achip.warn { background: var(--pending-bg); color: var(--pending) }
+.achip svg { color: currentColor }
+
+/* Dashboard command center — pipeline bar */
+.pipe { padding: 14px 18px 12px; margin-bottom: 16px }
+.pipe-lb { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--fg-3); margin-bottom: 12px }
+.pipe-bars { display: flex; align-items: flex-end; gap: 10px; height: 56px }
+.pipe-col { flex: 1; display: flex; align-items: flex-end; height: 100% }
+.pipe-col i { display: block; width: 100%; min-height: 3px; background: var(--brand-grad); border-radius: 4px 4px 0 0 }
+.pipe-axis { display: flex; gap: 10px; margin-top: 8px }
+.pipe-axis span { flex: 1; font-size: 11px; color: var(--fg-3); text-align: center }
+.pipe-axis b { color: var(--cyan); font-family: var(--font-mono); font-variant-numeric: tabular-nums }
+
+/* Dashboard command center — finance snapshot + merchanting split */
+.finsnap { padding: 14px 18px 16px }
+.fbar { height: 9px; border-radius: 6px; background: var(--bg-sunken); overflow: hidden }
+.fbar i { display: block; height: 100%; background: var(--brand-grad) }
+.fbar.mtt i { background: var(--cyan) }
+.flegend { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12.5px; color: var(--fg-2); margin-top: 9px }
+.flegend b { font-size: 13px }
+.aging { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 14px }
+.agecell { border: 1px solid var(--hairline); border-radius: 10px; padding: 9px 6px; text-align: center }
+.agecell .an { display: block; font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 18px; font-weight: 600; color: var(--fg-1) }
+.agecell .al { display: block; font-size: 10.5px; color: var(--fg-3); margin-top: 2px }
+.agecell.bad .an { color: var(--err) }
+.agecell.warn .an { color: var(--pending) }
+.mttclocks { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px }
+.mc { font-size: 12px; color: var(--fg-2); background: var(--bg-sunken); border-radius: 8px; padding: 5px 10px }
+.mc b { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--fg-1) }
+.mc.bad { background: var(--err-bg); color: var(--err) }
+.mc.bad b { color: var(--err) }

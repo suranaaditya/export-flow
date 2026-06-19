@@ -376,6 +376,42 @@ class TestIntelligence(IntegrationTestCase):
 			self.assertEqual(mine["tone"], "ok")
 		self.assertGreaterEqual(d["kpis"]["in_transit"], 1)
 
+	def test_dashboard_finance_pipeline_aging(self):
+		"""The command-center aggregates: finance snapshot, realization aging,
+		pipeline by stage and the merchanting split."""
+		so, customer, _s = self.make_deal()
+		shp = self.make_shipment(so, customer)
+		frappe.get_doc(
+			{
+				"doctype": "Export Realization",
+				"export_invoice": f"MNG-DB-{_suffix()}",
+				"shipment": shp,
+				"status": "Awaiting Realization",
+				"currency": "USD",
+				"invoice_value": 1000,
+				"conversion_rate": 83,
+				"export_date": add_days(nowdate(), -500),  # due in the past -> overdue
+			}
+		).insert(ignore_permissions=True)
+
+		d = get_dashboard()
+		k = d["kpis"]
+		# finance snapshot in INR (invoice_value x conversion_rate)
+		self.assertGreaterEqual(flt(k["export_value_inr"]), 83000.0)
+		self.assertGreaterEqual(flt(k["outstanding_inr"]), 83000.0)
+		self.assertGreaterEqual(k["realizations_overdue"], 1)
+		self.assertGreaterEqual(d["aging"]["overdue"], 1)
+		# pipeline returns the five coarse stages; a freshly-booked shipment sits
+		# at "Customs" (auto-advanced to Customs Filed on creation)
+		self.assertEqual(
+			[p["stage"] for p in d["pipeline"]],
+			["Booked", "At port", "Customs", "Shipped", "Arrived"],
+		)
+		customs = next(p for p in d["pipeline"] if p["stage"] == "Customs")
+		self.assertGreaterEqual(customs["count"], 1)
+		self.assertIn("mtt_total", k)
+		self.assertIn("shipments_total", k)
+
 	def test_dashboard_permission_gating(self):
 		sfx = _suffix()
 		bare = frappe.get_doc(
