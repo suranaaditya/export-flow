@@ -507,3 +507,17 @@ footer b { color: var(--fg-3); font-weight: 500 }
 .mc b { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--fg-1) }
 .mc.bad { background: var(--err-bg); color: var(--err) }
 .mc.bad b { color: var(--err) }
+
+/* List-view filter bar */
+.filterbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 2px 0 14px }
+.fchip { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; padding: 6px 13px; border-radius: 999px; border: 1px solid var(--hairline); background: var(--bg-card); color: var(--fg-2); cursor: pointer; transition: border-color .16s var(--ease), color .16s var(--ease), background .16s var(--ease) }
+.fchip:hover { border-color: var(--hairline-2); color: var(--fg-1) }
+.fchip.on { background: var(--iris-tint); border-color: transparent; color: var(--iris); font-weight: 500 }
+.fsel { position: relative; display: inline-flex; align-items: center }
+.fsel select { appearance: none; -webkit-appearance: none; font-size: 12.5px; padding: 6px 28px 6px 13px; border-radius: 999px; border: 1px solid var(--hairline); background: var(--bg-card); color: var(--fg-2); cursor: pointer; transition: border-color .16s var(--ease), color .16s var(--ease) }
+.fsel select:hover { border-color: var(--hairline-2); color: var(--fg-1) }
+.fsel.on select { background: var(--iris-tint); border-color: transparent; color: var(--iris); font-weight: 500 }
+.fsel svg { position: absolute; right: 10px; pointer-events: none; color: var(--fg-3) }
+.fsel.on svg { color: var(--iris) }
+.fclear { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 6px 11px; border-radius: 999px; border: 1px dashed var(--hairline-2); background: transparent; color: var(--fg-3); cursor: pointer; transition: color .16s var(--ease) }
+.fclear:hover { color: var(--err) }

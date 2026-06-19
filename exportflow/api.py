@@ -1512,7 +1512,7 @@ def get_shipments() -> list[dict]:
 	rows = frappe.get_all(
 		"Export Shipment",
 		filters={"company": company} if company else None,
-		fields=["name", "customer", "customer_name", "mode", "current_milestone", "etd", "eta", "port_of_loading", "port_of_discharge"],
+		fields=["name", "customer", "customer_name", "mode", "trade_type", "current_milestone", "etd", "eta", "port_of_loading", "port_of_discharge"],
 		order_by="creation desc",
 		limit_page_length=100,
 	)

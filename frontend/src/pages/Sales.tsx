@@ -142,19 +142,6 @@ export function Sales() {
 					}
 				/>
 				<Kpi
-					icon="download"
-					label="Received"
-					value={inr(kpis.pfi_received_inr)}
-					detail={
-						kpis.pfi_outstanding_inr !== undefined ? (
-							<>{inr(kpis.pfi_outstanding_inr)} outstanding</>
-						) : (
-							'—'
-						)
-					}
-					tone={kpis.pfi_outstanding_inr && kpis.pfi_outstanding_inr > 0 ? 'warn' : undefined}
-				/>
-				<Kpi
 					icon="cube"
 					label="Procurement cost"
 					value={inr(kpis.procurement_inr)}

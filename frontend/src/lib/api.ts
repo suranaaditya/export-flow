@@ -641,6 +641,7 @@ export interface ShipmentListRow {
 	customer: string;
 	customer_name: string;
 	mode: 'Sea' | 'Air';
+	trade_type?: string;
 	current_milestone: string;
 	etd: string | null;
 	eta: string | null;
