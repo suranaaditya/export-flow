@@ -8,7 +8,7 @@ import {
 	useFrappeGetDocList,
 	useFrappeUpdateDoc,
 } from 'frappe-react-sdk';
-import { Icon } from '@/components/Icon';
+import { Icon, type IconName } from '@/components/Icon';
 import { MasterModal } from '@/components/MasterModal';
 import { CheckInput, Field, SearchSelect, SelectInput, TextArea, TextInput } from '@/components/form';
 import { Card, CHead, EmptyMsg, Modal, Tag } from '@/components/ui';
@@ -387,8 +387,6 @@ interface ExporterProfile {
 	signatory_name: string;
 	signatory_designation: string;
 	scomet_text: string;
-	mtt_completion_months: string;
-	mtt_outlay_months: string;
 	bank_account_no: string;
 	bank_name: string;
 	bank_branch_address: string;
@@ -406,8 +404,6 @@ const EMPTY_PROFILE: ExporterProfile = {
 	signatory_name: '',
 	signatory_designation: '',
 	scomet_text: '',
-	mtt_completion_months: '',
-	mtt_outlay_months: '',
 	bank_account_no: '',
 	bank_name: '',
 	bank_branch_address: '',
@@ -420,8 +416,6 @@ const EMPTY_PROFILE: ExporterProfile = {
 function ExporterProfilePanel({ canEdit }: { canEdit: boolean }) {
 	const { data, error, isLoading, mutate } = useFrappeGetDoc<
 		Partial<ExporterProfile> & {
-			auto_cha_third_country?: 0 | 1;
-			auto_create_realization?: 0 | 1;
 			company_logo?: string | null;
 			logo_nav_height?: number;
 		}
@@ -432,8 +426,6 @@ function ExporterProfilePanel({ canEdit }: { canEdit: boolean }) {
 	// this bench), so the preview is fetched rather than built from the file_url
 	const logoUri = useFrappeGetCall<{ message: { logo: string | null } }>(API.companyLogo, {});
 	const [form, setForm] = useState<ExporterProfile>(EMPTY_PROFILE);
-	const [autoCha, setAutoCha] = useState(false);
-	const [autoRealization, setAutoRealization] = useState(true);
 	const [navHeight, setNavHeight] = useState(28);
 	const [logo, setLogo] = useState<string | null>(null);
 	const [seeded, setSeeded] = useState(false);
@@ -449,10 +441,6 @@ function ExporterProfilePanel({ canEdit }: { canEdit: boolean }) {
 				(Object.keys(EMPTY_PROFILE) as (keyof ExporterProfile)[]).map((k) => [k, data[k] ?? '']),
 			),
 		}));
-		setAutoCha(!!data.auto_cha_third_country);
-		// default ON — an unset Single field comes back null/undefined, which must
-		// read as enabled (matching the backend), not as an unchecked toggle
-		setAutoRealization(data.auto_create_realization == null ? true : !!data.auto_create_realization);
 		setLogo(data.company_logo ?? null);
 		setNavHeight(Number(data.logo_nav_height) || 28);
 		setSeeded(true);
@@ -500,10 +488,6 @@ function ExporterProfilePanel({ canEdit }: { canEdit: boolean }) {
 			await updateDoc('ExportFlow Settings', 'ExportFlow Settings', {
 				...form,
 				lut_valid_upto: form.lut_valid_upto || null,
-				mtt_completion_months: Number(form.mtt_completion_months) || 9,
-				mtt_outlay_months: Number(form.mtt_outlay_months) || 4,
-				auto_cha_third_country: autoCha ? 1 : 0,
-				auto_create_realization: autoRealization ? 1 : 0,
 				logo_nav_height: navHeight || 28,
 			});
 			setSavedTick(true);
@@ -656,47 +640,6 @@ function ExporterProfilePanel({ canEdit }: { canEdit: boolean }) {
 								<TextArea value={form.scomet_text} onChange={(v) => set('scomet_text', v)} rows={2} />
 							</Field>
 						</div>
-						<Field
-							label="MTT completion window (months)"
-							hint="FEMA merchanting — default 9; FEM Regs 2026 may revise"
-						>
-							<TextInput
-								type="number"
-								mono
-								value={form.mtt_completion_months}
-								onChange={(v) => set('mtt_completion_months', v)}
-								placeholder="9"
-							/>
-						</Field>
-						<Field label="MTT forex-outlay window (months)" hint="Default 4">
-							<TextInput
-								type="number"
-								mono
-								value={form.mtt_outlay_months}
-								onChange={(v) => set('mtt_outlay_months', v)}
-								placeholder="4"
-							/>
-						</Field>
-						<div className="span2">
-							<CheckInput
-								checked={autoCha}
-								onChange={(v) => {
-									setSavedTick(false);
-									setAutoCha(v);
-								}}
-								label="Set CHA to “Third Country” automatically on merchanting shipments"
-							/>
-						</div>
-						<div className="span2">
-							<CheckInput
-								checked={autoRealization}
-								onChange={(v) => {
-									setSavedTick(false);
-									setAutoRealization(v);
-								}}
-								label="Open a bank realization automatically when a Commercial Invoice is generated"
-							/>
-						</div>
 					</div>
 					<div className="formfoot">
 						{err && <span className="ferr">{err}</span>}
@@ -717,6 +660,127 @@ function ExporterProfilePanel({ canEdit }: { canEdit: boolean }) {
 	);
 }
 
+/** Lifecycle automation toggles + the FEMA merchanting clocks (split out of the
+ *  exporter profile so each settings section stays focused). */
+function AutomationPanel({ canEdit }: { canEdit: boolean }) {
+	const { data, isLoading, error, mutate } = useFrappeGetDoc<{
+		mtt_completion_months?: number;
+		mtt_outlay_months?: number;
+		auto_cha_third_country?: 0 | 1;
+		auto_create_realization?: 0 | 1;
+		email_digest_enabled?: 0 | 1;
+	}>('ExportFlow Settings', 'ExportFlow Settings');
+	const { updateDoc, loading: saving } = useFrappeUpdateDoc();
+	const [completion, setCompletion] = useState('');
+	const [outlay, setOutlay] = useState('');
+	const [autoCha, setAutoCha] = useState(false);
+	const [autoRealization, setAutoRealization] = useState(true);
+	const [emailDigest, setEmailDigest] = useState(false);
+	const [seeded, setSeeded] = useState(false);
+	const [err, setErr] = useState<string | null>(null);
+	const [savedTick, setSavedTick] = useState(false);
+
+	useEffect(() => {
+		if (!data || seeded) return;
+		setCompletion(data.mtt_completion_months != null ? String(data.mtt_completion_months) : '');
+		setOutlay(data.mtt_outlay_months != null ? String(data.mtt_outlay_months) : '');
+		setAutoCha(!!data.auto_cha_third_country);
+		// default ON — an unset Single field reads back null/undefined
+		setAutoRealization(data.auto_create_realization == null ? true : !!data.auto_create_realization);
+		setEmailDigest(!!data.email_digest_enabled);
+		setSeeded(true);
+	}, [data, seeded]);
+
+	const touch = <T,>(fn: (v: T) => void) => (v: T) => {
+		setSavedTick(false);
+		fn(v);
+	};
+
+	async function onSave() {
+		setErr(null);
+		setSavedTick(false);
+		try {
+			await updateDoc('ExportFlow Settings', 'ExportFlow Settings', {
+				mtt_completion_months: Number(completion) || 9,
+				mtt_outlay_months: Number(outlay) || 4,
+				auto_cha_third_country: autoCha ? 1 : 0,
+				auto_create_realization: autoRealization ? 1 : 0,
+				email_digest_enabled: emailDigest ? 1 : 0,
+			});
+			setSavedTick(true);
+			mutate();
+		} catch (e) {
+			setErr(parseServerError(e));
+		}
+	}
+
+	return (
+		<Card accent>
+			<CHead icon="sparkle" title="Automation & alerts" />
+			{isLoading ? (
+				<div className="sub" style={{ padding: '14px 18px' }}>Loading…</div>
+			) : error ? (
+				<div className="ferr" style={{ padding: '14px 18px' }}>{parseServerError(error)}</div>
+			) : (
+				<>
+					<div className="formgrid">
+						<div className="span2">
+							<CheckInput
+								checked={autoRealization}
+								onChange={touch(setAutoRealization)}
+								label="Open a bank realization automatically when a Commercial Invoice is generated"
+							/>
+						</div>
+						<div className="span2">
+							<CheckInput
+								checked={autoCha}
+								onChange={touch(setAutoCha)}
+								label="Set CHA to “Third Country” automatically on merchanting shipments"
+							/>
+						</div>
+						<div className="span2">
+							<CheckInput
+								checked={emailDigest}
+								onChange={touch(setEmailDigest)}
+								label="Send a daily email digest of open alerts to the export team"
+							/>
+						</div>
+						<div className="span2 fdivider">Merchanting (FEMA) clocks</div>
+						<Field
+							label="MTT completion window (months)"
+							hint="FEMA merchanting — default 9; FEM Regs 2026 may revise"
+						>
+							<TextInput type="number" mono value={completion} onChange={touch(setCompletion)} placeholder="9" />
+						</Field>
+						<Field label="MTT forex-outlay window (months)" hint="Default 4">
+							<TextInput type="number" mono value={outlay} onChange={touch(setOutlay)} placeholder="4" />
+						</Field>
+					</div>
+					<div className="formfoot">
+						{err && <span className="ferr">{err}</span>}
+						{savedTick && !err && <span className="fhint">Saved.</span>}
+						<span className="spacer" />
+						<button type="button" className="btn" disabled={saving || !canEdit} onClick={() => void onSave()}>
+							{saving ? 'Saving…' : 'Save'}
+						</button>
+					</div>
+				</>
+			)}
+		</Card>
+	);
+}
+
+const DOC_MASTER = MASTERS.find((m) => m.doctype === 'Document Type')!;
+const DATA_MASTERS = MASTERS.filter((m) => m.doctype !== 'Document Type');
+
+type SettingsSection = 'company' | 'automation' | 'documents' | 'data';
+const SETTINGS_SECTIONS: { key: SettingsSection; label: string; icon: IconName; count?: number }[] = [
+	{ key: 'company', label: 'Company profile', icon: 'building' },
+	{ key: 'automation', label: 'Automation & alerts', icon: 'sparkle' },
+	{ key: 'documents', label: 'Documents & rules', icon: 'file-text' },
+	{ key: 'data', label: 'Master data', icon: 'box', count: DATA_MASTERS.length },
+];
+
 export function Settings() {
 	// the SO-context endpoint doubles as the masters option source; viewers
 	// without create rights still browse the lists below read-only
@@ -733,23 +797,70 @@ export function Settings() {
 		...STATIC_OPTIONS,
 	};
 
+	const [section, setSection] = useState<SettingsSection>('company');
+	const [activeMaster, setActiveMaster] = useState(DATA_MASTERS[0].doctype);
+	const master = DATA_MASTERS.find((m) => m.doctype === activeMaster) ?? DATA_MASTERS[0];
+
 	return (
 		<main>
 			<div className="eyebrow">Workspace</div>
 			<h1>
 				Masters & <em>settings</em>
 			</h1>
-			<div className="sub">
-				Customers, suppliers, items, units and ports — everything the deal and shipment forms pick
-				from.
-			</div>
+			<div className="sub">Everything the deal, shipment and document screens pick from.</div>
 
-			<div className="stack" style={{ marginTop: 22 }}>
-				{MASTERS.map((def) => (
-					<MasterPanel key={def.doctype} def={def} options={options} canEdit={canEdit} />
-				))}
-				<ChecklistRulesPanel canEdit={canEdit} />
-				<ExporterProfilePanel canEdit={canEdit} />
+			<div className="setwrap">
+				<nav className="setnav" aria-label="Settings sections">
+					{SETTINGS_SECTIONS.map((s) => (
+						<a
+							key={s.key}
+							className={section === s.key ? 'on' : ''}
+							role="button"
+							tabIndex={0}
+							onClick={() => setSection(s.key)}
+							onKeyDown={(e) => {
+								if (e.key === 'Enter' || e.key === ' ') {
+									e.preventDefault();
+									setSection(s.key);
+								}
+							}}
+						>
+							<Icon name={s.icon} size={17} />
+							<span className="lbl">{s.label}</span>
+							{s.count ? <span className="cnt">{s.count}</span> : null}
+						</a>
+					))}
+				</nav>
+
+				<div className="setbody">
+					{section === 'company' && <ExporterProfilePanel canEdit={canEdit} />}
+					{section === 'automation' && <AutomationPanel canEdit={canEdit} />}
+					{section === 'documents' && (
+						<div className="stack">
+							<MasterPanel def={DOC_MASTER} options={options} canEdit={canEdit} />
+							<ChecklistRulesPanel canEdit={canEdit} />
+						</div>
+					)}
+					{section === 'data' && (
+						<>
+							<div className="setsub" role="tablist" aria-label="Master lists">
+								{DATA_MASTERS.map((m) => (
+									<button
+										key={m.doctype}
+										type="button"
+										role="tab"
+										aria-selected={activeMaster === m.doctype}
+										className={activeMaster === m.doctype ? 'on' : ''}
+										onClick={() => setActiveMaster(m.doctype)}
+									>
+										{m.title}
+									</button>
+								))}
+							</div>
+							<MasterPanel key={master.doctype} def={master} options={options} canEdit={canEdit} />
+						</>
+					)}
+				</div>
 			</div>
 
 			<footer>
