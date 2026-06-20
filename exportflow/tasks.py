@@ -29,6 +29,7 @@ def daily():
 	alerts += send_compliance_alerts()
 	alerts += send_realization_alerts()
 	alerts += send_scrip_expiry_alerts()
+	refresh_forward_statuses()
 	alerts += send_forward_maturity_alerts()
 	alerts += send_mtt_outlay_alerts()
 	send_email_digest(alerts)
@@ -460,6 +461,38 @@ def send_scrip_expiry_alerts(today=None) -> list[dict]:
 			frappe.log_error(title=f"Scrip expiry alert failed: {inc.name}", message=frappe.get_traceback())
 
 	return alerts
+
+
+def refresh_forward_statuses(today=None) -> int:
+	"""Re-derive forward status as the clock advances (Open / Partially Utilized → Matured
+	once past maturity). recompute_utilization otherwise only fires on a linked-realization
+	edit, so a forward could sit 'Open' with a negative days-to-maturity and still count as
+	live hedge cover — this keeps the portfolio + exposure honest day to day."""
+	n = 0
+	for name in frappe.get_all(
+		"Forward Contract",
+		filters={"status": ["in", ("Open", "Partially Utilized", "Matured")]},
+		pluck="name",
+	):
+		try:
+			fc = frappe.get_doc("Forward Contract", name)
+			before = fc.status
+			fc.recompute_utilization()
+			if fc.status != before:
+				frappe.db.set_value(
+					"Forward Contract", name,
+					{
+						"status": fc.status,
+						"utilized_amount": fc.utilized_amount,
+						"outstanding_amount": fc.outstanding_amount,
+						"hedge_note": fc.hedge_note,
+					},
+					update_modified=False,
+				)
+				n += 1
+		except Exception:
+			frappe.log_error(title=f"Forward status refresh failed: {name}", message=frappe.get_traceback())
+	return n
 
 
 def send_forward_maturity_alerts(today=None) -> list[dict]:

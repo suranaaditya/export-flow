@@ -26,6 +26,14 @@ class ForwardContract(Document):
 			frappe.throw(_("Maturity date cannot be before the booking date."))
 		self.inr_value = flt(flt(self.contract_amount) * flt(self.forward_rate), 2)
 		self.recompute_utilization()
+		if flt(self.utilized_amount) > flt(self.contract_amount) + EPS:
+			frappe.msgprint(
+				_("This forward is over-utilized: {0} {1} drawn against {2} of cover. Review the linked realizations or raise the contract amount.").format(
+					self.currency or "", flt(self.utilized_amount), flt(self.contract_amount)
+				),
+				indicator="orange",
+				title=_("Over-utilized forward"),
+			)
 
 	def recompute_utilization(self, exclude: str | None = None):
 		"""Σ realized FCY of the realizations linked to this contract → utilized /

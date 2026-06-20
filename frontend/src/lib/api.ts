@@ -208,6 +208,7 @@ export interface FxExposure {
 	hedged: number;
 	open_exposure: number;
 	hedge_pct: number | null;
+	over_hedged: number;
 }
 export interface OpenForward {
 	name: string;

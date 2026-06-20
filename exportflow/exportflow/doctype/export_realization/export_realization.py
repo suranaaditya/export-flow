@@ -152,6 +152,8 @@ class ExportRealization(Document):
 		the conversion mode is anything else."""
 		if self.conversion_mode != "Forward Contract":
 			self.forward_contract = None
+			self.fwd_contract_no = None
+			self.fwd_rate = None
 			return
 		if not self.forward_contract:
 			return

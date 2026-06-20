@@ -284,7 +284,7 @@ export function RealizationModal({
 	// open forwards in the realization's currency, for the picker (a USD deal can't
 	// draw on a EUR forward); keep the current link selectable even once fully utilized
 	const { data: fwdData } = useFrappeGetCall<{ message: OpenForward[] }>(API.openForwards, {
-		currency: form.currency || 'USD',
+		currency: form.currency,
 	});
 	const openForwards = fwdData?.message ?? [];
 	const forwardOptions = [
@@ -350,7 +350,7 @@ export function RealizationModal({
 				<Field label="Export invoice"><TextInput mono value={form.export_invoice} onChange={(v) => set('export_invoice', v)} /></Field>
 				<Field label="Status"><SelectInput value={form.status} onChange={(v) => set('status', v as RealizationStatus)} options={REALIZATION_STATUSES.map((s) => ({ value: s }))} /></Field>
 				<Field label="Shipment"><TextInput mono value={form.shipment} onChange={(v) => set('shipment', v)} placeholder="SHP-…" disabled={lockShipment} /></Field>
-				<Field label="Currency" hint="INR uses the 18-month FEMA window"><SelectInput value={form.currency} onChange={(v) => set('currency', v)} options={currencyOptions} /></Field>
+				<Field label="Currency" hint="INR uses the 18-month FEMA window"><SelectInput value={form.currency} onChange={(v) => { set('currency', v); set('forward_contract', ''); }} options={currencyOptions} /></Field>
 				<Field label="Invoice value (FCY)"><TextInput type="number" mono value={form.invoice_value} onChange={(v) => set('invoice_value', v)} /></Field>
 				<Field label="Export date" hint="Starts the FEMA clock"><TextInput type="date" value={form.export_date} onChange={(v) => set('export_date', v)} /></Field>
 				<Field label="AD bank"><TextInput value={form.ad_bank} onChange={(v) => set('ad_bank', v)} /></Field>
@@ -362,7 +362,11 @@ export function RealizationModal({
 				<Field label="Bank charges (FCY)"><TextInput type="number" mono value={form.bank_charges} onChange={(v) => set('bank_charges', v)} /></Field>
 				<Field label="Conversion mode" hint="How the FX is converted to INR"><SelectInput value={form.conversion_mode} onChange={(v) => set('conversion_mode', v)} options={CONVERSION_MODES.map((m) => ({ value: m }))} /></Field>
 				{form.conversion_mode === 'Forward Contract' && (
-					<Field label="Forward contract" hint="Locks the rate to the forward rate"><SelectInput value={form.forward_contract} onChange={(v) => set('forward_contract', v)} options={forwardOptions} /></Field>
+					form.currency ? (
+						<Field label="Forward contract" hint="Locks the rate to the forward rate"><SelectInput value={form.forward_contract} onChange={(v) => set('forward_contract', v)} options={forwardOptions} /></Field>
+					) : (
+						<Field label="Forward contract"><span className="sub" style={{ margin: 0 }}>Set the currency first to pick a forward.</span></Field>
+					)
 				)}
 				<Field label="eBRC number"><TextInput mono value={form.ebrc_number} onChange={(v) => set('ebrc_number', v)} /></Field>
 				<Field label="eBRC date"><TextInput type="date" value={form.ebrc_date} onChange={(v) => set('ebrc_date', v)} /></Field>

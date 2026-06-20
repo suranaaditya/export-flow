@@ -2463,7 +2463,10 @@ FORWARD_FIELDS = [
 	"outstanding_amount", "hedge_note", "notes", "modified",
 ]
 # realization statuses still owing FX (open receivables = the unhedged exposure base)
-_OPEN_REL = ("Awaiting Realization", "Partially Realized", "Overdue", "Lodged")
+_OPEN_REL = ("Awaiting Realization", "Partially Realized", "Overdue", "Lodged with Bank")
+# forward statuses that still carry live cover — Matured cover can still be delivered or
+# rolled, so it counts toward the hedge / the picker until fully drawn (matches the alert)
+_FORWARD_COVER = ("Open", "Partially Utilized", "Matured")
 
 
 @frappe.whitelist()
@@ -2496,7 +2499,7 @@ def get_open_forwards(currency: str | None = None) -> list:
 	realization's currency so a USD deal can't draw on a EUR forward."""
 	frappe.has_permission("Forward Contract", "read", throw=True)
 	company = exportflow_company()
-	filters = {"status": ["in", ["Open", "Partially Utilized"]]}
+	filters = {"status": ["in", list(_FORWARD_COVER)], "outstanding_amount": [">", 0]}
 	if company:
 		filters["company"] = company
 	if currency:
@@ -2528,7 +2531,7 @@ def _fx_exposure(company: str | None) -> list:
 
 	cover: dict[str, float] = {}
 	for c in frappe.get_all(
-		"Forward Contract", filters={**cf, "status": ["in", ["Open", "Partially Utilized"]]},
+		"Forward Contract", filters={**cf, "status": ["in", list(_FORWARD_COVER)]},
 		fields=["currency", "outstanding_amount"], limit_page_length=0,
 	):
 		if c.currency:
@@ -2544,6 +2547,9 @@ def _fx_exposure(company: str | None) -> list:
 			"hedged": hedged,
 			"open_exposure": flt(max(0.0, receivable - hedged), 2),
 			"hedge_pct": round(min(100.0, hedged / receivable * 100), 1) if receivable > 0 else None,
+			# cover exceeding receivables (over-hedged, or cover on a currency with no open
+			# receivables) is a real signal, not something to hide behind the 100% cap
+			"over_hedged": flt(max(0.0, hedged - receivable), 2),
 		})
 	return out
 

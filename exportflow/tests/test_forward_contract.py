@@ -75,6 +75,28 @@ class TestForwardContract(IntegrationTestCase):
 		self.assertIn(fc_usd.name, usd)
 		self.assertNotIn(fc_eur.name, usd)
 
+	def test_matured_cover_still_drawable(self):
+		from frappe.utils import add_days, nowdate
+
+		fc = self._forward(currency="USD", amount=5000, maturity=add_days(nowdate(), -1))
+		fc.reload()
+		self.assertEqual(fc.status, "Matured")
+		self.assertGreater(flt(fc.outstanding_amount), 0)
+		# matured cover is still deliverable → stays in the picker + the hedge total
+		self.assertIn(fc.name, [f["name"] for f in get_open_forwards("USD")])
+
+	def test_unlink_clears_forward_fields_and_releases_cover(self):
+		fc = self._forward(rate=86.0)
+		r = self._realization(fc=fc.name, amount_received=1000)
+		self.assertEqual(r.fwd_contract_no, fc.contract_no)
+		r.conversion_mode = "Direct"
+		r.save(ignore_permissions=True)
+		r.reload()
+		self.assertFalse(r.forward_contract)
+		self.assertFalse(r.fwd_contract_no)
+		fc.reload()
+		self.assertEqual(flt(fc.utilized_amount), 0)
+
 	def test_maturity_alert(self):
 		from frappe.utils import add_days, nowdate
 

@@ -6,7 +6,6 @@ import { API, parseServerError, type ForwardContract, type FxExposure } from '@/
 import { fmtDate, fmtMoney } from '@/lib/format';
 
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'AED', 'JPY', 'CNY', 'INR'];
-const STATUSES = ['Open', 'Partially Utilized', 'Fully Utilized', 'Matured', 'Cancelled'];
 
 function statusTone(s: string): 'ok' | 'pend' | 'err' {
 	if (s === 'Fully Utilized') return 'ok';
@@ -238,8 +237,8 @@ function ForwardModal({
 						<TextInput type="date" value={form.maturity_date} onChange={(v) => set('maturity_date', v)} />
 					</Field>
 				</div>
-				<Field label="Status" hint="Auto from utilization & maturity; set Cancelled to retire the contract">
-					<SelectInput value={form.status} onChange={(v) => set('status', v)} options={STATUSES.map((s) => ({ value: s }))} />
+				<Field label="Status" hint="Auto from utilization & maturity — set Cancelled to retire, or Open to re-activate">
+					<SelectInput value={form.status} onChange={(v) => set('status', v)} options={[...new Set([form.status, 'Open', 'Cancelled'])].map((s) => ({ value: s }))} />
 				</Field>
 				{!isNew && (
 					<div className="fcstat">
