@@ -194,6 +194,7 @@ h1 em { font-style: normal; background: var(--brand-grad); -webkit-background-cl
 
 /* ============ KPI strip ============ */
 .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin: 22px 0 16px }
+.kpis.kpis3 { grid-template-columns: repeat(3, 1fr) }
 .kpi { padding: 16px 18px 14px; cursor: default; transition: transform .25s var(--spring), box-shadow .25s var(--spring) }
 .kpi:hover { transform: translateY(-2px); box-shadow: var(--shadow-pop), var(--inset-hi) }
 .kpi .lb { display: flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--fg-3) }

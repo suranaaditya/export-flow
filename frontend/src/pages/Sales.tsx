@@ -124,7 +124,7 @@ export function Sales() {
 				)}
 			</div>
 
-			<div className="kpis">
+			<div className="kpis kpis3">
 				<Kpi
 					icon="banknote"
 					label="Export value"
@@ -153,7 +153,7 @@ export function Sales() {
 			</div>
 
 			{(kpis.incentive_inr !== undefined || kpis.realized_inr !== undefined) && (
-				<div className="kpis">
+				<div className="kpis kpis3">
 					<Kpi
 						icon="shield"
 						label="Incentives earned"
@@ -173,13 +173,6 @@ export function Sales() {
 								: 'eBRC closure'
 						}
 						tone={kpis.realization_outstanding_inr && kpis.realization_outstanding_inr > 0 ? 'warn' : undefined}
-					/>
-					<Kpi
-						icon="warning"
-						label="Realization overdue"
-						value={String(kpis.realization_overdue ?? 0)}
-						detail="past the FEMA window"
-						tone={kpis.realization_overdue && kpis.realization_overdue > 0 ? 'bad' : undefined}
 					/>
 					<Kpi
 						icon="rupee"
