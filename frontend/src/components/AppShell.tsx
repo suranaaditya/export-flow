@@ -6,8 +6,8 @@ import { API } from '@/lib/api';
 import { useTheme } from '@/lib/theme';
 
 const NAV_ITEMS: { to: string; label: string; icon: IconName }[] = [
-	{ to: '/', label: 'Dashboard', icon: 'layers' },
-	{ to: '/sales', label: 'Sales', icon: 'sparkle' },
+	{ to: '/', label: 'Operations dashboard', icon: 'layers' },
+	{ to: '/sales', label: 'Sales dashboard', icon: 'sparkle' },
 	{ to: '/sales-orders', label: 'Sales orders', icon: 'file-text' },
 	{ to: '/purchases', label: 'Purchases', icon: 'cube' },
 	{ to: '/shipments', label: 'Shipments', icon: 'ship' },
