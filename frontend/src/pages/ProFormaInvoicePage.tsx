@@ -8,6 +8,7 @@ import {
 	useFrappeUpdateDoc,
 } from 'frappe-react-sdk';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { EmailComposer } from '@/components/EmailComposer';
 import { Icon } from '@/components/Icon';
 import { Field, SearchSelect, SelectInput, TextArea, TextInput } from '@/components/form';
 import { Card, CHead, Facts, Tag } from '@/components/ui';
@@ -127,6 +128,7 @@ export function ProFormaInvoicePage() {
 	const [terms, setTerms] = useState('');
 	const [saveError, setSaveError] = useState<string | null>(null);
 	const [actionError, setActionError] = useState<string | null>(null);
+	const [emailing, setEmailing] = useState(false);
 
 	// Seed form state once per doc name — background revalidation (e.g. after a
 	// payment lands) must not clobber in-progress edits.
@@ -418,8 +420,12 @@ export function ProFormaInvoicePage() {
 								},
 							]}
 						/>
-						{canMarkSent || canCancel ? (
+						{name ? (
 							<div className="formfoot">
+								<button className="btn" onClick={() => setEmailing(true)}>
+									<Icon name="send" size={15} />
+									Email customer
+								</button>
 								{canMarkSent ? (
 									<button className="btn" onClick={() => doStatus('sent')} disabled={statusLoading}>
 										<Icon name="send" size={15} />
@@ -441,6 +447,15 @@ export function ProFormaInvoicePage() {
 							<CHead icon="file-text" title="PDF" action={<a href={pfiPdfUrl(name)}>Download</a>} />
 							<iframe className="pdfframe" src={pfiPrintPreviewUrl(name)} title="PFI preview" />
 						</Card>
+					) : null}
+					{emailing && name ? (
+						<EmailComposer
+							doctype="Pro Forma Invoice"
+							name={name}
+							purpose="pfi_to_customer"
+							title="Email customer"
+							onClose={() => setEmailing(false)}
+						/>
 					) : null}
 				</div>
 			</div>

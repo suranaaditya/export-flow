@@ -586,3 +586,12 @@ footer b { color: var(--fg-3); font-weight: 500 }
 .cmrow input { accent-color: var(--iris); width: 14px; height: 14px; cursor: pointer; flex: none }
 .cmrow input:disabled { cursor: default; opacity: .45 }
 .rptexp { display: flex; gap: 14px }
+
+/* AI email composer */
+.emform { display: flex; flex-direction: column; gap: 12px; width: min(560px, 86vw) }
+.embanner { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--fg-2); background: var(--iris-tint); border: 1px solid var(--hairline-2); border-radius: 8px; padding: 8px 11px }
+.embanner svg { color: var(--iris); flex: none }
+.emactions { display: flex; align-items: center; gap: 8px; margin-top: 4px }
+.emdone { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 24px 18px 8px; text-align: center; width: min(440px, 82vw) }
+.emdone svg { color: var(--iris) }
+.emdone p { font-size: 13.5px; color: var(--fg-1); margin: 0; line-height: 1.5 }

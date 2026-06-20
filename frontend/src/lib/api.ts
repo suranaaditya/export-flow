@@ -175,7 +175,20 @@ export const API = {
 	companyLogo: 'exportflow.api.get_company_logo',
 	reportList: 'exportflow.reports.report_list',
 	reportData: 'exportflow.reports.report_data',
+	emailContext: 'exportflow.ai_email.email_context',
+	emailDraft: 'exportflow.ai_email.email_draft',
+	emailSend: 'exportflow.ai_email.email_send',
 } as const;
+
+export interface EmailContext {
+	purpose: string;
+	to: string | null;
+	to_name: string | null;
+	party_type: string;
+	attachment_label: string;
+	facts: Record<string, unknown>;
+	sandbox: string | null;
+}
 
 export type ReportColType = 'text' | 'id' | 'inr' | 'num' | 'pct' | 'date' | 'days' | 'tag';
 export interface ReportColumn {

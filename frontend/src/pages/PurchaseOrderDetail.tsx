@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useFrappeGetCall, useFrappePostCall, useFrappeUpdateDoc } from 'frappe-react-sdk';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { EmailComposer } from '@/components/EmailComposer';
 import { Icon } from '@/components/Icon';
 import { Field, TextInput } from '@/components/form';
 import { Card, CHead, EmptyMsg, Facts, LRow, Tag } from '@/components/ui';
@@ -25,6 +26,7 @@ interface POInvoiceWritable {
 export function PurchaseOrderDetail() {
 	const { id = '' } = useParams<{ id: string }>();
 	const navigate = useNavigate();
+	const [emailing, setEmailing] = useState(false);
 
 	const { data, error, isLoading, mutate } = useFrappeGetCall<{ message: PODetailData }>(
 		API.poDetail,
@@ -175,6 +177,9 @@ export function PurchaseOrderDetail() {
 				<a className="btn" href={printPdfUrl('Purchase Order', id, 'ExportFlow Purchase Order')} style={{ textDecoration: 'none' }}>
 					<Icon name="download" size={15} /> PDF
 				</a>
+				<button className="btn" onClick={() => setEmailing(true)}>
+					<Icon name="send" size={15} /> Email
+				</button>
 				{can.edit && (
 					<button className="btn" onClick={() => navigate(`/purchases/${id}/edit`)}>
 						<Icon name="file-text" size={15} /> Edit
@@ -201,6 +206,15 @@ export function PurchaseOrderDetail() {
 					</button>
 				)}
 			</div>
+			{emailing && (
+				<EmailComposer
+					doctype="Purchase Order"
+					name={id}
+					purpose="po_to_supplier"
+					title="Email supplier"
+					onClose={() => setEmailing(false)}
+				/>
+			)}
 			{actionErr && (
 				<div className="ferr" style={{ marginBottom: 10 }}>
 					{actionErr}
