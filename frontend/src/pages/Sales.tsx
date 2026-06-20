@@ -186,7 +186,7 @@ export function Sales() {
 
 			<div className="grid">
 				<div className="stack">
-					<Card accent>
+					<Card>
 						<CHead
 							icon="building"
 							title="Top customers"
