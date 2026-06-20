@@ -87,7 +87,16 @@ function rowDetail(doc: DocInstanceRow): ReactNode {
 	return bits.flatMap((b, i) => (i === 0 ? [b] : [' · ', b]));
 }
 
-export function DocumentChecklist({ shipment }: { shipment: string }) {
+export function DocumentChecklist({
+	shipment,
+	onGenerated,
+}: {
+	shipment: string;
+	/** Fired after a document is generated/changed so the parent can refresh
+	 *  sibling views — generating a Commercial Invoice auto-creates a realization
+	 *  on the finance card, which fetches independently. */
+	onGenerated?: () => void;
+}) {
 	const { data, error, isLoading, mutate } = useFrappeGetCall<{ message: ShipmentDocumentsData }>(
 		API.shipmentDocuments,
 		{ shipment },
@@ -126,6 +135,7 @@ export function DocumentChecklist({ shipment }: { shipment: string }) {
 		try {
 			await generate({ name: d.name });
 			await mutate();
+			onGenerated?.();
 		} catch (e) {
 			setGenErr({ name: d.name, msg: parseServerError(e) });
 		} finally {
@@ -141,6 +151,7 @@ export function DocumentChecklist({ shipment }: { shipment: string }) {
 			const res = await generateAll({ shipment });
 			const { results, generated, failed } = res.message;
 			await mutate();
+			onGenerated?.();
 			if (failed > 0) {
 				const failedTypes = Array.from(new Set(results.filter((r) => !r.ok).map((r) => r.document_type)));
 				const shown = failedTypes.slice(0, 2).join(', ') + (failedTypes.length > 2 ? '…' : '');
@@ -314,8 +325,12 @@ export function DocumentChecklist({ shipment }: { shipment: string }) {
 					onSaved={() => {
 						setOpen(null);
 						mutate();
+						onGenerated?.();
 					}}
-					onChanged={() => void mutate()}
+					onChanged={() => {
+						void mutate();
+						onGenerated?.();
+					}}
 				/>
 			)}
 			{adding && (

@@ -1,9 +1,17 @@
+import json
+
 import frappe
 from frappe.utils import add_days, flt, getdate
 
 # Notification 41/2017 (merchant exports at 0.1% GST): goods must be exported
 # within 90 days of the supplier's tax invoice.
 GST_EXPORT_WINDOW_DAYS = 90
+
+# Concessional total GST a registered supplier charges a merchant exporter under
+# Notifications 40/2017-CT(R) (intra-state: 0.05% CGST + 0.05% SGST) and
+# 41/2017-IT(R) (inter-state: 0.1% IGST). The 0.1% is split across whichever
+# heads actually apply for the place of supply.
+MERCHANT_EXPORT_TOTAL_RATE = 0.1
 
 
 def before_insert(doc, method=None):
@@ -242,3 +250,113 @@ def set_gst_export_deadline(doc):
 		doc.gst_export_deadline = add_days(getdate(doc.supplier_invoice_date), GST_EXPORT_WINDOW_DAYS)
 	else:
 		doc.gst_export_deadline = None
+
+
+# --- Merchant-export 0.1% concessional GST -------------------------------------
+# The "Merchant export scheme (0.1% GST)" flag is more than a label: under the
+# scheme the registered supplier charges the merchant exporter a concessional
+# 0.1% (not the item's normal rate). ERPNext re-derives each line's
+# item_tax_rate from its Item Tax Template on EVERY recompute, so a one-off rate
+# override would be wiped — we rescale inside the calculation itself, after the
+# normal derivation and before the tax rows are built, by overriding the PO's
+# calculate_taxes_and_totals (registered via override_doctype_class in hooks).
+#
+# SCOPE: the concessional rate is applied on the Purchase Order only — the sole
+# scheme artifact ExportFlow creates, prints and tracks (the supplier invoice no/
+# date are captured as PO fields, not a Purchase Invoice). ExportFlow never makes
+# a Purchase Receipt / Purchase Invoice in its flow; if one is created from the
+# desk it reverts to the item's full rate (those doctypes have no scheme field).
+
+from erpnext.controllers.taxes_and_totals import (  # noqa: E402
+	calculate_taxes_and_totals as _CalculateTaxesAndTotals,
+)
+
+
+def _gst_account_map() -> dict:
+	"""{gst_account_head: gst_tax_type} for the site — the set of TRUE GST
+	accounts. ERPNext writes every taxes-table account head (including freight /
+	cartage charge accounts) into item_tax_rate, so the scheme must scale/relabel
+	only the heads in this map and never a charge row. Empty (a no-op) where
+	india_compliance is absent, e.g. the test site."""
+	try:
+		from india_compliance.gst_india.utils import get_gst_account_gst_tax_type_map
+
+		return get_gst_account_gst_tax_type_map() or {}
+	except Exception:
+		return {}
+
+
+class _MerchantExportTaxes(_CalculateTaxesAndTotals):
+	"""Same engine as stock ERPNext, but after item_tax_rate is derived from the
+	Item Tax Template it rescales the GST heads that ACTUALLY apply (the ones in
+	the document's taxes table — CGST+SGST for an intra-state supplier, IGST for
+	an inter-state one) so the per-line GST totals the concessional 0.1%. Only
+	real GST accounts are touched: a freight/cartage charge row is left at its
+	full amount even though ERPNext also lists its account in item_tax_rate."""
+
+	def update_item_tax_map(self):
+		super().update_item_tax_map()
+		gst_map = _gst_account_map()
+		applied = [
+			t.account_head
+			for t in (self.doc.get("taxes") or [])
+			if t.account_head and gst_map.get(t.account_head)
+		]
+		if not applied:
+			# GST rows not on the taxes table yet (an early pass), or no GST at
+			# all — a later recompute, once india_compliance has added them, does
+			# the scaling
+			return
+		for item in self.doc.items:
+			try:
+				rates = json.loads(item.item_tax_rate or "{}")
+			except (ValueError, TypeError):
+				continue
+			heads = {h: flt(rates.get(h)) for h in applied if flt(rates.get(h)) > 0}
+			total = sum(heads.values())
+			if total <= 0:
+				continue
+			for head in heads:
+				rates[head] = flt(heads[head] * MERCHANT_EXPORT_TOTAL_RATE / total, 6)
+			item.item_tax_rate = json.dumps(rates)
+
+
+from erpnext.buying.doctype.purchase_order.purchase_order import (  # noqa: E402
+	PurchaseOrder,
+)
+
+
+class ExportFlowPurchaseOrder(PurchaseOrder):
+	"""Stock Purchase Order in every respect except that, when the 0.1%
+	merchant-export scheme is on, taxes compute at the concessional rate.
+	Registered as the Purchase Order class via override_doctype_class.
+
+	NB merchant_export_scheme can default from the supplier on desk-created POs
+	(before_insert) — which now changes the charged tax, so the field is meant to
+	be set deliberately; ExportFlow's own PO form always sets it before computing,
+	so its preview and the saved PO agree."""
+
+	def calculate_taxes_and_totals(self):
+		if self.get("merchant_export_scheme") and not self.get("merchanting_trade"):
+			_MerchantExportTaxes(self)
+			# relabel ONLY the GST rows with their concessional per-head rate
+			# (0.05% CGST/SGST, 0.1% IGST) so the printed rate matches the amount;
+			# the per-item override otherwise leaves the nominal 9/18 on the row.
+			# Read the clean rate off the rescaled item_tax_rate (uniform per head)
+			# rather than amount/net, which a multi-line PO would round to 0.0502%.
+			# Free-charge rows (freight/cartage) are never GST accounts → untouched.
+			gst_map = _gst_account_map()
+			head_rate: dict[str, float] = {}
+			for item in self.get("items") or []:
+				try:
+					rates = json.loads(item.item_tax_rate or "{}")
+				except (ValueError, TypeError):
+					continue
+				for head, rate in rates.items():
+					if flt(rate) > flt(head_rate.get(head, 0)):
+						head_rate[head] = flt(rate)
+			for tax in self.get("taxes") or []:
+				if gst_map.get(tax.account_head) and tax.account_head in head_rate:
+					tax.rate = flt(head_rate[tax.account_head], 4)
+			return
+		super().calculate_taxes_and_totals()

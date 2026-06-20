@@ -41,6 +41,15 @@ type ShipmentDoc = ShipmentDetailData['shipment'];
 
 /** Milestones whose arrival means the goods have left the country. */
 
+/** SWR key for a shipment's finance fetch, shared by the finance card and the
+ *  MTT card. A refresh nonce is folded in so the parent can force both cards to
+ *  re-fetch after a document is generated or the voyage is saved — without a
+ *  page reload. (frappe-react-sdk bundles its own swr instance, so a cross-
+ *  component global mutate would target the wrong cache; bumping a key the cards
+ *  subscribe to is the reliable way to revalidate them from the parent.) */
+const financeKey = (shipment: string, nonce: number) =>
+	`efx-shipment-finance:${shipment}:${nonce}`;
+
 export function ShipmentDetail() {
 	const { id = '' } = useParams<{ id: string }>();
 	const navigate = useNavigate();
@@ -50,6 +59,12 @@ export function ShipmentDetail() {
 		{ name: id },
 	);
 	const { call: setMilestone, loading: completing } = useFrappePostCall(API.setMilestone);
+	// the finance + MTT cards fetch independently; bumping this nonce (threaded
+	// into their SWR key) re-fetches them after a document is generated (a
+	// Commercial Invoice auto-creates a realization) or the voyage is saved (the
+	// export date / FEMA due fill in)
+	const [finNonce, setFinNonce] = useState(0);
+	const refreshFinance = () => setFinNonce((n) => n + 1);
 	const [actionErr, setActionErr] = useState<string | null>(null);
 	const [editing, setEditing] = useState(false);
 	const [editingShipment, setEditingShipment] = useState(false);
@@ -351,7 +366,7 @@ export function ShipmentDetail() {
 						onSaved={() => mutate()}
 					/>
 
-					<DocumentChecklist shipment={id} />
+					<DocumentChecklist shipment={id} onGenerated={refreshFinance} />
 				</div>
 
 				<div className="stack">
@@ -403,10 +418,11 @@ export function ShipmentDetail() {
 						shipment={shipment}
 						outlay={mtt_outlay}
 						canEdit={can.write}
+						nonce={finNonce}
 						onSaved={() => mutate()}
 					/>
 					)}
-					<ShipmentFinanceCard shipment={id} merchanting={merchanting} />
+					<ShipmentFinanceCard shipment={id} merchanting={merchanting} nonce={finNonce} />
 				</div>
 			</div>
 
@@ -417,6 +433,7 @@ export function ShipmentDetail() {
 					onClose={() => setEditing(false)}
 					onSaved={() => {
 						mutate();
+						refreshFinance();
 						setEditing(false);
 					}}
 				/>
@@ -430,6 +447,7 @@ export function ShipmentDetail() {
 					onClose={() => setEditingShipment(false)}
 					onSaved={() => {
 						mutate();
+						refreshFinance();
 						setEditingShipment(false);
 					}}
 				/>
@@ -445,10 +463,21 @@ export function ShipmentDetail() {
 /** Incentives + realization attached to this shipment, with inline "Add"
  *  actions that open the finance modals pre-seeded from the shipment + SO.
  *  Full editing also lives on the Finance screen. */
-function ShipmentFinanceCard({ shipment, merchanting }: { shipment: string; merchanting: boolean }) {
-	const { data, mutate } = useFrappeGetCall<{ message: ShipmentFinanceData }>(API.shipmentFinance, {
-		shipment,
-	});
+function ShipmentFinanceCard({
+	shipment,
+	merchanting,
+	nonce,
+}: {
+	shipment: string;
+	merchanting: boolean;
+	nonce: number;
+}) {
+	const { data, mutate } = useFrappeGetCall<{ message: ShipmentFinanceData }>(
+		API.shipmentFinance,
+		{ shipment },
+		financeKey(shipment, nonce),
+		{ keepPreviousData: true },
+	);
 	// seed values (export value / currency / date) for the create modals; light
 	// query that settles before the user clicks, so the modal opens pre-filled
 	const seedQ = useFrappeGetCall<{ message: ShipmentFinanceSeed }>(API.shipmentFinanceSeed, {
@@ -824,16 +853,21 @@ function MTTComplianceCard({
 	shipment,
 	outlay,
 	canEdit,
+	nonce,
 	onSaved,
 }: {
 	shipment: ShipmentDoc;
 	outlay: MttOutlay | null;
 	canEdit: boolean;
+	nonce: number;
 	onSaved: () => void;
 }) {
-	const { data, mutate } = useFrappeGetCall<{ message: ShipmentFinanceData }>(API.shipmentFinance, {
-		shipment: shipment.name,
-	});
+	const { data, mutate } = useFrappeGetCall<{ message: ShipmentFinanceData }>(
+		API.shipmentFinance,
+		{ shipment: shipment.name },
+		financeKey(shipment.name, nonce),
+		{ keepPreviousData: true },
+	);
 	const mtt: MTTBlock | null = data?.message?.mtt ?? null;
 	const [editing, setEditing] = useState(false);
 

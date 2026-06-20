@@ -24,6 +24,12 @@ website_route_rules = [
 	{"from_route": "/exportflow/<path:app_path>", "to_route": "exportflow"},
 ]
 
+# Apply the merchant-export 0.1% concessional GST when the scheme flag is set;
+# stock ERPNext behaviour otherwise (see overrides/purchase_order.py).
+override_doctype_class = {
+	"Purchase Order": "exportflow.overrides.purchase_order.ExportFlowPurchaseOrder",
+}
+
 doc_events = {
 	"Purchase Order": {
 		"before_insert": "exportflow.overrides.purchase_order.before_insert",
