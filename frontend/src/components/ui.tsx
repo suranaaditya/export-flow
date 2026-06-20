@@ -113,12 +113,18 @@ export function Modal({
 	icon,
 	onClose,
 	children,
+	locked,
 }: {
 	title: string;
 	icon: IconName;
 	onClose: () => void;
 	children: ReactNode;
+	/** when true the modal cannot be dismissed (e.g. a send is in flight) */
+	locked?: boolean;
 }) {
+	const close = () => {
+		if (!locked) onClose();
+	};
 	// Portal to <body>: a modal rendered inside a card (overflow:hidden +
 	// transform animation) would otherwise be clipped to the card instead of
 	// covering the viewport.
@@ -126,7 +132,7 @@ export function Modal({
 		<div
 			className="overlay"
 			onClick={(e) => {
-				if (e.target === e.currentTarget) onClose();
+				if (e.target === e.currentTarget) close();
 			}}
 		>
 			<div className="modal" role="dialog" aria-label={title}>
@@ -134,7 +140,7 @@ export function Modal({
 					<Icon name={icon} size={16} />
 					<span className="ttl">{title}</span>
 					<span className="spacer" />
-					<button className="xbtn" onClick={onClose} aria-label="Close">
+					<button className="xbtn" onClick={close} aria-label="Close" disabled={locked}>
 						<Icon name="close" size={14} />
 					</button>
 				</div>

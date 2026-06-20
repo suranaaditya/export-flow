@@ -21,7 +21,7 @@ import requests
 import frappe
 from frappe import _
 from frappe.contacts.doctype.contact.contact import get_default_contact
-from frappe.utils import escape_html, flt, fmt_money, format_date
+from frappe.utils import escape_html, flt, fmt_money, format_date, split_emails, validate_email_address
 
 
 def _ollama_url() -> str:
@@ -42,9 +42,10 @@ def _ollama_json(prompt: str, num_predict: int = 500) -> dict:
 	resp = requests.post(_ollama_url(), json=payload, timeout=60)
 	resp.raise_for_status()
 	try:
-		return json.loads(resp.json().get("response") or "{}")
+		out = json.loads(resp.json().get("response") or "{}")
 	except (json.JSONDecodeError, ValueError):
 		return {}
+	return out if isinstance(out, dict) else {}  # a JSON list/scalar is not a usable draft
 
 
 # --------------------------------------------------------------- recipient
@@ -99,6 +100,22 @@ def _po_facts(doc) -> dict:
 	}
 
 
+def _exporter_bank() -> dict | None:
+	"""The exporter's receiving-bank details from ExportFlow Settings — so a proforma
+	email can tell the customer where to wire the advance."""
+	s = frappe.get_single("ExportFlow Settings")
+	bank = {
+		"bank_name": s.get("bank_name"),
+		"account_no": s.get("bank_account_no"),
+		"branch": s.get("bank_branch_address"),
+		"ifsc": s.get("bank_ifsc"),
+		"swift": s.get("bank_swift"),
+		"correspondent": s.get("bank_correspondent"),
+	}
+	bank = {k: v for k, v in bank.items() if v}
+	return bank or None
+
+
 def _pfi_facts(doc) -> dict:
 	return {
 		"document": "Proforma Invoice",
@@ -109,7 +126,8 @@ def _pfi_facts(doc) -> dict:
 		"invoice_total": fmt_money(doc.amount, currency=doc.currency),
 		"line_count": len(doc.items),
 		"items": _line_items(doc),
-		"payment_method": doc.get("expected_payment_method") or None,
+		"payment_method": doc.get("expected_payment_method") or "Advance payment / Letter of Credit",
+		"remit_payment_to": _exporter_bank(),
 	}
 
 
@@ -144,15 +162,16 @@ def _cfg(purpose: str, doctype: str) -> dict:
 	return cfg
 
 
-def _build_prompt(cfg: dict, facts: dict, tone: str) -> str:
+def _build_prompt(cfg: dict, facts: dict, tone: str, instruction: str | None = None) -> str:
 	from exportflow.printing import exporter_profile
 
 	ex = exporter_profile()
 	sender = ex.company_name or "the exporter"
 	signatory = ex.signatory_name or ""
 	recipient = facts.get("supplier") or facts.get("customer") or "the recipient"
+	extra = (instruction or "").strip()
 	return (
-		"You are drafting a short, professional B2B email on behalf of an Indian merchant exporter.\n"
+		"You are drafting a professional B2B email on behalf of an Indian merchant exporter.\n"
 		f"You represent the sender: {sender}.\n"
 		f"The recipient is: {recipient}.\n"
 		f"Goal: {cfg['intent']}.\n"
@@ -160,11 +179,16 @@ def _build_prompt(cfg: dict, facts: dict, tone: str) -> str:
 		"RULES:\n"
 		"- Use ONLY the facts in the JSON below. Do NOT invent any number, date, name, price or term.\n"
 		"- State that the document is attached as a PDF.\n"
-		"- Keep the body under 130 words, with a greeting and a sign-off"
+		"- If the facts include payment / bank details (payment_method, remit_payment_to), include them so "
+		"the recipient knows how and where to pay.\n"
+		"- Keep the body focused (under 180 words), with a greeting and a sign-off"
 		+ (f" from {signatory}, {sender}" if signatory else f" from {sender}")
 		+ ".\n"
 		"- Do NOT put the subject line inside the body.\n\n"
 		f"FACTS:\n{json.dumps(facts, ensure_ascii=False, indent=1)}\n\n"
+		"--- What the user specifically wants this email to mention (weave it in naturally, but stay grounded "
+		"in the facts above) ---\n"
+		f"{extra or '(no extra instruction — write a fitting email for the goal above)'}\n\n"
 		'Return ONLY valid JSON of the form {"subject": "...", "body": "..."} '
 		"with real newline characters in the body."
 	)
@@ -191,12 +215,14 @@ def email_context(doctype: str, name: str, purpose: str) -> dict:
 
 
 @frappe.whitelist()
-def email_draft(doctype: str, name: str, purpose: str, tone: str = "professional and courteous") -> dict:
-	"""Ask Gemma to draft {subject, body} from the document's facts."""
+def email_draft(doctype: str, name: str, purpose: str, instruction: str = None,
+				tone: str = "professional and courteous") -> dict:
+	"""Ask Gemma to draft {subject, body} from the document's facts plus the user's
+	free-text instruction (what they want the email to say)."""
 	cfg = _cfg(purpose, doctype)
 	frappe.has_permission(doctype, "read", doc=name, throw=True)
 	doc = frappe.get_doc(doctype, name)
-	prompt = _build_prompt(cfg, cfg["facts"](doc), tone)
+	prompt = _build_prompt(cfg, cfg["facts"](doc), tone, instruction)
 	try:
 		out = _ollama_json(prompt)
 	except requests.RequestException as e:
@@ -215,9 +241,16 @@ def email_send(doctype: str, name: str, purpose: str, to: str, subject: str, bod
 	"""Send the email (attachment re-derived server-side) and log it as a linked
 	Communication. In dev, redirect to the sandbox address."""
 	cfg = _cfg(purpose, doctype)
-	frappe.has_permission(doctype, "read", doc=name, throw=True)
-	if not to or "@" not in to:
-		frappe.throw(_("A valid recipient email is required."))
+	# emailing a confidential document OUT requires more than view access — a pure
+	# viewer must not be able to mail the PDF to an arbitrary address
+	if not any(frappe.has_permission(doctype, p, doc=name) for p in ("email", "submit", "write")):
+		frappe.throw(_("You do not have permission to email this document."), frappe.PermissionError)
+	# validate every recipient address (to + each cc); split_emails handles a comma list
+	to = (to or "").strip()
+	validate_email_address(to, throw=True)
+	cc_list = [e.strip() for e in split_emails(cc or "") if e.strip()]
+	for addr in cc_list:
+		validate_email_address(addr, throw=True)
 	if not (subject or "").strip() or not (body or "").strip():
 		frappe.throw(_("Subject and body are required."))
 
@@ -228,7 +261,7 @@ def email_send(doctype: str, name: str, purpose: str, to: str, subject: str, bod
 
 	sandbox = frappe.conf.get("exportflow_email_sandbox")
 	recipients = [sandbox] if sandbox else [to]
-	cc_list = [] if sandbox else ([cc] if cc else [])
+	cc_final = [] if sandbox else cc_list
 	subj = f"[SANDBOX → {to}] {subject}" if sandbox else subject
 	content = (
 		'<div style="white-space:pre-wrap;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#1b2230">'
@@ -246,7 +279,7 @@ def email_send(doctype: str, name: str, purpose: str, to: str, subject: str, bod
 		"subject": subj,
 		"content": content,
 		"recipients": ", ".join(recipients),
-		"cc": ", ".join(cc_list) or None,
+		"cc": ", ".join(cc_final) or None,
 		"reference_doctype": doctype,
 		"reference_name": name,
 		"status": "Linked",
@@ -254,7 +287,7 @@ def email_send(doctype: str, name: str, purpose: str, to: str, subject: str, bod
 
 	frappe.sendmail(
 		recipients=recipients,
-		cc=cc_list or None,
+		cc=cc_final or None,
 		subject=subj,
 		content=content,
 		attachments=attachments,

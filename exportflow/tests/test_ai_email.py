@@ -75,3 +75,9 @@ class TestAiEmail(IntegrationTestCase):
 		with self.assertRaises(frappe.ValidationError):
 			email_send("Purchase Order", po, "po_to_supplier", to="not-an-email",
 					   subject="x", body="y", attach_pdf=0)
+
+	def test_send_rejects_bad_cc(self):
+		po = self._make_po()
+		with self.assertRaises(frappe.ValidationError):
+			email_send("Purchase Order", po, "po_to_supplier", to="ok@buyer.com",
+					   cc="not-an-email", subject="x", body="y", attach_pdf=0)

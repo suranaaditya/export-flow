@@ -40,6 +40,7 @@ export function EmailComposer({
 	const [attachLabel, setAttachLabel] = useState('');
 	const [toName, setToName] = useState('');
 	const [sandbox, setSandbox] = useState<string | null>(null);
+	const [instruction, setInstruction] = useState('');
 
 	useEffect(() => {
 		let alive = true;
@@ -71,7 +72,7 @@ export function EmailComposer({
 		setDrafting(true);
 		setErr(null);
 		try {
-			const r = await draftCall({ doctype, name, purpose });
+			const r = await draftCall({ doctype, name, purpose, instruction });
 			setSubject(r.message.subject);
 			setBody(r.message.body);
 		} catch (e) {
@@ -100,7 +101,7 @@ export function EmailComposer({
 	}
 
 	return (
-		<Modal title={title} icon="send" onClose={onClose}>
+		<Modal title={title} icon="send" onClose={onClose} locked={sending}>
 			{loading ? (
 				<div className="sub" style={{ padding: 10 }}>Loading…</div>
 			) : sent ? (
@@ -123,8 +124,17 @@ export function EmailComposer({
 					<Field label="Cc">
 						<TextInput value={cc} onChange={setCc} placeholder="optional" />
 					</Field>
+					<Field label="What should this email mention?" hint="Optional — add anything specific, then Regenerate.">
+						<TextArea
+							value={instruction}
+							onChange={setInstruction}
+							rows={2}
+							disabled={drafting}
+							placeholder="e.g. mention the online meeting we discussed; ask them to confirm by Friday"
+						/>
+					</Field>
 					<Field label="Subject" required>
-						<TextInput value={subject} onChange={setSubject} placeholder={drafting ? 'Drafting…' : ''} />
+						<TextInput value={subject} onChange={setSubject} disabled={drafting} placeholder={drafting ? 'Drafting…' : ''} />
 					</Field>
 					<Field label="Message" required hint={drafting ? 'The AI is drafting from the document…' : undefined}>
 						<TextArea
