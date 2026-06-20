@@ -2445,6 +2445,9 @@ REALIZATION_FIELDS = [
 	"bank_charges",
 	"conversion_mode",
 	"conversion_rate",
+	"forward_contract",
+	"fwd_contract_no",
+	"fwd_rate",
 	"ebrc_number",
 	"ebrc_date",
 	"brc_ref",
@@ -2452,6 +2455,97 @@ REALIZATION_FIELDS = [
 	"remarks",
 	"modified",
 ]
+
+
+FORWARD_FIELDS = [
+	"name", "contract_no", "ad_bank", "currency", "contract_amount", "forward_rate",
+	"inr_value", "booking_date", "maturity_date", "status", "utilized_amount",
+	"outstanding_amount", "hedge_note", "notes", "modified",
+]
+# realization statuses still owing FX (open receivables = the unhedged exposure base)
+_OPEN_REL = ("Awaiting Realization", "Partially Realized", "Overdue", "Lodged")
+
+
+@frappe.whitelist()
+def get_forward_contracts() -> dict:
+	"""Forward contracts portfolio + a per-currency FX exposure summary for the
+	Forward FX screen, one trip."""
+	frappe.has_permission("Forward Contract", "read", throw=True)
+	company = exportflow_company()
+	cf = {"company": company} if company else {}
+	contracts = frappe.get_all(
+		"Forward Contract", filters=cf, fields=FORWARD_FIELDS, order_by="maturity_date asc, modified desc",
+		limit_page_length=0,
+	)
+	today = getdate(nowdate())
+	for c in contracts:
+		c["days_to_maturity"] = (getdate(c.maturity_date) - today).days if c.maturity_date else None
+	return {
+		"contracts": contracts,
+		"exposure": _fx_exposure(company),
+		"can": {
+			"write": frappe.has_permission("Forward Contract", "write"),
+			"delete": frappe.has_permission("Forward Contract", "delete"),
+		},
+	}
+
+
+@frappe.whitelist()
+def get_open_forwards(currency: str | None = None) -> list:
+	"""Forwards with cover still available — for the realization picker. Filtered to the
+	realization's currency so a USD deal can't draw on a EUR forward."""
+	frappe.has_permission("Forward Contract", "read", throw=True)
+	company = exportflow_company()
+	filters = {"status": ["in", ["Open", "Partially Utilized"]]}
+	if company:
+		filters["company"] = company
+	if currency:
+		filters["currency"] = currency
+	rows = frappe.get_all(
+		"Forward Contract", filters=filters,
+		fields=["name", "contract_no", "currency", "forward_rate", "outstanding_amount", "maturity_date"],
+		order_by="maturity_date asc", limit_page_length=0,
+	)
+	for r in rows:
+		r["label"] = f"{r.contract_no} · {r.currency} @ {flt(r.forward_rate):g} · {flt(r.outstanding_amount):,.0f} left"
+	return rows
+
+
+def _fx_exposure(company: str | None) -> list:
+	"""Per-currency open receivables (FCY still owed) vs open forward cover → the
+	unhedged exposure and a hedge ratio."""
+	if not frappe.has_permission("Export Realization", "read"):
+		return []
+	cf = {"company": company} if company else {}
+	recv: dict[str, float] = {}
+	for r in frappe.get_all(
+		"Export Realization", filters={**cf, "status": ["in", _OPEN_REL]},
+		fields=["currency", "invoice_value", "amount_received"], limit_page_length=0,
+	):
+		if not r.currency:
+			continue
+		recv[r.currency] = recv.get(r.currency, 0.0) + max(0.0, flt(r.invoice_value) - flt(r.amount_received))
+
+	cover: dict[str, float] = {}
+	for c in frappe.get_all(
+		"Forward Contract", filters={**cf, "status": ["in", ["Open", "Partially Utilized"]]},
+		fields=["currency", "outstanding_amount"], limit_page_length=0,
+	):
+		if c.currency:
+			cover[c.currency] = cover.get(c.currency, 0.0) + flt(c.outstanding_amount)
+
+	out = []
+	for ccy in sorted(set(recv) | set(cover)):
+		receivable = flt(recv.get(ccy, 0.0), 2)
+		hedged = flt(cover.get(ccy, 0.0), 2)
+		out.append({
+			"currency": ccy,
+			"receivable": receivable,
+			"hedged": hedged,
+			"open_exposure": flt(max(0.0, receivable - hedged), 2),
+			"hedge_pct": round(min(100.0, hedged / receivable * 100), 1) if receivable > 0 else None,
+		})
+	return out
 
 
 # shared incentive status semantics (keep the two finance surfaces in sync)

@@ -71,6 +71,11 @@ doc_events = {
 		# after_delete, not on_trash — the rebuild must see the rule gone
 		"after_delete": "exportflow.checklist.rebuild_for_rule_change",
 	},
+	# a realization drawing on a forward contract keeps that contract's utilization current
+	"Export Realization": {
+		"on_update": "exportflow.exportflow.doctype.forward_contract.forward_contract.recompute_for_realization",
+		"on_trash": "exportflow.exportflow.doctype.forward_contract.forward_contract.recompute_for_realization",
+	},
 }
 
 # print-format context builders (Commercial Invoice / Packing List / SCOMET)

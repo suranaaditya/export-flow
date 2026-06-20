@@ -34,6 +34,7 @@
   "bank_charges",
   "cb_rel_remit",
   "conversion_mode",
+  "forward_contract",
   "conversion_rate",
   "fwd_contract_no",
   "fwd_rate",
@@ -115,7 +116,7 @@
    "precision": "2"
   },
   {
-   "description": "Date of export (B/L or AWB date) — starts the FEMA realization clock",
+   "description": "Date of export (B/L or AWB date) \u2014 starts the FEMA realization clock",
    "fieldname": "export_date",
    "fieldtype": "Date",
    "label": "Export Date"
@@ -274,6 +275,14 @@
    "fieldname": "remarks",
    "fieldtype": "Small Text",
    "label": "Remarks"
+  },
+  {
+   "fieldname": "forward_contract",
+   "fieldtype": "Link",
+   "label": "Forward contract",
+   "options": "Forward Contract",
+   "depends_on": "eval:doc.conversion_mode=='Forward Contract'",
+   "description": "Links this realization to a booked forward; locks the conversion rate to the forward rate"
   }
  ],
  "index_web_pages_for_search": 0,

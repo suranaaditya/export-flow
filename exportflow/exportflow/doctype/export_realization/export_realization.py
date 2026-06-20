@@ -3,7 +3,7 @@
 
 import frappe
 from frappe.model.document import Document
-from frappe.utils import add_months, getdate
+from frappe.utils import add_months, flt, getdate
 
 from exportflow.mtt import is_merchanting, mtt_months
 
@@ -105,6 +105,7 @@ class ExportRealization(Document):
 			self.company = exportflow_company()
 		self.pull_shipment_facts()
 		self.set_due_date()
+		self.apply_forward_contract()
 
 	def pull_shipment_facts(self):
 		self._shipment_facts = None
@@ -144,6 +145,32 @@ class ExportRealization(Document):
 			# only auto-move if the due date was still tracking the formula
 			if old_expected and getdate(self.due_date) == old_expected:
 				self.due_date = expected
+
+	def apply_forward_contract(self):
+		"""When settled under a forward contract, lock the conversion rate to the forward
+		rate and copy its reference (for display + the MIS register). Clears the link when
+		the conversion mode is anything else."""
+		if self.conversion_mode != "Forward Contract":
+			self.forward_contract = None
+			return
+		if not self.forward_contract:
+			return
+		fc = frappe.db.get_value(
+			"Forward Contract", self.forward_contract,
+			["contract_no", "forward_rate", "currency"], as_dict=True,
+		)
+		if not fc:
+			return
+		if fc.currency and self.currency and fc.currency != self.currency:
+			frappe.throw(
+				frappe._("Forward contract {0} is in {1}, not {2}.").format(
+					self.forward_contract, fc.currency, self.currency
+				)
+			)
+		self.fwd_contract_no = fc.contract_no
+		if flt(fc.forward_rate) > 0:
+			self.fwd_rate = fc.forward_rate
+			self.conversion_rate = fc.forward_rate
 
 	def is_overdue(self, today=None) -> bool:
 		from frappe.utils import nowdate

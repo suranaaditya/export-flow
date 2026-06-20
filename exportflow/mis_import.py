@@ -551,6 +551,75 @@ def backfill_consignee(path: str, company: str = "MN Globex", dry_run: int = 1) 
 	return result
 
 
+def backfill_forward_contracts(path: str, company: str = "MN Globex", dry_run: int = 1) -> dict:
+	"""Create Forward Contract records from the source MIS (the import never read the FWD
+	Contract No. / rate columns) and link the matching realizations. Idempotent: a forward
+	is matched by contract_no + company. `path` = a forwards.json of
+	[{export_invoice, contract_no, fwd_rate, mode}] produced locally from the sheet.
+
+	    bench --site <site> execute exportflow.mis_import.backfill_forward_contracts \\
+	        --kwargs "{'path': '/tmp/forwards.json', 'company': 'MN Globex', 'dry_run': False}"
+	"""
+	dry_run = int(dry_run)
+	with open(path) as f:
+		entries = json.load(f)
+	result = {"forwards_created": 0, "realizations_linked": 0, "eefc": 0, "cancelled": 0, "missing": 0}
+
+	# one Forward Contract per distinct contract no. (some cover several invoices)
+	groups: dict[str, dict] = {}
+	for e in entries:
+		if e.get("mode") == "Forward Contract" and e.get("contract_no"):
+			g = groups.setdefault(e["contract_no"], {"rate": None, "invoices": []})
+			g["invoices"].append(e["export_invoice"])
+			if e.get("fwd_rate"):
+				g["rate"] = e["fwd_rate"]
+
+	for contract_no, g in groups.items():
+		rels = frappe.get_all(
+			"Export Realization",
+			filters={"export_invoice": ["in", g["invoices"]], "company": company},
+			fields=["name", "currency", "invoice_value"],
+		)
+		if not rels:
+			result["missing"] += 1
+			continue
+		currency = next((r.currency for r in rels if r.currency), None) or "USD"
+		amount = sum(flt(r.invoice_value) for r in rels) or 1.0  # sheet has no contract size → cover the invoices
+		fc_name = frappe.db.exists("Forward Contract", {"contract_no": contract_no, "company": company})
+		if not fc_name:
+			fc_name = frappe.get_doc({
+				"doctype": "Forward Contract", "company": company, "contract_no": contract_no,
+				"ad_bank": "BOI", "currency": currency, "contract_amount": flt(amount, 2),
+				"forward_rate": flt(g["rate"]) or 1.0, "notes": "Imported from MIS",
+			}).insert(ignore_permissions=True).name
+			result["forwards_created"] += 1
+		for r in rels:
+			rd = frappe.get_doc("Export Realization", r.name)
+			rd.conversion_mode = "Forward Contract"
+			rd.forward_contract = fc_name
+			rd.save(ignore_permissions=True)
+			result["realizations_linked"] += 1
+
+	# EEFC proceeds get their conversion mode recorded; cancelled forwards are just counted
+	for e in entries:
+		if e.get("mode") == "EEFC":
+			rel = frappe.db.exists("Export Realization", {"export_invoice": e["export_invoice"], "company": company})
+			if rel:
+				frappe.db.set_value("Export Realization", rel, "conversion_mode", "EEFC", update_modified=False)
+				result["eefc"] += 1
+		elif e.get("mode") == "Cancelled":
+			result["cancelled"] += 1
+
+	if dry_run:
+		frappe.db.rollback()
+		result["mode"] = "dry-run (rolled back)"
+	else:
+		frappe.db.commit()
+		result["mode"] = "committed"
+	frappe.logger().info(f"MIS forward-contract backfill: {result}")
+	return result
+
+
 def backfill_mtt_import_facts(company: str | None = None, dry_run: int = 1) -> dict:
 	"""Derive the MTT import outlay (and single-supplier) from the linked POs for
 	merchanting shipments flagged auto — fills rows imported/created before the

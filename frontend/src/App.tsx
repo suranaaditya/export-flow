@@ -7,6 +7,7 @@ import { Compliance } from '@/pages/Compliance';
 import { Dashboard } from '@/pages/Dashboard';
 import { Documents } from '@/pages/Documents';
 import { Finance } from '@/pages/Finance';
+import { ForwardContracts } from '@/pages/ForwardContracts';
 import { Sales } from '@/pages/Sales';
 import { LetterOfCreditPage } from '@/pages/LetterOfCreditPage';
 import { NewSalesOrder } from '@/pages/NewSalesOrder';
@@ -68,6 +69,7 @@ export default function App() {
 								<Route path="shipments/:id" element={<ShipmentDetail />} />
 								<Route path="documents" element={<Documents />} />
 								<Route path="finance" element={<Finance />} />
+								<Route path="forwards" element={<ForwardContracts />} />
 								<Route path="reports" element={<Reports />} />
 								<Route path="compliance" element={<Compliance />} />
 								<Route path="settings" element={<Settings />} />

@@ -597,3 +597,13 @@ footer b { color: var(--fg-3); font-weight: 500 }
 .emdone { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 24px 18px 8px; text-align: center; width: min(440px, 82vw) }
 .emdone svg { color: var(--iris) }
 .emdone p { font-size: 13.5px; color: var(--fg-1); margin: 0; line-height: 1.5 }
+
+/* forward contracts */
+.fcform { display: flex; flex-direction: column; gap: 12px; width: min(560px, 88vw); box-sizing: border-box; padding: 2px 18px 16px }
+.fcform .row2 { display: flex; gap: 12px }
+.fcform .row2 > * { flex: 1; min-width: 0 }
+.fcstat { font-size: 12.5px; color: var(--fg-2); background: var(--bg-sunken); border-radius: 8px; padding: 9px 11px; line-height: 1.6 }
+.fcstat b { color: var(--fg-1); font-variant-numeric: tabular-nums }
+.hbar { position: relative; height: 18px; border-radius: 5px; background: var(--bg-sunken); overflow: hidden; display: flex; align-items: center }
+.hbar i { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(90deg, var(--iris-tint), var(--cyan-tint)); border-radius: 5px }
+.hbar span { position: relative; font-size: 11px; color: var(--fg-2); padding-left: 7px; font-variant-numeric: tabular-nums }

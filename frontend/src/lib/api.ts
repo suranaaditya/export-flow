@@ -181,7 +181,43 @@ export const API = {
 	emailAccountGet: 'exportflow.ai_email.get_email_account',
 	emailAccountSave: 'exportflow.ai_email.save_email_account',
 	emailAccountTest: 'exportflow.ai_email.test_email_account',
+	forwardContracts: 'exportflow.api.get_forward_contracts',
+	openForwards: 'exportflow.api.get_open_forwards',
 } as const;
+
+export interface ForwardContract {
+	name: string;
+	contract_no: string;
+	ad_bank: string | null;
+	currency: string;
+	contract_amount: number;
+	forward_rate: number;
+	inr_value: number;
+	booking_date: string | null;
+	maturity_date: string | null;
+	status: string;
+	utilized_amount: number;
+	outstanding_amount: number;
+	hedge_note: string | null;
+	notes: string | null;
+	days_to_maturity: number | null;
+}
+export interface FxExposure {
+	currency: string;
+	receivable: number;
+	hedged: number;
+	open_exposure: number;
+	hedge_pct: number | null;
+}
+export interface OpenForward {
+	name: string;
+	contract_no: string;
+	currency: string;
+	forward_rate: number;
+	outstanding_amount: number;
+	maturity_date: string | null;
+	label: string;
+}
 
 export interface EmailAccount {
 	email: string | null;
@@ -313,6 +349,7 @@ export interface RealizationRow {
 	bank_charges: number | null;
 	conversion_mode: string | null;
 	conversion_rate: number | null;
+	forward_contract: string | null;
 	ebrc_number: string | null;
 	ebrc_date: string | null;
 	brc_ref: string | null;

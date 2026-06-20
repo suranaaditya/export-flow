@@ -13,6 +13,7 @@ const NAV_ITEMS: { to: string; label: string; icon: IconName }[] = [
 	{ to: '/shipments', label: 'Shipments', icon: 'ship' },
 	{ to: '/documents', label: 'Documents', icon: 'copy' },
 	{ to: '/finance', label: 'Finance', icon: 'rupee' },
+	{ to: '/forwards', label: 'Forward FX', icon: 'banknote' },
 	{ to: '/reports', label: 'Reports', icon: 'file-text-alt' },
 	{ to: '/compliance', label: 'Compliance', icon: 'shield-check' },
 ];

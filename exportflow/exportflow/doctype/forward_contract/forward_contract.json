@@ -1,0 +1,225 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "naming_series:",
+ "creation": "2026-06-20 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "company",
+  "contract_no",
+  "ad_bank",
+  "cb_main",
+  "currency",
+  "contract_amount",
+  "forward_rate",
+  "inr_value",
+  "section_dates",
+  "booking_date",
+  "maturity_date",
+  "cb_dates",
+  "status",
+  "section_util",
+  "utilized_amount",
+  "outstanding_amount",
+  "cb_util",
+  "hedge_note",
+  "section_notes",
+  "notes"
+ ],
+ "fields": [
+  {
+   "default": "FWD-.YY.-.####",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "FWD-.YY.-.####",
+   "print_hide": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "description": "The bank's forward-contract reference",
+   "fieldname": "contract_no",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Forward contract no.",
+   "reqd": 1
+  },
+  {
+   "fieldname": "ad_bank",
+   "fieldtype": "Data",
+   "label": "AD bank"
+  },
+  {
+   "fieldname": "cb_main",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Currency",
+   "options": "Currency",
+   "reqd": 1
+  },
+  {
+   "description": "Foreign-currency amount covered by this contract",
+   "fieldname": "contract_amount",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Contract amount (FCY)",
+   "precision": "2",
+   "reqd": 1
+  },
+  {
+   "description": "The locked INR rate the proceeds are settled at",
+   "fieldname": "forward_rate",
+   "fieldtype": "Float",
+   "label": "Forward rate (INR)",
+   "precision": "4",
+   "reqd": 1
+  },
+  {
+   "fieldname": "inr_value",
+   "fieldtype": "Currency",
+   "label": "Locked INR value",
+   "options": "Company:company:default_currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_dates",
+   "fieldtype": "Section Break",
+   "label": "Dates & status"
+  },
+  {
+   "fieldname": "booking_date",
+   "fieldtype": "Date",
+   "label": "Booking date"
+  },
+  {
+   "fieldname": "maturity_date",
+   "fieldtype": "Date",
+   "label": "Maturity / delivery date"
+  },
+  {
+   "fieldname": "cb_dates",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Open",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Open\nPartially Utilized\nFully Utilized\nMatured\nCancelled"
+  },
+  {
+   "fieldname": "section_util",
+   "fieldtype": "Section Break",
+   "label": "Utilization"
+  },
+  {
+   "description": "Foreign-currency drawn down by realizations linked to this contract",
+   "fieldname": "utilized_amount",
+   "fieldtype": "Float",
+   "label": "Utilized (FCY)",
+   "precision": "2",
+   "read_only": 1
+  },
+  {
+   "fieldname": "outstanding_amount",
+   "fieldtype": "Float",
+   "label": "Outstanding cover (FCY)",
+   "precision": "2",
+   "read_only": 1
+  },
+  {
+   "fieldname": "cb_util",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "hedge_note",
+   "fieldtype": "Data",
+   "label": "Coverage",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_notes",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-06-20 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ExportFlow",
+ "name": "Forward Contract",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Export Admin",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Export Accounts",
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "Export Operations"
+  },
+  {
+   "read": 1,
+   "role": "Export Viewer"
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

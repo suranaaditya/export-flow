@@ -14,6 +14,8 @@ COMPLIANCE_ALERT_DAYS = {60, 30, 7}
 # bank realization (FEMA window) and RoDTEP scrip expiry
 REALIZATION_ALERT_DAYS = {30, 7}
 SCRIP_EXPIRY_ALERT_DAYS = {60, 30, 7}
+# forward (FX) contracts maturing with cover still un-drawn
+FORWARD_ALERT_DAYS = {14, 7, 3, 1}
 # FEMA merchanting 4-month forex-outlay clock (completion is tracked by the
 # realization due date, which is MTT-based for merchanting shipments)
 MTT_OUTLAY_ALERT_DAYS = {15, 7}
@@ -27,6 +29,7 @@ def daily():
 	alerts += send_compliance_alerts()
 	alerts += send_realization_alerts()
 	alerts += send_scrip_expiry_alerts()
+	alerts += send_forward_maturity_alerts()
 	alerts += send_mtt_outlay_alerts()
 	send_email_digest(alerts)
 
@@ -455,6 +458,41 @@ def send_scrip_expiry_alerts(today=None) -> list[dict]:
 				notify_export_users(subject, body, "Export Incentive", inc.name)
 		except Exception:
 			frappe.log_error(title=f"Scrip expiry alert failed: {inc.name}", message=frappe.get_traceback())
+
+	return alerts
+
+
+def send_forward_maturity_alerts(today=None) -> list[dict]:
+	"""Forward contracts maturing with cover still un-drawn — alert at 14/7/3/1 days
+	before maturity (and weekly once past) so the proceeds are delivered or the
+	contract rolled/cancelled before it lapses into bank charges."""
+	today = getdate(today or nowdate())
+	alerts = []
+
+	for fc in frappe.get_all(
+		"Forward Contract",
+		filters={
+			"status": ["in", ("Open", "Partially Utilized", "Matured")],
+			"maturity_date": ["is", "set"],
+		},
+		fields=["name", "contract_no", "currency", "outstanding_amount", "maturity_date"],
+	):
+		try:
+			if flt(fc.outstanding_amount) <= 0:
+				continue
+			days_left = (getdate(fc.maturity_date) - today).days
+			if _should_alert(days_left, FORWARD_ALERT_DAYS):
+				undrawn = f"{fc.currency} {flt(fc.outstanding_amount):,.0f}"
+				subject = f"Forward {fc.contract_no} matures {_when(days_left)} — {undrawn} undrawn"
+				body = (
+					f"Forward contract {fc.contract_no} ({fc.currency}) matures on {fc.maturity_date} with "
+					f"{fc.currency} {flt(fc.outstanding_amount):,.2f} of cover still un-drawn. Deliver the "
+					f"proceeds or roll/cancel the contract before maturity to avoid bank charges."
+				)
+				alerts.append({"forward_contract": fc.name, "days_left": days_left, "subject": subject})
+				notify_export_users(subject, body, "Forward Contract", fc.name)
+		except Exception:
+			frappe.log_error(title=f"Forward maturity alert failed: {fc.name}", message=frappe.get_traceback())
 
 	return alerts
 

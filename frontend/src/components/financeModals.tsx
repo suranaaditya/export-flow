@@ -1,16 +1,20 @@
 import { useState } from 'react';
-import { useFrappeCreateDoc, useFrappeDeleteDoc, useFrappeUpdateDoc } from 'frappe-react-sdk';
+import { useFrappeCreateDoc, useFrappeDeleteDoc, useFrappeGetCall, useFrappeUpdateDoc } from 'frappe-react-sdk';
 import { Field, SelectInput, TextArea, TextInput } from '@/components/form';
 import { Modal } from '@/components/ui';
 import {
+	API,
 	INCENTIVE_STATUSES,
 	REALIZATION_STATUSES,
 	parseServerError,
 	type IncentiveRow,
 	type IncentiveStatus,
+	type OpenForward,
 	type RealizationRow,
 	type RealizationStatus,
 } from '@/lib/api';
+
+const CONVERSION_MODES = ['Direct', 'Forward Contract', 'EEFC', 'Packing Credit'];
 
 /** Seed for creating an incentive from a shipment (FOB basis pre-filled; the
  *  rate stays manual, the amount auto-computes server-side). */
@@ -264,6 +268,8 @@ export function RealizationModal({
 		amount_received: record?.amount_received != null ? String(record.amount_received) : '',
 		amount_received_inr: record?.amount_received_inr != null ? String(record.amount_received_inr) : '',
 		bank_charges: record?.bank_charges != null ? String(record.bank_charges) : '',
+		conversion_mode: record?.conversion_mode ?? 'Direct',
+		forward_contract: record?.forward_contract ?? '',
 		ebrc_number: record?.ebrc_number ?? '',
 		ebrc_date: record?.ebrc_date ?? '',
 		remarks: record?.remarks ?? '',
@@ -274,6 +280,20 @@ export function RealizationModal({
 	const { updateDoc, loading: updating } = useFrappeUpdateDoc();
 	const { deleteDoc, loading: deleting } = useFrappeDeleteDoc();
 	const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }));
+
+	// open forwards in the realization's currency, for the picker (a USD deal can't
+	// draw on a EUR forward); keep the current link selectable even once fully utilized
+	const { data: fwdData } = useFrappeGetCall<{ message: OpenForward[] }>(API.openForwards, {
+		currency: form.currency || 'USD',
+	});
+	const openForwards = fwdData?.message ?? [];
+	const forwardOptions = [
+		{ value: '', label: '— select a forward —' },
+		...openForwards.map((f) => ({ value: f.name, label: f.label })),
+		...(form.forward_contract && !openForwards.some((f) => f.name === form.forward_contract)
+			? [{ value: form.forward_contract, label: form.forward_contract }]
+			: []),
+	];
 
 	async function onDelete() {
 		if (!record) return;
@@ -309,6 +329,8 @@ export function RealizationModal({
 			amount_received: Number(form.amount_received) || 0,
 			amount_received_inr: Number(form.amount_received_inr) || 0,
 			bank_charges: Number(form.bank_charges) || 0,
+			conversion_mode: form.conversion_mode,
+			forward_contract: form.conversion_mode === 'Forward Contract' ? form.forward_contract || null : null,
 			ebrc_number: form.ebrc_number,
 			ebrc_date: form.ebrc_date || null,
 			remarks: form.remarks,
@@ -338,6 +360,10 @@ export function RealizationModal({
 				<Field label="Amount received (FCY)"><TextInput type="number" mono value={form.amount_received} onChange={(v) => set('amount_received', v)} /></Field>
 				<Field label="Amount received (INR)"><TextInput type="number" mono value={form.amount_received_inr} onChange={(v) => set('amount_received_inr', v)} /></Field>
 				<Field label="Bank charges (FCY)"><TextInput type="number" mono value={form.bank_charges} onChange={(v) => set('bank_charges', v)} /></Field>
+				<Field label="Conversion mode" hint="How the FX is converted to INR"><SelectInput value={form.conversion_mode} onChange={(v) => set('conversion_mode', v)} options={CONVERSION_MODES.map((m) => ({ value: m }))} /></Field>
+				{form.conversion_mode === 'Forward Contract' && (
+					<Field label="Forward contract" hint="Locks the rate to the forward rate"><SelectInput value={form.forward_contract} onChange={(v) => set('forward_contract', v)} options={forwardOptions} /></Field>
+				)}
 				<Field label="eBRC number"><TextInput mono value={form.ebrc_number} onChange={(v) => set('ebrc_number', v)} /></Field>
 				<Field label="eBRC date"><TextInput type="date" value={form.ebrc_date} onChange={(v) => set('ebrc_date', v)} /></Field>
 				<div className="span2"><Field label="Remarks"><TextArea value={form.remarks} onChange={(v) => set('remarks', v)} rows={2} /></Field></div>
