@@ -784,7 +784,9 @@ const SETTINGS_SECTIONS: { key: SettingsSection; label: string; icon: IconName; 
 ];
 
 
-function EmailAccountPanel({ canEdit }: { canEdit: boolean }) {
+function EmailAccountPanel() {
+	// gated on this panel's OWN endpoint (write-only) — an `error` here means the user
+	// lacks ExportFlow Settings write, so the form is never shown to them
 	const { data, isLoading, error, mutate } = useFrappeGetCall<{ message: EmailAccount }>(API.emailAccountGet, undefined);
 	const acc = data?.message;
 	const { call: saveCall, loading: saving } = useFrappePostCall<{ message: { ok: boolean; configured: boolean } }>(API.emailAccountSave);
@@ -812,6 +814,13 @@ function EmailAccountPanel({ canEdit }: { canEdit: boolean }) {
 		setSeeded(true);
 	}, [acc, seeded]);
 
+	// editing the form clears any stale Saved / Connected / error message
+	const touch = <T,>(fn: (v: T) => void) => (v: T) => {
+		setMsg(null);
+		setErr(null);
+		fn(v);
+	};
+
 	async function onSave() {
 		setErr(null);
 		setMsg(null);
@@ -829,7 +838,8 @@ function EmailAccountPanel({ canEdit }: { canEdit: boolean }) {
 		setErr(null);
 		setMsg(null);
 		try {
-			const r = await testCall({});
+			// test the LIVE values being edited, not the stale saved account
+			const r = await testCall({ email, host, port, use_ssl: useSsl ? 1 : 0, password: password || undefined });
 			setMsg(`Connected ✓ — ${r.message.email}`);
 		} catch (e) {
 			setErr(parseServerError(e));
@@ -850,32 +860,36 @@ function EmailAccountPanel({ canEdit }: { canEdit: boolean }) {
 						change this site's other apps. For Gmail/Workspace use an <b>App Password</b>, not your login password.
 					</div>
 					<Field label="From email address" required>
-						<TextInput value={email} onChange={setEmail} placeholder="exports@yourcompany.com" disabled={!canEdit} />
+						<TextInput value={email} onChange={touch(setEmail)} placeholder="exports@yourcompany.com" />
 					</Field>
 					<Field label="Sender name">
-						<TextInput value={senderName} onChange={setSenderName} placeholder="MN Globex Exports" disabled={!canEdit} />
+						<TextInput value={senderName} onChange={touch(setSenderName)} placeholder="MN Globex Exports" />
 					</Field>
 					<div style={{ display: 'flex', gap: 12 }}>
 						<div style={{ flex: 2 }}>
-							<Field label="SMTP host"><TextInput value={host} onChange={setHost} disabled={!canEdit} /></Field>
+							<Field label="SMTP host"><TextInput value={host} onChange={touch(setHost)} /></Field>
 						</div>
 						<div style={{ flex: 1 }}>
-							<Field label="Port"><TextInput value={port} onChange={setPort} type="number" disabled={!canEdit} /></Field>
+							<Field label="Port"><TextInput value={port} onChange={touch(setPort)} type="number" /></Field>
 						</div>
 					</div>
-					<CheckInput checked={useSsl} onChange={setUseSsl} label="Use SSL (port 465; uncheck for STARTTLS / 587)" disabled={!canEdit} />
+					<CheckInput checked={useSsl} onChange={touch(setUseSsl)} label="Use SSL (port 465; uncheck for STARTTLS / 587)" />
 					<Field label="App password" hint={hasPassword ? 'A password is saved — leave blank to keep it.' : 'Required to send.'}>
-						<TextInput value={password} onChange={setPassword} type="password" placeholder={hasPassword ? '••••••••  (unchanged)' : 'app password'} disabled={!canEdit} />
+						<TextInput value={password} onChange={touch(setPassword)} type="password" placeholder={hasPassword ? '••••••••  (unchanged)' : 'app password'} />
 					</Field>
 					{err && <div className="ferr">{err}</div>}
 					{msg && <div className="sub" style={{ margin: 0, color: 'var(--iris)' }}>{msg}</div>}
-					{canEdit && (
-						<div className="formfoot">
-							<button className="btn primary" onClick={() => void onSave()} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
-							<button className="btn" onClick={() => void onTest()} disabled={testing || !acc?.configured}>{testing ? 'Testing…' : 'Test connection'}</button>
-							<span className="spacer" />
-						</div>
-					)}
+					<div className="formfoot">
+						<button className="btn primary" onClick={() => void onSave()} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+						<button
+							className="btn"
+							onClick={() => void onTest()}
+							disabled={testing || !email || (!password && !hasPassword)}
+						>
+							{testing ? 'Testing…' : 'Test connection'}
+						</button>
+						<span className="spacer" />
+					</div>
 				</div>
 			)}
 		</Card>
@@ -936,7 +950,7 @@ export function Settings() {
 				<div className="setbody">
 					{section === 'company' && <ExporterProfilePanel canEdit={canEdit} />}
 					{section === 'automation' && <AutomationPanel canEdit={canEdit} />}
-					{section === 'email' && <EmailAccountPanel canEdit={canEdit} />}
+					{section === 'email' && <EmailAccountPanel />}
 					{section === 'documents' && (
 						<div className="stack">
 							<MasterPanel def={DOC_MASTER} options={options} canEdit={canEdit} />

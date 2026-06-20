@@ -21,7 +21,7 @@ import requests
 import frappe
 from frappe import _
 from frappe.contacts.doctype.contact.contact import get_default_contact
-from frappe.utils import escape_html, flt, fmt_money, format_date, split_emails, validate_email_address
+from frappe.utils import cint, escape_html, flt, fmt_money, format_date, split_emails, validate_email_address
 
 
 def _ollama_url() -> str:
@@ -355,8 +355,9 @@ def _smtp_send(acc, recipients, cc, subject, html, attachments):
 
 @frappe.whitelist()
 def get_email_account() -> dict:
-	"""The connected sending account (never returns the password)."""
-	frappe.has_permission("ExportFlow Settings", "read", throw=True)
+	"""The connected sending account (never returns the password). Write-gated so a
+	pure viewer can't enumerate the sending identity."""
+	frappe.has_permission("ExportFlow Settings", "write", throw=True)
 	s = frappe.get_single("ExportFlow Settings")
 	return {
 		"email": s.get("smtp_email"),
@@ -366,6 +367,7 @@ def get_email_account() -> dict:
 		"use_ssl": bool(int(s.get("smtp_use_ssl") or 0)),
 		"has_password": bool(s.get_password("smtp_password", raise_exception=False)),
 		"configured": bool(_smtp_account()),
+		"can_write": True,
 	}
 
 
@@ -381,7 +383,7 @@ def save_email_account(email, sender_name=None, host=None, port=None, use_ssl=1,
 	s.smtp_email = email
 	s.smtp_sender_name = (sender_name or "").strip() or None
 	s.smtp_host = (host or "").strip() or "smtp.gmail.com"
-	s.smtp_port = int(port or 465)
+	s.smtp_port = cint(port) or 465
 	s.smtp_use_ssl = 1 if str(use_ssl) in ("1", "true", "True") else 0
 	if password:
 		s.smtp_password = password
@@ -391,25 +393,33 @@ def save_email_account(email, sender_name=None, host=None, port=None, use_ssl=1,
 
 
 @frappe.whitelist()
-def test_email_account() -> dict:
-	"""Verify the connected account's SMTP login (connect + auth, no message sent)."""
+def test_email_account(email=None, host=None, port=None, use_ssl=None, password=None) -> dict:
+	"""Verify SMTP login (connect + auth, no message sent). Tests the LIVE form values
+	the user typed (so 'Test' validates what they're about to save, not the stale saved
+	account); the saved password is reused when the password box was left blank."""
 	frappe.has_permission("ExportFlow Settings", "write", throw=True)
-	acc = _smtp_account()
-	if not acc:
-		frappe.throw(_("Enter the email address and app password, Save, then test."))
+	s = frappe.get_single("ExportFlow Settings")
+	em = (email or s.get("smtp_email") or "").strip()
+	if not em:
+		frappe.throw(_("Enter the email address first."))
+	validate_email_address(em, throw=True)
+	pw = password or s.get_password("smtp_password", raise_exception=False)
+	if not pw:
+		frappe.throw(_("Enter the app password to test."))
+	host = (host or s.get("smtp_host") or "smtp.gmail.com").strip()
+	use_ssl = int(use_ssl if use_ssl is not None else (s.get("smtp_use_ssl") or 0))
+	conn_port = cint(port) or cint(s.get("smtp_port")) or (465 if use_ssl else 587)
+
 	import smtplib
 	import ssl as _ssl
 
-	host = acc.smtp_host or "smtp.gmail.com"
-	use_ssl = int(acc.get("smtp_use_ssl") or 0)
-	port = int(acc.smtp_port or (465 if use_ssl else 587))
 	try:
 		ctx = _ssl.create_default_context()
-		server = smtplib.SMTP_SSL(host, port, context=ctx, timeout=20) if use_ssl else smtplib.SMTP(host, port, timeout=20)
+		server = smtplib.SMTP_SSL(host, conn_port, context=ctx, timeout=20) if use_ssl else smtplib.SMTP(host, conn_port, timeout=20)
 		if not use_ssl:
 			server.starttls(context=ctx)
-		server.login(acc.smtp_email, acc.get_password("smtp_password"))
+		server.login(em, pw)
 		server.quit()
 	except Exception as e:
 		frappe.throw(_("Could not connect: {0}").format(str(e)[:160]))
-	return {"ok": True, "email": acc.smtp_email}
+	return {"ok": True, "email": em}
