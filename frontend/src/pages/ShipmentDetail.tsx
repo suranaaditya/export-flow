@@ -1383,6 +1383,11 @@ function EditShipmentModal({
 		consignee_name: shipment.consignee_name ?? '',
 		consignee_address: shipment.consignee_address ?? '',
 		notify_party: shipment.notify_party ?? '',
+		// incentive claims booked on this shipment
+		claim_rodtep: !!shipment.claim_rodtep,
+		rodtep_rate_pct: shipment.rodtep_rate_pct != null ? String(shipment.rodtep_rate_pct) : '',
+		claim_drawback: !!shipment.claim_drawback,
+		drawback_rate_pct: shipment.drawback_rate_pct != null ? String(shipment.drawback_rate_pct) : '',
 	}));
 	const [lines, setLines] = useState<ShipmentLineEdit[]>(() =>
 		items.map((it) => ({
@@ -1465,6 +1470,11 @@ function EditShipmentModal({
 					consignee_name: form.consignee_to_order ? null : form.consignee_name,
 					consignee_address: form.consignee_to_order ? null : form.consignee_address,
 					notify_party: form.notify_party,
+					// incentive claims never apply to merchanting
+					claim_rodtep: !merch && form.claim_rodtep ? 1 : 0,
+					rodtep_rate_pct: !merch && form.claim_rodtep ? Number(form.rodtep_rate_pct) || 0 : 0,
+					claim_drawback: !merch && form.claim_drawback ? 1 : 0,
+					drawback_rate_pct: !merch && form.claim_drawback ? Number(form.drawback_rate_pct) || 0 : 0,
 					items: lines.map((l) => ({
 						name: l.name,
 						qty: Number(l.qty),
@@ -1603,6 +1613,44 @@ function EditShipmentModal({
 						<TextArea value={form.notes} onChange={(v) => set('notes', v)} rows={2} />
 					</Field>
 				</div>
+				{!isMerchanting(form.trade_type) && (
+					<>
+						<div className="span2 fdivider">Export incentives</div>
+						<Field label="RoDTEP">
+							<CheckInput
+								checked={form.claim_rodtep}
+								onChange={(v) => set('claim_rodtep', v)}
+								label="Claim RoDTEP"
+							/>
+							{form.claim_rodtep && (
+								<TextInput
+									type="number"
+									value={form.rodtep_rate_pct}
+									onChange={(v) => set('rodtep_rate_pct', v)}
+									placeholder="Rate % of FOB (optional)"
+								/>
+							)}
+						</Field>
+						<Field label="Duty Drawback">
+							<CheckInput
+								checked={form.claim_drawback}
+								onChange={(v) => set('claim_drawback', v)}
+								label="Claim Drawback"
+							/>
+							{form.claim_drawback && (
+								<TextInput
+									type="number"
+									value={form.drawback_rate_pct}
+									onChange={(v) => set('drawback_rate_pct', v)}
+									placeholder="Rate % of FOB (optional)"
+								/>
+							)}
+						</Field>
+						<div className="span2 sub" style={{ margin: 0 }}>
+							A Pending claim opens automatically when the Commercial Invoice is generated.
+						</div>
+					</>
+				)}
 			</div>
 			{lines.length > 0 && (
 				<>

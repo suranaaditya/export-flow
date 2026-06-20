@@ -61,6 +61,12 @@
   "cb_parties",
   "consignee_address",
   "notify_party",
+  "section_incentives",
+  "claim_rodtep",
+  "rodtep_rate_pct",
+  "cb_incentives",
+  "claim_drawback",
+  "drawback_rate_pct",
   "section_mtt",
   "mtt_ad_bank",
   "mtt_same_ad_bank",
@@ -536,6 +542,44 @@
    "fieldname": "notes",
    "fieldtype": "Small Text",
    "label": "Notes"
+  },
+  {
+   "fieldname": "section_incentives",
+   "fieldtype": "Section Break",
+   "label": "Export Incentives",
+   "depends_on": "eval:doc.trade_type!='Third-country / Merchanting'"
+  },
+  {
+   "fieldname": "claim_rodtep",
+   "fieldtype": "Check",
+   "label": "Claim RoDTEP",
+   "default": "0",
+   "description": "Book a RoDTEP claim — a Pending Export Incentive opens automatically when the Commercial Invoice is generated."
+  },
+  {
+   "fieldname": "rodtep_rate_pct",
+   "fieldtype": "Percent",
+   "label": "RoDTEP rate %",
+   "depends_on": "eval:doc.claim_rodtep",
+   "description": "Govt-notified RoDTEP rate (% of FOB). Drives the auto-opened claim's amount; leave blank to fill later."
+  },
+  {
+   "fieldname": "cb_incentives",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "claim_drawback",
+   "fieldtype": "Check",
+   "label": "Claim Duty Drawback",
+   "default": "0",
+   "description": "Book a Duty Drawback claim — a Pending Export Incentive opens automatically when the Commercial Invoice is generated."
+  },
+  {
+   "fieldname": "drawback_rate_pct",
+   "fieldtype": "Percent",
+   "label": "Drawback rate %",
+   "depends_on": "eval:doc.claim_drawback",
+   "description": "Duty Drawback rate (% of FOB). Drives the auto-opened claim's amount; leave blank to fill later."
   }
  ],
  "index_web_pages_for_search": 0,

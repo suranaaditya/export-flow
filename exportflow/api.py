@@ -1462,6 +1462,10 @@ def create_shipment(payload) -> dict:
 			"consignee_name": payload.get("consignee_name"),
 			"consignee_address": payload.get("consignee_address"),
 			"notify_party": payload.get("notify_party"),
+			"claim_rodtep": 1 if payload.get("claim_rodtep") else 0,
+			"rodtep_rate_pct": flt(payload.get("rodtep_rate_pct")) or None,
+			"claim_drawback": 1 if payload.get("claim_drawback") else 0,
+			"drawback_rate_pct": flt(payload.get("drawback_rate_pct")) or None,
 			"items": [
 				{
 					"item_code": row.get("item_code"),
@@ -1657,6 +1661,10 @@ def get_shipment_detail(name: str) -> dict:
 				"consignee_name",
 				"consignee_address",
 				"notify_party",
+				"claim_rodtep",
+				"rodtep_rate_pct",
+				"claim_drawback",
+				"drawback_rate_pct",
 				"mtt_ad_bank",
 				"mtt_same_ad_bank",
 				"mtt_import_supplier",
@@ -1731,6 +1739,11 @@ SHIPMENT_EDITABLE = {
 	"consignee_name",
 	"consignee_address",
 	"notify_party",
+	# incentive claims booked at shipment time (drive the auto-created shells)
+	"claim_rodtep",
+	"rodtep_rate_pct",
+	"claim_drawback",
+	"drawback_rate_pct",
 }
 SHIPMENT_DATE_FIELDS = {"etd", "eta", "buyer_order_date"}
 
@@ -2024,6 +2037,57 @@ def _auto_create_realization(doc) -> None:
 	).insert(ignore_permissions=True)
 
 
+def _auto_create_incentives(doc) -> None:
+	"""A Commercial Invoice has been generated → for each incentive scheme the
+	shipment is booked to claim (RoDTEP / Duty Drawback, chosen on the booking
+	form), open a Pending Export Incentive pre-filled with the FOB basis and the
+	booked rate, so it is a confirm-and-file worklist item rather than a blank one
+	(amount = FOB × rate, left blank when no rate was captured). Idempotent per
+	(shipment, scheme). HARD-SKIPS merchanting — those trades cannot earn RoDTEP
+	or Drawback and the Export Incentive controller would throw. Gated by
+	ExportFlow Settings.auto_create_incentive (default ON; an unset Single field
+	reads None, so only an explicit 0 disables it). Never raises — the caller
+	wraps it and it must never block the PDF."""
+	enabled = frappe.db.get_single_value("ExportFlow Settings", "auto_create_incentive")
+	if enabled is not None and not enabled:
+		return
+	if not doc.shipment:
+		return
+	seed = _finance_seed(doc.shipment)
+	if seed.get("merchanting"):
+		# third-country / merchanting trades are ineligible for RoDTEP / Drawback
+		return
+	booked = frappe.db.get_value(
+		"Export Shipment",
+		doc.shipment,
+		["claim_rodtep", "rodtep_rate_pct", "claim_drawback", "drawback_rate_pct"],
+		as_dict=True,
+	)
+	if not booked:
+		return
+	fob = seed.get("fob_value_inr")
+	wanted = []
+	if booked.claim_rodtep:
+		wanted.append(("RoDTEP", flt(booked.rodtep_rate_pct)))
+	if booked.claim_drawback:
+		wanted.append(("Duty Drawback", flt(booked.drawback_rate_pct)))
+	for scheme, rate in wanted:
+		# one auto-shell per (shipment, scheme) — never duplicates a manually
+		# added or historical claim
+		if frappe.db.exists("Export Incentive", {"shipment": doc.shipment, "scheme": scheme}):
+			continue
+		frappe.get_doc(
+			{
+				"doctype": "Export Incentive",
+				"shipment": doc.shipment,
+				"scheme": scheme,
+				"status": "Pending",
+				"fob_value": fob or None,
+				"rate_pct": rate or None,
+			}
+		).insert(ignore_permissions=True)
+
+
 @frappe.whitelist()
 def generate_shipment_documents(shipment: str) -> dict:
 	"""Generate every generatable document on a shipment in one pass. Generatable
@@ -2153,6 +2217,12 @@ def generate_document(name: str) -> dict:
 		except Exception:
 			frappe.log_error(
 				title=f"Auto-create realization failed: {doc.name}", message=frappe.get_traceback()
+			)
+		try:
+			_auto_create_incentives(doc)
+		except Exception:
+			frappe.log_error(
+				title=f"Auto-create incentives failed: {doc.name}", message=frappe.get_traceback()
 			)
 
 	return {

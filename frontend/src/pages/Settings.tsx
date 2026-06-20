@@ -669,6 +669,7 @@ function AutomationPanel({ canEdit }: { canEdit: boolean }) {
 		mtt_outlay_months?: number;
 		auto_cha_third_country?: 0 | 1;
 		auto_create_realization?: 0 | 1;
+		auto_create_incentive?: 0 | 1;
 		email_digest_enabled?: 0 | 1;
 	}>('ExportFlow Settings', 'ExportFlow Settings');
 	const { updateDoc, loading: saving } = useFrappeUpdateDoc();
@@ -676,6 +677,7 @@ function AutomationPanel({ canEdit }: { canEdit: boolean }) {
 	const [outlay, setOutlay] = useState('');
 	const [autoCha, setAutoCha] = useState(false);
 	const [autoRealization, setAutoRealization] = useState(true);
+	const [autoIncentive, setAutoIncentive] = useState(true);
 	const [emailDigest, setEmailDigest] = useState(false);
 	const [seeded, setSeeded] = useState(false);
 	const [err, setErr] = useState<string | null>(null);
@@ -688,6 +690,7 @@ function AutomationPanel({ canEdit }: { canEdit: boolean }) {
 		setAutoCha(!!data.auto_cha_third_country);
 		// default ON — an unset Single field reads back null/undefined
 		setAutoRealization(data.auto_create_realization == null ? true : !!data.auto_create_realization);
+		setAutoIncentive(data.auto_create_incentive == null ? true : !!data.auto_create_incentive);
 		setEmailDigest(!!data.email_digest_enabled);
 		setSeeded(true);
 	}, [data, seeded]);
@@ -706,6 +709,7 @@ function AutomationPanel({ canEdit }: { canEdit: boolean }) {
 				mtt_outlay_months: Number(outlay) || 4,
 				auto_cha_third_country: autoCha ? 1 : 0,
 				auto_create_realization: autoRealization ? 1 : 0,
+				auto_create_incentive: autoIncentive ? 1 : 0,
 				email_digest_enabled: emailDigest ? 1 : 0,
 			});
 			setSavedTick(true);
@@ -730,6 +734,13 @@ function AutomationPanel({ canEdit }: { canEdit: boolean }) {
 								checked={autoRealization}
 								onChange={touch(setAutoRealization)}
 								label="Open a bank realization automatically when a Commercial Invoice is generated"
+							/>
+						</div>
+						<div className="span2">
+							<CheckInput
+								checked={autoIncentive}
+								onChange={touch(setAutoIncentive)}
+								label="Open RoDTEP / Drawback incentive claims automatically when a Commercial Invoice is generated (never for merchanting)"
 							/>
 						</div>
 						<div className="span2">

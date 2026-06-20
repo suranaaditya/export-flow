@@ -833,6 +833,10 @@ export interface ShipmentDetailData {
 		consignee_name: string | null;
 		consignee_address: string | null;
 		notify_party: string | null;
+		claim_rodtep: 0 | 1;
+		rodtep_rate_pct: number | null;
+		claim_drawback: 0 | 1;
+		drawback_rate_pct: number | null;
 		mtt_ad_bank: string | null;
 		mtt_same_ad_bank: 0 | 1;
 		mtt_import_supplier: string | null;

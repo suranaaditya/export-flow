@@ -9,7 +9,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
 import { MasterModal } from '@/components/MasterModal';
 import { PackEditor, editToPayload, type PackEdit } from '@/components/packEditor';
-import { Field, SearchSelect, SelectInput, TextInput } from '@/components/form';
+import { CheckInput, Field, SearchSelect, SelectInput, TextInput } from '@/components/form';
 import { Card, CHead, EmptyMsg } from '@/components/ui';
 import {
 	API,
@@ -134,6 +134,13 @@ export function NewShipment() {
 	);
 	const autoCha = !!settings.data?.auto_cha_third_country;
 	const merchanting = isMerchanting(tradeType);
+
+	// incentive claims booked at shipment time → a Pending Export Incentive opens
+	// automatically when the Commercial Invoice is generated (never for merchanting)
+	const [claimRodtep, setClaimRodtep] = useState(false);
+	const [rodtepRate, setRodtepRate] = useState('');
+	const [claimDrawback, setClaimDrawback] = useState(false);
+	const [drawbackRate, setDrawbackRate] = useState('');
 
 	// auto-stamp the placeholder CHA on merchanting trades when the setting is on
 	useEffect(() => {
@@ -407,6 +414,11 @@ export function NewShipment() {
 					etd: etd || null,
 					eta: eta || null,
 					letter_of_credit: lc || null,
+					// incentive claims never apply to merchanting — never send them
+					claim_rodtep: !merchanting && claimRodtep ? 1 : 0,
+					rodtep_rate_pct: !merchanting && claimRodtep ? Number(rodtepRate) || null : null,
+					claim_drawback: !merchanting && claimDrawback ? 1 : 0,
+					drawback_rate_pct: !merchanting && claimDrawback ? Number(drawbackRate) || null : null,
 					items: checked.map((l) => ({
 						item_code: l.item_code,
 						qty: Number(selFor(l).qty),
@@ -624,6 +636,40 @@ export function NewShipment() {
 							<TextInput type="date" value={eta} onChange={setEta} />
 						</Field>
 					</div>
+
+					{!merchanting && (
+						<>
+							<div className="fdivider">Export incentives · optional</div>
+							<div className="formgrid">
+								<Field label="RoDTEP">
+									<CheckInput checked={claimRodtep} onChange={setClaimRodtep} label="Claim RoDTEP" />
+									{claimRodtep && (
+										<TextInput
+											type="number"
+											value={rodtepRate}
+											onChange={setRodtepRate}
+											placeholder="Rate % of FOB (optional)"
+										/>
+									)}
+								</Field>
+								<Field label="Duty Drawback">
+									<CheckInput checked={claimDrawback} onChange={setClaimDrawback} label="Claim Drawback" />
+									{claimDrawback && (
+										<TextInput
+											type="number"
+											value={drawbackRate}
+											onChange={setDrawbackRate}
+											placeholder="Rate % of FOB (optional)"
+										/>
+									)}
+								</Field>
+								<div className="span2 sub" style={{ margin: 0 }}>
+									A Pending claim opens automatically when the Commercial Invoice is generated — the rate
+									is optional, fill it later if not yet notified.
+								</div>
+							</div>
+						</>
+					)}
 
 					<div
 						className="reqhead"

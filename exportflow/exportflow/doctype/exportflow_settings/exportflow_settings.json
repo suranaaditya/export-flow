@@ -39,6 +39,7 @@
   "section_automation",
   "auto_cha_third_country",
   "auto_create_realization",
+  "auto_create_incentive",
   "section_alerts",
   "email_digest_enabled",
   "section_email_account",
@@ -303,6 +304,13 @@
    "fieldtype": "Password",
    "label": "App password",
    "description": "An app-specific password (e.g. a Google App Password), stored encrypted."
+  },
+  {
+   "default": "1",
+   "description": "When a Commercial Invoice is generated, automatically open a Pending Export Incentive shell for each scheme the shipment is booked to claim (RoDTEP / Duty Drawback), pre-filled with the FOB basis and booked rate. Never applies to merchanting trades (ineligible).",
+   "fieldname": "auto_create_incentive",
+   "fieldtype": "Check",
+   "label": "Auto-create incentive claims when a Commercial Invoice is generated"
   }
  ],
  "index_web_pages_for_search": 0,
