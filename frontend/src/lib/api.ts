@@ -195,6 +195,7 @@ export interface ReportData {
 	filters: ReportFilterDef[];
 	rows: Record<string, string | number | boolean | null>[];
 	company: string | null;
+	totals?: boolean; // false => line-granularity report, no summed totals row
 }
 export interface ReportCatalogItem {
 	key: string;

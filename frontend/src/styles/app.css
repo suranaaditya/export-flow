@@ -572,6 +572,14 @@ footer b { color: var(--fg-3); font-weight: 500 }
 .cmhd span { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--fg-3); font-weight: 600 }
 .cmhd button { font-size: 12px; color: var(--iris); background: none; border: none; cursor: pointer; padding: 2px 2px; font-weight: 500 }
 .cmhd button:disabled { color: var(--fg-4); cursor: default }
+.cmhd .cmcount { font-weight: 500; color: var(--fg-4); font-family: var(--font-mono); letter-spacing: 0; text-transform: none }
+.cmsearch { display: flex; align-items: center; gap: 7px; padding: 0 8px; margin-bottom: 5px; height: 30px; border: 1px solid var(--hairline-2); border-radius: 7px; background: var(--surface-1); flex: none }
+.cmsearch svg { color: var(--fg-3); flex: none }
+.cmsearch input { flex: 1; min-width: 0; border: none; background: none; outline: none; font-size: 13px; color: var(--fg-1); font-family: inherit }
+.cmsearch input::placeholder { color: var(--fg-4) }
+.cmclear { display: inline-flex; align-items: center; justify-content: center; padding: 2px; border: none; background: none; color: var(--fg-3); cursor: pointer; border-radius: 4px; flex: none }
+.cmclear:hover { color: var(--fg-1); background: var(--row-hover) }
+.cmempty { padding: 16px 8px; text-align: center; font-size: 12.5px; color: var(--fg-3) }
 .cmlist { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column }
 .cmrow { display: flex; align-items: center; gap: 9px; padding: 6px 8px; border-radius: 7px; cursor: pointer; font-size: 13px; color: var(--fg-1) }
 .cmrow:hover { background: var(--row-hover) }

@@ -340,6 +340,7 @@ def import_group(group: dict, company: str) -> dict:
 			"egm_date": group.get("egm_date"),
 			"bl_number": group.get("bl_no"),
 			"bl_date": group.get("bl_date"),
+			"consignee_name": group.get("consignee"),
 			**_mtt_shipment_fields(group, merchanting, rate),
 			"items": ship_items,
 		}
@@ -503,6 +504,50 @@ def backfill_trade_types(path: str, company: str = "MN Globex", dry_run: int = 1
 		frappe.db.commit()
 		result["mode"] = "committed"
 	frappe.logger().info(f"MIS trade-type backfill: {result}")
+	return result
+
+
+def backfill_consignee(path: str, company: str = "MN Globex", dry_run: int = 1) -> dict:
+	"""Set consignee_name on already-imported shipments from the source MIS — the
+	consignee genuinely differs from the buyer on ~13 of 58 invoices and was never
+	captured, so the MIS register otherwise shows the buyer as consignee. Keyed
+	export invoice → realization → shipment; only writes where consignee != buyer
+	(equal ones stay blank and the report falls back to the buyer). db.set_value,
+	no validate.
+
+	Run on the server (the client JSON is not in the repo):
+	    bench --site <site> execute exportflow.mis_import.backfill_consignee \\
+	        --kwargs "{'path': '/tmp/mis_clean.json', 'company': 'MN Globex', 'dry_run': False}"
+	"""
+	dry_run = int(dry_run)
+	with open(path) as f:
+		groups = json.load(f)
+	result = {"set": 0, "same_as_buyer": 0, "missing": 0, "company": company}
+	for group in groups:
+		inv = group.get("export_invoice") or group.get("buyer_po_no")
+		consignee = (group.get("consignee") or "").strip()
+		if not inv or not consignee:
+			continue
+		shipment = frappe.db.get_value(
+			"Export Realization", {"export_invoice": inv, "company": company}, "shipment"
+		)
+		if not shipment or not frappe.db.exists("Export Shipment", shipment):
+			result["missing"] += 1
+			continue
+		buyer = (frappe.db.get_value("Export Shipment", shipment, "customer_name") or "").strip()
+		if consignee == buyer:
+			result["same_as_buyer"] += 1
+			continue
+		frappe.db.set_value("Export Shipment", shipment, "consignee_name", consignee, update_modified=False)
+		result["set"] += 1
+
+	if dry_run:
+		frappe.db.rollback()
+		result["mode"] = "dry-run (rolled back)"
+	else:
+		frappe.db.commit()
+		result["mode"] = "committed"
+	frappe.logger().info(f"MIS consignee backfill: {result}")
 	return result
 
 

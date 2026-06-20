@@ -89,6 +89,7 @@ export function ReportView({ report }: { report: string }) {
 	// remembered per report in localStorage)
 	const [visible, setVisible] = useState<string[]>([]);
 	const [colMenu, setColMenu] = useState(false);
+	const [colSearch, setColSearch] = useState('');
 	const [menuPos, setMenuPos] = useState<{ top?: number; bottom?: number; right: number; maxH: number }>();
 	const btnRef = useRef<HTMLButtonElement>(null);
 	const menuElRef = useRef<HTMLDivElement>(null);
@@ -105,6 +106,7 @@ export function ReportView({ report }: { report: string }) {
 		const right = Math.max(8, window.innerWidth - r.right);
 		if (below < 220 && above > below) setMenuPos({ bottom: window.innerHeight - r.top + 6, right, maxH: above });
 		else setMenuPos({ top: r.bottom + 6, right, maxH: below });
+		setColSearch('');
 		setColMenu(true);
 	}
 
@@ -172,6 +174,21 @@ export function ReportView({ report }: { report: string }) {
 		if (has && cur.length === 1) return; // keep at least one column
 		setShown(has ? cur.filter((k) => k !== key) : [...cur, key]);
 	}
+
+	// filter the picker list by label so the long registers (the MIS workbook has 78
+	// columns) stay navigable; the header action then targets the matching subset
+	const searchActive = colSearch.trim().length > 0;
+	const menuCols = useMemo(() => {
+		const q = colSearch.trim().toLowerCase();
+		return q ? cols.filter((c) => c.label.toLowerCase().includes(q)) : cols;
+	}, [cols, colSearch]);
+	function selectAllOrShown() {
+		if (searchActive) setShown([...shownCols.map((c) => c.key), ...menuCols.map((c) => c.key)]);
+		else setShown(allKeys);
+	}
+	const selectAllDisabled = searchActive
+		? menuCols.length === 0 || menuCols.every((c) => shownKeys.has(c.key))
+		: shownCols.length === cols.length;
 
 	const dateFilter = d?.filters.find((f) => f.control === 'daterange');
 	const fieldFilters: FilterDef<Row>[] = useMemo(
@@ -267,13 +284,31 @@ export function ReportView({ report }: { report: string }) {
 							style={{ top: menuPos.top, bottom: menuPos.bottom, right: menuPos.right, maxHeight: menuPos.maxH }}
 						>
 							<div className="cmhd">
-								<span>Columns</span>
-								<button type="button" onClick={() => setShown(allKeys)} disabled={shownCols.length === cols.length}>
-									Select all
+								<span>Columns <span className="cmcount">{shownCols.length}/{cols.length}</span></span>
+								<button type="button" onClick={selectAllOrShown} disabled={selectAllDisabled}>
+									{searchActive ? 'Select shown' : 'Select all'}
 								</button>
 							</div>
+							<div className="cmsearch">
+								<Icon name="search" size={13} />
+								<input
+									autoFocus
+									type="text"
+									value={colSearch}
+									placeholder="Filter columns…"
+									onChange={(e) => setColSearch(e.target.value)}
+								/>
+								{searchActive && (
+									<button type="button" className="cmclear" onClick={() => setColSearch('')} aria-label="Clear filter">
+										<Icon name="close" size={12} />
+									</button>
+								)}
+							</div>
 							<div className="cmlist">
-								{cols.map((c) => {
+								{menuCols.length === 0 ? (
+									<div className="cmempty">No columns match “{colSearch.trim()}”</div>
+								) : (
+									menuCols.map((c) => {
 									const on = shownKeys.has(c.key);
 									return (
 										<label key={c.key} className="cmrow">
@@ -286,7 +321,8 @@ export function ReportView({ report }: { report: string }) {
 											<span>{c.label}</span>
 										</label>
 									);
-								})}
+									})
+								)}
 							</div>
 						</div>,
 						document.body,
@@ -373,7 +409,7 @@ export function ReportView({ report }: { report: string }) {
 											))}
 										</tr>
 									))}
-									{Object.keys(totals).length > 0 && (
+									{d?.totals !== false && Object.keys(totals).length > 0 && (
 										<tr className="reptot">
 											{shownCols.map((c, i) => (
 												<td key={c.key} className={c.key in totals ? c.type : ''}>

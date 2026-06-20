@@ -9,7 +9,7 @@ from exportflow.reports import REPORTS, report_data, report_export, report_list
 from exportflow.tests.test_dropship import _suffix, make_customer
 from exportflow.tests.test_logistics import book_deal, make_plain_item
 
-REPORT_KEYS = ["realization", "incentive", "sales_register", "gst_export", "merchanting"]
+REPORT_KEYS = ["realization", "incentive", "sales_register", "gst_export", "merchanting", "mis"]
 
 
 class TestReports(IntegrationTestCase):
@@ -147,6 +147,31 @@ class TestReports(IntegrationTestCase):
 		with self.assertRaises(frappe.ValidationError):
 			report_export("sales_register", "xlsx", rows="{")
 		report_export("sales_register", "xlsx", rows="[1, 2, 3]")
+		self.assertTrue(frappe.local.response.filecontent)
+
+	def test_report_pdf_dynamic_page_size(self):
+		"""Wide column sets step the page up (A4 → A0) instead of cramming into A4."""
+		from exportflow.reports import _report_pdf
+
+		# the full 78-column MIS set needs the largest page
+		_h, opts = _report_pdf("MIS", "", REPORTS["mis"][0]["columns"], [], {})
+		self.assertEqual(opts["page-size"], "A0")
+		self.assertEqual(opts["orientation"], "Landscape")
+		# a normal ~12-column report stays on A4
+		_h2, opts2 = _report_pdf("MTT", "", REPORTS["merchanting"][0]["columns"], [], {})
+		self.assertEqual(opts2["page-size"], "A4")
+
+	def test_mis_register(self):
+		"""The MIS workbook is the 78-column line-level register with NO totals row
+		(per-shipment values repeat across lines, so a column sum would double-count)."""
+		meta = REPORTS["mis"][0]
+		self.assertEqual(len(meta["columns"]), 78)
+		self.assertFalse(meta.get("totals", True))
+		d = report_data("mis")
+		self.assertEqual(d.get("totals"), False)
+		self.assertIsInstance(d["rows"], list)
+		# exports cleanly even though it has inr columns (fob/RoDTEP/DBK) — no totals row
+		report_export("mis", "xlsx", rows=frappe.as_json(d["rows"]))
 		self.assertTrue(frappe.local.response.filecontent)
 
 	def test_unknown_report(self):

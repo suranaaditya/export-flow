@@ -23,6 +23,7 @@ REPORT_PERM = {
 	"sales_register": ("Sales Order", "read"),
 	"gst_export": ("Export Shipment", "read"),
 	"merchanting": ("Export Shipment", "read"),
+	"mis": ("Export Shipment", "read"),
 }
 
 
@@ -284,12 +285,228 @@ def _rows_merchanting():
 	return rows
 
 
+# ------------------------------------------------------------- MIS workbook
+# Regenerates MN Globex's original 81-column MIS export sheet from the app data
+# (the very sheet the data was imported from). One row per shipment product line;
+# shipment-level values repeat across a shipment's lines, exactly like the original.
+# The three structurally-empty columns of the source (a separator + two trailing
+# blanks) are dropped; headers are cleaned of the source's typos. Columns the app
+# never captured (COO/GSP, BRC-prepare, RoDTEP-file, POE, ORTT, exporter-copy,
+# supplier pay date) stay blank. No totals row — line granularity repeats per-shipment
+# money values, so a column sum would double-count.
+
+MIS_META = {
+	"title": "MIS export register (full workbook)",
+	"totals": False,
+	"columns": [
+		col("sr", "Sr No."), col("buyer_po", "PO Number"), col("export_invoice", "Export Invoice"),
+		col("buyer", "Buyer"), col("consignee", "Consignee"), col("product", "Products"),
+		col("hs_code", "HS Code"), col("country", "Country"), col("pod", "POD"),
+		col("rate", "Rate / Kg or MT", "num"), col("qty", "Quantity"), col("total_cif", "Total (CIF)", "num"),
+		col("dollar_rate", "Dollar Rate", "num"), col("port_regist", "Port of Regist."),
+		col("sb_no", "SB No."), col("sb_date", "SB Date", "date"), col("egm_no", "EGM No."),
+		col("egm_date", "EGM Date", "date"), col("fob_inr", "FOB Value (Rs.)", "inr"),
+		col("bl_no", "Bill of Lading"), col("bl_date", "BL Date", "date"),
+		col("rodtep_pct", "RoDTEP %", "pct"), col("rodtep_amt", "RoDTEP", "inr"),
+		col("rodtep_scroll", "RoDTEP Scroll No."), col("rodtep_scroll_date", "RoDTEP Scroll Date", "date"),
+		col("dbk_pct", "DBK %", "pct"), col("dbk_book", "DBK Book No."), col("dbk_amt", "DBK Amount", "inr"),
+		col("ep_copy", "Exporter / EP Copy Received"), col("due_date", "Due Date", "date"),
+		col("pay_recd_date", "Payment Received Date", "date"), col("bank_charges", "Bank Charges", "num"),
+		col("amt_received", "Amount Received", "num"), col("fwd_contract", "FWD Contract No."),
+		col("fwd_rate", "FWD Exch. Rate", "num"), col("convert_rate", "Convert Exch. Rate", "num"),
+		col("bank", "Bank"), col("doc_submit", "Documents Submitted to Bank", "date"),
+		col("irm_no", "IRT No. (IRM)"), col("fbc_ref", "FBC Ref No."), col("coo_gsp", "COO / GSP"),
+		col("brc_prepare", "BRC Prepare"), col("ebrc_no", "eBRC No."), col("ebrc_date", "eBRC Date", "date"),
+		col("rodtep_file", "RoDTEP File"), col("insurance", "Insurance", "num"), col("container", "Container No."),
+		col("cha", "CHA"), col("forwarder", "Forwarder"), col("poe", "POE"),
+		col("dbk_scroll", "DBK Scroll No."), col("dbk_scroll_date", "DBK Scroll Date", "date"),
+		col("dbk_receive", "DBK Receive", "date"), col("dbk_amt_received", "DBK Amount Received", "inr"),
+		col("supplier_po", "Supplier PO No."), col("supplier_name", "Supplier Name"),
+		col("supplier_rate", "Supplier Rate / Kg or MT", "num"), col("supplier_qty", "Supplier Quantity"),
+		col("supplier_total", "Supplier Total", "num"), col("supplier_due", "Supplier Due Date"),
+		col("supplier_paid_date", "Supplier Payment Paid Date", "date"), col("supplier_exch", "Supplier Exch. Rate", "num"),
+		col("ortt_ref", "ORTT Ref No."), col("trade_type", "Trade Type"), col("mtt_invoice", "MTT Invoice No."),
+		col("mtt_bl_date", "MTT BL Date", "date"), col("mtt_due_date", "MTT Due Date", "date"),
+		col("mtt_doc_submit", "MTT Documents Submitted", "date"), col("mtt_oc_received", "MTT O/C Received"),
+		col("mtt_fbc", "MTT FBC Number"), col("mtt_irt", "MTT IRT Number"), col("mtt_fibcd", "MTT FIBCD Number"),
+		col("mtt_ebrc", "MTT eBRC Number"), col("mtt_brc_draft", "MTT BRC Draft"), col("mtt_poe", "MTT POE"),
+		col("mtt_bank_charges", "MTT Bank Charges", "num"), col("mtt_gst", "MTT GST", "num"),
+		col("mtt_total", "MTT Total", "num"),
+	],
+	"filters": [
+		flt_("daterange", "BL date", "daterange", "bl_date"),
+		flt_("buyer", "Buyer", "searchselect", "buyer"),
+		flt_("trade_type", "Trade type", "select", "trade_type"),
+	],
+}
+
+
+def _qty_str(qty, uom):
+	if not qty:
+		return None
+	q = flt(qty)
+	qs = f"{q:.0f}" if q == int(q) else f"{q:g}"
+	return f"{qs} {uom}".strip() if uom else qs
+
+
+def _oc(v):
+	"""oc_received is a checkbox (stored '1') or imported free text — show it as a
+	readable 'Received' rather than a bare '1'."""
+	if v is None or str(v).strip() in ("", "0"):
+		return None
+	return "Received" if str(v).strip() in ("1", "Yes", "yes") else str(v).strip()
+
+
+def _num(v):
+	"""flt() that PRESERVES a genuine 0 — only a NULL / empty source becomes blank.
+	(the bare `flt(x) or None` idiom wrongly blanked real zero charges / amounts.)"""
+	return None if v in (None, "") else flt(v)
+
+
+def _rows_mis():
+	"""Join shipment / SO line / realization / incentive / supplier-PO into the
+	client's original MIS row-per-product-line layout."""
+	frappe.has_permission("Export Shipment", "read", throw=True)
+	from exportflow.mtt import is_merchanting
+
+	ships = frappe.get_all(
+		"Export Shipment", filters=_company_filter(),
+		fields=["name", "customer", "customer_name", "consignee_name", "trade_type", "cha",
+				"port_of_loading", "port_of_discharge", "shipping_bill_number", "shipping_bill_date",
+				"egm_number", "egm_date", "bl_number", "bl_date", "awb_number", "awb_date",
+				"container_numbers", "insurance_amount", "buyer_order_no"],
+		order_by="creation", limit_page_length=0,
+	)
+	if not ships:
+		return []
+	names = [s.name for s in ships]
+
+	items_by_ship = {}
+	for it in frappe.get_all(
+		"Export Shipment Item", filters={"parent": ["in", names]},
+		fields=["parent", "item_code", "item_name", "qty", "uom", "sales_order", "so_detail",
+				"purchase_order", "po_detail"],
+		order_by="parent, idx", limit_page_length=0,
+	):
+		items_by_ship.setdefault(it.parent, []).append(it)
+
+	def _by_name(doctype, name_set, fields):
+		if not name_set:
+			return {}
+		return {r.name: r for r in frappe.get_all(
+			doctype, filters={"name": ["in", list(name_set)]}, fields=["name", *fields], limit_page_length=0)}
+
+	all_items = [it for v in items_by_ship.values() for it in v]
+	soi = _by_name("Sales Order Item", {it.so_detail for it in all_items if it.so_detail},
+				   ["rate", "amount", "base_amount", "gst_hsn_code"])
+	soh = _by_name("Sales Order", {it.sales_order for it in all_items if it.sales_order}, ["conversion_rate", "po_no"])
+	poi = _by_name("Purchase Order Item", {it.po_detail for it in all_items if it.po_detail}, ["rate", "qty", "amount", "uom"])
+	poh = _by_name("Purchase Order", {it.purchase_order for it in all_items if it.purchase_order},
+				   ["supplier_name", "conversion_rate"])
+	# HS code lives on the Item master (customs_tariff_number); the imported lines never
+	# got an india_compliance gst_hsn_code, so prefer the tariff number
+	item_codes = {it.item_code for it in all_items if it.item_code}
+	tariff = {r.name: r.customs_tariff_number for r in frappe.get_all(
+		"Item", filters={"name": ["in", list(item_codes)]}, fields=["name", "customs_tariff_number"],
+		limit_page_length=0)} if item_codes else {}
+
+	rel = {}
+	for r in frappe.get_all(
+		"Export Realization", filters=_company_filter({"shipment": ["in", names]}),
+		fields=["shipment", "export_invoice", "due_date", "remittance_date", "bank_charges", "amount_received",
+				"fwd_contract_no", "fwd_rate", "conversion_rate", "ad_bank", "document_submitted_date",
+				"firc_no", "fbc_number", "ebrc_number", "ebrc_date", "oc_received", "brc_ref"],
+		order_by="creation", limit_page_length=0,
+	):
+		rel.setdefault(r.shipment, r)  # earliest realization (a multi-invoice shipment keeps the first)
+
+	inc = {}
+	for r in frappe.get_all(
+		"Export Incentive", filters=_company_filter({"shipment": ["in", names]}),
+		fields=["shipment", "scheme", "fob_value", "rate_pct", "amount", "scroll_number", "scroll_date",
+				"drawback_serial", "amount_received", "received_date"],
+		order_by="creation", limit_page_length=0,
+	):
+		bucket = inc.setdefault(r.shipment, {})
+		bucket.setdefault("dbk" if "Drawback" in (r.scheme or "") else "rodtep", r)
+
+	dest = {c.name: c.destination_country for c in frappe.get_all(
+		"Customer", fields=["name", "destination_country"], limit_page_length=0)}
+
+	rows, sr = [], 0
+	for s in ships:
+		merch = is_merchanting(s.trade_type)
+		r = rel.get(s.name) or frappe._dict()
+		inc_s = inc.get(s.name) or {}
+		rod = inc_s.get("rodtep") or frappe._dict()
+		dbk = inc_s.get("dbk") or frappe._dict()
+		bl_no, bl_dt = s.bl_number or s.awb_number, s.bl_date or s.awb_date
+		for it in items_by_ship.get(s.name, []):
+			sr += 1
+			sl = soi.get(it.so_detail) or frappe._dict()
+			po_line = poi.get(it.po_detail) or frappe._dict()
+			po_hdr = poh.get(it.purchase_order) or frappe._dict()
+			so_hdr = soh.get(it.sales_order) or frappe._dict()
+			# customs FOB (Rs.) is a shipment-level figure on the incentive, NOT CIF×rate
+			fob = _num(rod.fob_value) or _num(dbk.fob_value)
+			rows.append({
+				"sr": str(sr), "buyer_po": so_hdr.po_no or s.buyer_order_no,
+				"export_invoice": r.export_invoice or s.name,
+				"buyer": s.customer_name, "consignee": s.consignee_name or s.customer_name,
+				"product": it.item_name or it.item_code, "hs_code": tariff.get(it.item_code) or sl.gst_hsn_code,
+				"country": dest.get(s.customer), "pod": s.port_of_discharge,
+				"rate": _num(sl.rate), "qty": _qty_str(it.qty, it.uom),
+				"total_cif": _num(sl.amount),
+				"dollar_rate": _num(so_hdr.conversion_rate) or _num(r.conversion_rate),
+				"port_regist": s.port_of_loading,
+				"sb_no": None if merch else s.shipping_bill_number,
+				"sb_date": None if merch else s.shipping_bill_date,
+				"egm_no": None if merch else s.egm_number, "egm_date": None if merch else s.egm_date,
+				"fob_inr": None if merch else fob,
+				"bl_no": bl_no, "bl_date": bl_dt,
+				"rodtep_pct": _num(rod.rate_pct), "rodtep_amt": _num(rod.amount),
+				"rodtep_scroll": rod.scroll_number, "rodtep_scroll_date": rod.scroll_date,
+				"dbk_pct": _num(dbk.rate_pct), "dbk_book": dbk.drawback_serial,
+				"dbk_amt": _num(dbk.amount), "ep_copy": None,
+				"due_date": None if merch else r.due_date, "pay_recd_date": None if merch else r.remittance_date,
+				"bank_charges": None if merch else _num(r.bank_charges),
+				"amt_received": None if merch else _num(r.amount_received),
+				"fwd_contract": None if merch else r.fwd_contract_no,
+				"fwd_rate": None if merch else _num(r.fwd_rate),
+				"convert_rate": None if merch else _num(r.conversion_rate),
+				"bank": None if merch else r.ad_bank, "doc_submit": None if merch else r.document_submitted_date,
+				"irm_no": None if merch else r.firc_no, "fbc_ref": None if merch else r.fbc_number,
+				"coo_gsp": None, "brc_prepare": None, "ebrc_no": None if merch else r.ebrc_number,
+				"ebrc_date": None if merch else r.ebrc_date, "rodtep_file": None,
+				"insurance": _num(s.insurance_amount), "container": s.container_numbers,
+				"cha": s.cha, "forwarder": None, "poe": None,
+				"dbk_scroll": dbk.scroll_number, "dbk_scroll_date": dbk.scroll_date,
+				"dbk_receive": dbk.received_date, "dbk_amt_received": _num(dbk.amount_received),
+				"supplier_po": it.purchase_order, "supplier_name": po_hdr.supplier_name,
+				"supplier_rate": _num(po_line.rate),
+				"supplier_qty": _qty_str(po_line.qty, po_line.uom or it.uom) if po_line.qty else None,
+				"supplier_total": _num(po_line.amount), "supplier_due": None, "supplier_paid_date": None,
+				"supplier_exch": _num(po_hdr.conversion_rate), "ortt_ref": None,
+				"trade_type": "Merchanting" if merch else "Export from India",
+				"mtt_invoice": r.export_invoice if merch else None, "mtt_bl_date": bl_dt if merch else None,
+				"mtt_due_date": r.due_date if merch else None,
+				"mtt_doc_submit": r.document_submitted_date if merch else None,
+				"mtt_oc_received": _oc(r.oc_received) if merch else None, "mtt_fbc": r.fbc_number if merch else None,
+				"mtt_irt": r.firc_no if merch else None, "mtt_fibcd": r.brc_ref if merch else None,
+				"mtt_ebrc": r.ebrc_number if merch else None, "mtt_brc_draft": None, "mtt_poe": None,
+				"mtt_bank_charges": _num(r.bank_charges) if merch else None,
+				"mtt_gst": None, "mtt_total": None,
+			})
+	return rows
+
+
 REPORTS = {
 	"realization": (REALIZATION_META, _rows_realization),
 	"incentive": (INCENTIVE_META, _rows_incentive),
 	"sales_register": (SALES_META, _rows_sales_register),
 	"gst_export": (GST_META, _rows_gst_export),
 	"merchanting": (MTT_META, _rows_merchanting),
+	"mis": (MIS_META, _rows_mis),
 }
 
 REPORT_CATALOG = [
@@ -298,6 +515,7 @@ REPORT_CATALOG = [
 	{"key": "sales_register", "title": "Sales register", "sub": "the export MIS", "icon": "file-text"},
 	{"key": "gst_export", "title": "GST export", "sub": "LUT / IGST / merchanting", "icon": "shield"},
 	{"key": "merchanting", "title": "Merchanting", "sub": "third-country / MTT", "icon": "globe"},
+	{"key": "mis", "title": "MIS workbook", "sub": "full 78-column export register", "icon": "layers"},
 ]
 
 
@@ -380,6 +598,10 @@ def _xlsx_cell(value, ctype):
 _COL_W_TYPE = {"id": 11, "tag": 9, "date": 8, "inr": 11, "num": 10, "pct": 6, "days": 8, "text": 12}
 _COL_W_KEY = {"currency": 4, "mode": 6, "incoterm": 6, "igst_rate": 6, "customer": 16}
 
+# usable LANDSCAPE width (mm) of each standard page after ~20mm L/R margins — the PDF
+# page steps up A4 → A0 as the chosen columns need more room (see _report_pdf)
+_PAGE_WIDTHS = [("A4", 277), ("A3", 400), ("A2", 574), ("A1", 821), ("A0", 1169)]
+
 
 def _col_weight(c):
 	return _COL_W_KEY.get(c["key"]) or _COL_W_TYPE.get(c["type"], 11)
@@ -438,6 +660,15 @@ def _report_pdf(title, subtitle, cols, data, totals):
 	weights = [_col_weight(c) for c in cols]
 	total_w = sum(weights) or 1
 	landscape = n > 6 or total_w > 70
+	# Dynamic page size: keep narrow reports on A4, but step the page up (A4 → A0) so a
+	# wide register (the 78-column MIS sheet) gets real room instead of being crushed
+	# into A4 with one character per column. Pick the smallest standard page whose usable
+	# landscape width carries the columns at the comfortable A4 density (~1.9mm / weight).
+	if landscape:
+		needed_mm = total_w * 1.9
+		page_size = next((name for name, usable in _PAGE_WIDTHS if usable >= needed_mm), "A0")
+	else:
+		page_size = "A4"
 
 	colgroup = "".join(f"<col style='width:{w / total_w * 100:.3f}%'/>" for w in weights)
 	head = "".join(f"<th class='{c['type']}'>{esc(c['label'])}</th>" for c in cols)
@@ -491,7 +722,7 @@ def _report_pdf(title, subtitle, cols, data, totals):
 		f"</div>"
 	)
 	options = {
-		"page-size": "A4",
+		"page-size": page_size,
 		"orientation": "Landscape" if landscape else "Portrait",
 		"footer-left": company[:70],
 		"footer-center": f"Generated {stamp}",
@@ -542,10 +773,13 @@ def report_export(report: str, fmt: str = "xlsx", rows=None, columns=None, subti
 	slug, stamp = report.replace("_", "-"), nowdate()
 
 	# total only the money (inr) columns — the meaningful sum across mixed currencies
+	# (skipped for line-granularity reports where per-shipment values repeat, which a
+	# column sum would double-count — those declare "totals": False)
 	totals = {}
-	for c in cols:
-		if c["type"] == "inr":
-			totals[c["key"]] = flt(sum(flt(r.get(c["key"])) for r in data), 2)
+	if meta.get("totals", True):
+		for c in cols:
+			if c["type"] == "inr":
+				totals[c["key"]] = flt(sum(flt(r.get(c["key"])) for r in data), 2)
 
 	if fmt == "pdf":
 		from frappe.utils.pdf import get_pdf
