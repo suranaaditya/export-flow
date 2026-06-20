@@ -341,9 +341,15 @@ def _fmt(value, ctype):
 	if ctype == "pct":
 		return f"{flt(value):g}%"
 	if ctype == "date":
-		return formatdate(value, "dd-MM-yyyy")
+		try:
+			return formatdate(value, "dd-MM-yyyy")
+		except Exception:
+			return str(value)
 	if ctype == "days":
-		d = int(value)
+		try:
+			d = int(value)
+		except (ValueError, TypeError):
+			return str(value)
 		return f"{-d}d overdue" if d < 0 else (f"{d}d" if d else "today")
 	return str(value)
 
@@ -365,11 +371,145 @@ def _xlsx_cell(value, ctype):
 	return ("'" + s) if s[:1] in ("=", "+", "-", "@") else s
 
 
+# ------------------------------------------------------------------- PDF layout
+
+# Relative column widths for the fitted (table-layout:fixed) PDF table. The PDF has
+# NO horizontal scroll, so the chosen columns must share one page width — type gives
+# a sensible default, refined by key for the few columns whose natural width the type
+# alone doesn't capture (a currency code needs far less room than a customer name).
+_COL_W_TYPE = {"id": 11, "tag": 9, "date": 8, "inr": 11, "num": 10, "pct": 6, "days": 8, "text": 12}
+_COL_W_KEY = {"currency": 4, "mode": 6, "incoterm": 6, "igst_rate": 6, "customer": 16}
+
+
+def _col_weight(c):
+	return _COL_W_KEY.get(c["key"]) or _COL_W_TYPE.get(c["type"], 11)
+
+
+# Self-contained style. `.print-format { margin-* }` is the ONLY lever wkhtmltopdf
+# honours for page margins (get_print_format_styles reads margins from a rule whose
+# selector is EXACTLY `.print-format`); `div.print-format { margin:0 }` then zeroes
+# the doubled element margin. table-layout:fixed + <col> %widths keep every column on
+# one page width; thead repeats the header on each page.
+_REPORT_PDF_CSS = """
+*{box-sizing:border-box}
+body{margin:0 !important;font-family:'Helvetica Neue',Arial,sans-serif;color:#1b2230}
+.print-format{margin-top:8mm;margin-bottom:14mm;margin-left:10mm;margin-right:10mm}
+div.print-format{margin:0 !important;padding:0 !important}
+.efxr .lh{width:100%;border-collapse:collapse;margin-bottom:7px}
+.efxr .lh td{vertical-align:middle;padding:0}
+.efxr .lhl{width:1%;white-space:nowrap}
+.efxr .lglogo{height:42px;width:auto;display:block}
+.efxr .lhc{padding-left:11px}
+.efxr .lgco{font-size:14px;font-weight:700;letter-spacing:.01em}
+.efxr .lgad{font-size:9px;color:#5f6b7e;margin-top:1px;line-height:1.35}
+.efxr .lhr{text-align:right;white-space:nowrap;vertical-align:middle}
+.efxr .lgreg{font-size:8.5px;color:#5f6b7e;line-height:1.6}
+.efxr .rule{height:0;border-top:2px solid #1b2230;margin:0 0 11px}
+.efxr .rt{font-size:15px;font-weight:700;margin:0 0 3px}
+.efxr .rs{font-size:9.5px;color:#6a7486;margin-bottom:10px}
+.efxr .rs .mc{color:#1b2230;font-weight:600}
+.efxr .data{width:100%;table-layout:fixed;border-collapse:collapse}
+.efxr .data th,.efxr .data td{padding:4px 6px;text-align:left;vertical-align:top;word-wrap:break-word;overflow-wrap:break-word;border-bottom:.5px solid #e3e7ee}
+.efxr .data th{background:#eef1f6;text-transform:uppercase;letter-spacing:.03em;color:#52607a;font-weight:600;border-bottom:1px solid #c7cedb}
+.efxr .data td.inr,.efxr .data td.num,.efxr .data td.pct,.efxr .data td.days,.efxr .data th.inr,.efxr .data th.num,.efxr .data th.pct,.efxr .data th.days{text-align:right}
+.efxr .data td.inr,.efxr .data td.num{font-variant-numeric:tabular-nums}
+.efxr .data td.id{font-weight:500}
+.efxr .data tr.ev td{background:#f7f9fb}
+.efxr .data tr.tot td{border-top:1.5px solid #1b2230;background:#eef1f6;font-weight:700}
+.efxr .data tr.tot td.tlbl{text-transform:uppercase;letter-spacing:.04em;color:#52607a}
+thead{display:table-header-group}
+tr{page-break-inside:avoid}
+"""
+
+
+def _report_pdf(title, subtitle, cols, data, totals):
+	"""Build a professional, single-page-width PDF and its wkhtmltopdf options: an
+	MN Globex letterhead, the active-filter summary, and a table that always fits the
+	page width (table-layout:fixed + proportional column widths + auto orientation),
+	with a running footer carrying the generated date and page numbers."""
+	from exportflow.printing import exporter_profile
+
+	esc = frappe.utils.escape_html
+	prof = exporter_profile()
+	stamp = formatdate(nowdate(), "dd MMM yyyy")
+
+	n = len(cols)
+	font = 9 if n <= 6 else (8 if n <= 10 else 7)
+	weights = [_col_weight(c) for c in cols]
+	total_w = sum(weights) or 1
+	landscape = n > 6 or total_w > 70
+
+	colgroup = "".join(f"<col style='width:{w / total_w * 100:.3f}%'/>" for w in weights)
+	head = "".join(f"<th class='{c['type']}'>{esc(c['label'])}</th>" for c in cols)
+
+	body_rows = []
+	for i, r in enumerate(data):
+		cells = "".join(f"<td class='{c['type']}'>{esc(_fmt(r.get(c['key']), c['type']))}</td>" for c in cols)
+		body_rows.append(f"<tr class='{'ev' if i % 2 else 'od'}'>{cells}</tr>")
+	if totals:
+		# label the first column that is NOT itself a totalled (money) column — keying
+		# the label to index 0 would lose it when the leading column is an inr column
+		lbl_idx = next((i for i, c in enumerate(cols) if c["key"] not in totals), None)
+		tcells = [
+			(f"<td class='{c['type']}'>{esc(_fmt(totals[c['key']], c['type']))}</td>" if c["key"] in totals
+			 else (f"<td class='tlbl'>{_('Total')}</td>" if i == lbl_idx else "<td></td>"))
+			for i, c in enumerate(cols)
+		]
+		body_rows.append(f"<tr class='tot'>{''.join(tcells)}</tr>")
+	body = "".join(body_rows)
+
+	logo = f"<img class='lglogo' src='{prof.logo}'/>" if prof.get("logo") else ""
+	ident = [f"<div class='lgco'>{esc(prof.company_name or '')}</div>"]
+	if prof.get("letterhead_addr"):
+		ident.append(f"<div class='lgad'>{esc(prof.letterhead_addr)}</div>")
+	if prof.get("letterhead_contact"):
+		ident.append(f"<div class='lgad'>{esc(prof.letterhead_contact)}</div>")
+	reg = []
+	if prof.get("gstin"):
+		reg.append(f"GSTIN&nbsp;{esc(prof.gstin)}")
+	if prof.get("iec"):
+		reg.append(f"IEC&nbsp;{esc(prof.iec)}")
+	reg_html = f"<div class='lgreg'>{'<br/>'.join(reg)}</div>" if reg else ""
+
+	company = prof.company_name or exportflow_company() or ""
+	crumb = f"{esc(subtitle)} &nbsp;·&nbsp; " if subtitle else ""
+	meta_line = (
+		f"<span class='mc'>{esc(company)}</span> &nbsp;·&nbsp; "
+		f"{len(data)} row{'' if len(data) == 1 else 's'} &nbsp;·&nbsp; {crumb}generated {stamp}"
+	)
+
+	dyn = f".efxr .data{{font-size:{font}px}}.efxr .data th{{font-size:{max(7, font - 1)}px}}"
+	html = (
+		f"<style>{_REPORT_PDF_CSS}{dyn}</style>"
+		f"<div class='print-format efxr'>"
+		f"<table class='lh'><tr><td class='lhl'>{logo}</td>"
+		f"<td class='lhc'>{''.join(ident)}</td><td class='lhr'>{reg_html}</td></tr></table>"
+		f"<div class='rule'></div>"
+		f"<h1 class='rt'>{esc(title)}</h1><div class='rs'>{meta_line}</div>"
+		f"<table class='data'><colgroup>{colgroup}</colgroup>"
+		f"<thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
+		f"</div>"
+	)
+	options = {
+		"page-size": "A4",
+		"orientation": "Landscape" if landscape else "Portrait",
+		"footer-left": company[:70],
+		"footer-center": f"Generated {stamp}",
+		"footer-right": "Page [page] of [topage]",
+		"footer-font-name": "Helvetica",
+		"footer-font-size": "7",
+		"footer-spacing": "3",
+	}
+	return html, options
+
+
 @frappe.whitelist()
-def report_export(report: str, fmt: str = "xlsx", rows=None):
+def report_export(report: str, fmt: str = "xlsx", rows=None, columns=None, subtitle: str = ""):
 	"""Format the on-screen (already filtered) rows into a downloadable file. The
-	columns/title come from the server-side report definition; only the row data is
-	taken from the client (which the user already fetched via report_data)."""
+	column set + title come from the server-side report definition; the row data —
+	and which columns to include (the user's PDF/Excel column choice) — come from the
+	client, which already fetched them via report_data. `subtitle` is the human filter
+	summary the client shows on screen, stamped under the PDF title so it is self-documenting."""
 	if report not in REPORTS:
 		frappe.throw(_("Unknown report {0}").format(report))
 	if fmt not in ("xlsx", "pdf"):
@@ -377,7 +517,28 @@ def report_export(report: str, fmt: str = "xlsx", rows=None):
 	frappe.has_permission(*REPORT_PERM[report], throw=True)
 	meta, _rows_fn = REPORTS[report]
 	cols, title = meta["columns"], meta["title"]
-	data = json.loads(rows) if isinstance(rows, str) else (rows or [])
+
+	# honour the client's column selection: keep the canonical column order, ignore
+	# unknown keys, and fall back to all columns if nothing valid was chosen (a
+	# non-list payload — scalar/object — is simply ignored, not a crash)
+	if columns:
+		try:
+			sel = json.loads(columns) if isinstance(columns, str) else columns
+		except (ValueError, TypeError):
+			sel = None
+		if isinstance(sel, (list, tuple)):
+			keys = {str(k) for k in sel}
+			chosen = [c for c in cols if c["key"] in keys]
+			if chosen:
+				cols = chosen
+
+	# rows are the on-screen list the client POSTs back; tolerate a malformed or
+	# wrong-shaped payload (only list-of-dict rows survive) rather than 500-ing
+	try:
+		parsed = json.loads(rows) if isinstance(rows, str) else rows
+	except (ValueError, TypeError):
+		frappe.throw(_("Invalid rows payload"))
+	data = [r for r in (parsed or []) if isinstance(r, dict)]
 	slug, stamp = report.replace("_", "-"), nowdate()
 
 	# total only the money (inr) columns — the meaningful sum across mixed currencies
@@ -389,33 +550,9 @@ def report_export(report: str, fmt: str = "xlsx", rows=None):
 	if fmt == "pdf":
 		from frappe.utils.pdf import get_pdf
 
-		esc = frappe.utils.escape_html
-		head = "".join(f"<th>{esc(c['label'])}</th>" for c in cols)
-		body = "".join(
-			"<tr>" + "".join(f"<td class='{c['type']}'>{esc(_fmt(r.get(c['key']), c['type']))}</td>" for c in cols) + "</tr>"
-			for r in data
-		)
-		tr = ""
-		if totals:
-			cells = [
-				(f"<td class='{c['type']}'><b>{esc(_fmt(totals[c['key']], c['type']))}</b></td>" if c["key"] in totals
-				 else ("<td><b>Total</b></td>" if i == 0 else "<td></td>"))
-				for i, c in enumerate(cols)
-			]
-			tr = "<tr class='tot'>" + "".join(cells) + "</tr>"
-		html = (
-			"<style>body{font-family:Arial,sans-serif;color:#1b2230}h2{font-size:15px;margin:0 0 2px}"
-			".sub{color:#667085;font-size:10px;margin-bottom:10px}"
-			"table{width:100%;border-collapse:collapse;font-size:9.5px}"
-			"th,td{border:0.5px solid #d6dae2;padding:4px 6px;text-align:left}"
-			"th{background:#f1f3f7;font-size:8.5px;text-transform:uppercase;letter-spacing:.04em;color:#5f6b7e}"
-			"td.inr,td.num,td.pct,td.days{text-align:right}tr.tot td{background:#f7f8fa}</style>"
-			f"<h2>{esc(title)}</h2><div class='sub'>{esc(exportflow_company() or '')} · {len(data)} rows "
-			f"· generated {formatdate(stamp, 'dd MMM yyyy')}</div>"
-			f"<table><thead><tr>{head}</tr></thead><tbody>{body}{tr}</tbody></table>"
-		)
+		html, options = _report_pdf(title, (subtitle or "").strip()[:300], cols, data, totals)
 		frappe.local.response.filename = f"{slug}-{stamp}.pdf"
-		frappe.local.response.filecontent = get_pdf(html)
+		frappe.local.response.filecontent = get_pdf(html, options=options)
 		frappe.local.response.type = "binary"
 		return
 
@@ -424,8 +561,9 @@ def report_export(report: str, fmt: str = "xlsx", rows=None):
 	matrix = [[c["label"] for c in cols]]
 	matrix += [[_xlsx_cell(r.get(c["key"]), c["type"]) for c in cols] for r in data]
 	if totals:
+		lbl_idx = next((i for i, c in enumerate(cols) if c["key"] not in totals), None)
 		matrix.append([
-			flt(totals[c["key"]]) if c["key"] in totals else ("Total" if i == 0 else None)
+			flt(totals[c["key"]]) if c["key"] in totals else ("Total" if i == lbl_idx else None)
 			for i, c in enumerate(cols)
 		])
 	frappe.local.response.filename = f"{slug}-{stamp}.xlsx"

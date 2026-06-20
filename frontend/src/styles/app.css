@@ -558,3 +558,23 @@ footer b { color: var(--fg-3); font-weight: 500 }
 .reptable tbody tr:hover td { background: var(--row-hover) }
 .reptable .reptot td { font-weight: 600; background: var(--bg-sunken); border-bottom: none }
 .reptable .reptot td.inr { color: var(--cyan) }
+
+/* report toolbar: column picker + export links */
+.rptactions { display: flex; align-items: center; gap: 16px }
+.colpick { position: relative }
+.cpbtn { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 500; color: var(--fg-2); background: var(--surface-1); border: 1px solid var(--hairline-2); border-radius: 8px; padding: 5px 9px; cursor: pointer; transition: border-color .15s var(--ease) }
+.cpbtn:hover { border-color: var(--iris) }
+.cpbtn .cpc { color: var(--fg-3); font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 11.5px }
+/* portaled to <body> (a .card has overflow:hidden, which would clip an absolutely
+   positioned menu inside a short report card); position is set inline from the button rect */
+.colmenu { position: fixed; z-index: 90; width: 236px; background: var(--bg-card); border: 1px solid var(--hairline-2); border-radius: 11px; box-shadow: var(--shadow-pop); padding: 6px; display: flex; flex-direction: column; animation: duxSettle .14s var(--ease) both }
+.cmhd { display: flex; align-items: center; justify-content: space-between; padding: 5px 8px 8px; border-bottom: 1px solid var(--hairline); margin-bottom: 4px; flex: none }
+.cmhd span { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--fg-3); font-weight: 600 }
+.cmhd button { font-size: 12px; color: var(--iris); background: none; border: none; cursor: pointer; padding: 2px 2px; font-weight: 500 }
+.cmhd button:disabled { color: var(--fg-4); cursor: default }
+.cmlist { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column }
+.cmrow { display: flex; align-items: center; gap: 9px; padding: 6px 8px; border-radius: 7px; cursor: pointer; font-size: 13px; color: var(--fg-1) }
+.cmrow:hover { background: var(--row-hover) }
+.cmrow input { accent-color: var(--iris); width: 14px; height: 14px; cursor: pointer; flex: none }
+.cmrow input:disabled { cursor: default; opacity: .45 }
+.rptexp { display: flex; gap: 14px }
