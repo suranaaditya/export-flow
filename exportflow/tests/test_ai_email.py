@@ -81,3 +81,24 @@ class TestAiEmail(IntegrationTestCase):
 		with self.assertRaises(frappe.ValidationError):
 			email_send("Purchase Order", po, "po_to_supplier", to="ok@buyer.com",
 					   cc="not-an-email", subject="x", body="y", attach_pdf=0)
+
+	def test_email_account_save_and_clear(self):
+		from exportflow.ai_email import get_email_account, save_email_account
+
+		save_email_account(email="ops@example.com", sender_name="Ops", host="smtp.example.com",
+						   port=587, use_ssl=0, password="secret")
+		a = get_email_account()
+		self.assertEqual(a["email"], "ops@example.com")
+		self.assertTrue(a["has_password"])
+		self.assertTrue(a["configured"])
+		self.assertEqual(a["host"], "smtp.example.com")
+		self.assertFalse(a["use_ssl"])
+		# clearing the address de-configures the account (so sending falls back to the site)
+		save_email_account(email="")
+		self.assertFalse(get_email_account()["configured"])
+
+	def test_email_account_rejects_bad_email(self):
+		from exportflow.ai_email import save_email_account
+
+		with self.assertRaises(frappe.ValidationError):
+			save_email_account(email="not-an-email", password="x")

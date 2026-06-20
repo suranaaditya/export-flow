@@ -178,7 +178,20 @@ export const API = {
 	emailContext: 'exportflow.ai_email.email_context',
 	emailDraft: 'exportflow.ai_email.email_draft',
 	emailSend: 'exportflow.ai_email.email_send',
+	emailAccountGet: 'exportflow.ai_email.get_email_account',
+	emailAccountSave: 'exportflow.ai_email.save_email_account',
+	emailAccountTest: 'exportflow.ai_email.test_email_account',
 } as const;
+
+export interface EmailAccount {
+	email: string | null;
+	sender_name: string | null;
+	host: string;
+	port: number;
+	use_ssl: boolean;
+	has_password: boolean;
+	configured: boolean;
+}
 
 export interface EmailContext {
 	purpose: string;

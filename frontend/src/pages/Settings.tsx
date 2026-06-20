@@ -6,13 +6,14 @@ import {
 	useFrappeGetCall,
 	useFrappeGetDoc,
 	useFrappeGetDocList,
+	useFrappePostCall,
 	useFrappeUpdateDoc,
 } from 'frappe-react-sdk';
 import { Icon, type IconName } from '@/components/Icon';
 import { MasterModal } from '@/components/MasterModal';
 import { CheckInput, Field, SearchSelect, SelectInput, TextArea, TextInput } from '@/components/form';
 import { Card, CHead, EmptyMsg, Modal, Tag } from '@/components/ui';
-import { API, parseServerError, type ChecklistRuleRow, type NewSOContext } from '@/lib/api';
+import { API, parseServerError, type ChecklistRuleRow, type EmailAccount, type NewSOContext } from '@/lib/api';
 import { MASTERS, STATIC_OPTIONS, type MasterDef, type OptionSource } from '@/lib/masters';
 
 type Row = Record<string, unknown> & { name: string };
@@ -773,13 +774,113 @@ function AutomationPanel({ canEdit }: { canEdit: boolean }) {
 const DOC_MASTER = MASTERS.find((m) => m.doctype === 'Document Type')!;
 const DATA_MASTERS = MASTERS.filter((m) => m.doctype !== 'Document Type');
 
-type SettingsSection = 'company' | 'automation' | 'documents' | 'data';
+type SettingsSection = 'company' | 'automation' | 'email' | 'documents' | 'data';
 const SETTINGS_SECTIONS: { key: SettingsSection; label: string; icon: IconName; count?: number }[] = [
 	{ key: 'company', label: 'Company profile', icon: 'building' },
 	{ key: 'automation', label: 'Automation & alerts', icon: 'sparkle' },
+	{ key: 'email', label: 'Email account', icon: 'send' },
 	{ key: 'documents', label: 'Documents & rules', icon: 'file-text' },
 	{ key: 'data', label: 'Master data', icon: 'box', count: DATA_MASTERS.length },
 ];
+
+
+function EmailAccountPanel({ canEdit }: { canEdit: boolean }) {
+	const { data, isLoading, error, mutate } = useFrappeGetCall<{ message: EmailAccount }>(API.emailAccountGet, undefined);
+	const acc = data?.message;
+	const { call: saveCall, loading: saving } = useFrappePostCall<{ message: { ok: boolean; configured: boolean } }>(API.emailAccountSave);
+	const { call: testCall, loading: testing } = useFrappePostCall<{ message: { ok: boolean; email: string } }>(API.emailAccountTest);
+
+	const [email, setEmail] = useState('');
+	const [senderName, setSenderName] = useState('');
+	const [host, setHost] = useState('smtp.gmail.com');
+	const [port, setPort] = useState('465');
+	const [useSsl, setUseSsl] = useState(true);
+	const [password, setPassword] = useState('');
+	const [hasPassword, setHasPassword] = useState(false);
+	const [seeded, setSeeded] = useState(false);
+	const [err, setErr] = useState<string | null>(null);
+	const [msg, setMsg] = useState<string | null>(null);
+
+	useEffect(() => {
+		if (!acc || seeded) return;
+		setEmail(acc.email ?? '');
+		setSenderName(acc.sender_name ?? '');
+		setHost(acc.host || 'smtp.gmail.com');
+		setPort(String(acc.port || 465));
+		setUseSsl(acc.use_ssl);
+		setHasPassword(acc.has_password);
+		setSeeded(true);
+	}, [acc, seeded]);
+
+	async function onSave() {
+		setErr(null);
+		setMsg(null);
+		try {
+			const r = await saveCall({ email, sender_name: senderName, host, port, use_ssl: useSsl ? 1 : 0, password: password || undefined });
+			setMsg(r.message.configured ? 'Saved — account connected.' : 'Saved.');
+			if (password) setHasPassword(true);
+			setPassword('');
+			mutate();
+		} catch (e) {
+			setErr(parseServerError(e));
+		}
+	}
+	async function onTest() {
+		setErr(null);
+		setMsg(null);
+		try {
+			const r = await testCall({});
+			setMsg(`Connected ✓ — ${r.message.email}`);
+		} catch (e) {
+			setErr(parseServerError(e));
+		}
+	}
+
+	return (
+		<Card accent>
+			<CHead icon="send" title="Email sending account" action={acc?.configured ? <Tag tone="ok">Connected</Tag> : undefined} />
+			{isLoading ? (
+				<div className="sub" style={{ padding: '14px 18px' }}>Loading…</div>
+			) : error ? (
+				<div className="ferr" style={{ padding: '14px 18px' }}>{parseServerError(error)}</div>
+			) : (
+				<div style={{ padding: '6px 18px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+					<div className="sub" style={{ margin: 0 }}>
+						The address outbound emails (purchase orders, proforma invoices) are sent from. Self-contained — it does not
+						change this site's other apps. For Gmail/Workspace use an <b>App Password</b>, not your login password.
+					</div>
+					<Field label="From email address" required>
+						<TextInput value={email} onChange={setEmail} placeholder="exports@yourcompany.com" disabled={!canEdit} />
+					</Field>
+					<Field label="Sender name">
+						<TextInput value={senderName} onChange={setSenderName} placeholder="MN Globex Exports" disabled={!canEdit} />
+					</Field>
+					<div style={{ display: 'flex', gap: 12 }}>
+						<div style={{ flex: 2 }}>
+							<Field label="SMTP host"><TextInput value={host} onChange={setHost} disabled={!canEdit} /></Field>
+						</div>
+						<div style={{ flex: 1 }}>
+							<Field label="Port"><TextInput value={port} onChange={setPort} type="number" disabled={!canEdit} /></Field>
+						</div>
+					</div>
+					<CheckInput checked={useSsl} onChange={setUseSsl} label="Use SSL (port 465; uncheck for STARTTLS / 587)" disabled={!canEdit} />
+					<Field label="App password" hint={hasPassword ? 'A password is saved — leave blank to keep it.' : 'Required to send.'}>
+						<TextInput value={password} onChange={setPassword} type="password" placeholder={hasPassword ? '••••••••  (unchanged)' : 'app password'} disabled={!canEdit} />
+					</Field>
+					{err && <div className="ferr">{err}</div>}
+					{msg && <div className="sub" style={{ margin: 0, color: 'var(--iris)' }}>{msg}</div>}
+					{canEdit && (
+						<div className="formfoot">
+							<button className="btn primary" onClick={() => void onSave()} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+							<button className="btn" onClick={() => void onTest()} disabled={testing || !acc?.configured}>{testing ? 'Testing…' : 'Test connection'}</button>
+							<span className="spacer" />
+						</div>
+					)}
+				</div>
+			)}
+		</Card>
+	);
+}
 
 export function Settings() {
 	// the SO-context endpoint doubles as the masters option source; viewers
@@ -835,6 +936,7 @@ export function Settings() {
 				<div className="setbody">
 					{section === 'company' && <ExporterProfilePanel canEdit={canEdit} />}
 					{section === 'automation' && <AutomationPanel canEdit={canEdit} />}
+					{section === 'email' && <EmailAccountPanel canEdit={canEdit} />}
 					{section === 'documents' && (
 						<div className="stack">
 							<MasterPanel def={DOC_MASTER} options={options} canEdit={canEdit} />

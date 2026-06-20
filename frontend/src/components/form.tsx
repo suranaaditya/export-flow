@@ -37,7 +37,7 @@ interface InputProps {
 	onChange: (value: string) => void;
 	placeholder?: string;
 	disabled?: boolean;
-	type?: 'text' | 'date' | 'number';
+	type?: 'text' | 'date' | 'number' | 'password' | 'email';
 	mono?: boolean;
 	step?: string;
 	/** id of a <datalist> for type-ahead suggestions with free-text fallback */

@@ -269,30 +269,147 @@ def email_send(doctype: str, name: str, purpose: str, to: str, subject: str, bod
 		+ "</div>"
 	)
 
-	# explicit Communication so the email shows in the document's timeline (sendmail's
-	# reference_* links the queue but does not create a Communication on its own)
-	comm = frappe.get_doc({
+	acc = _smtp_account()
+	if acc:
+		# self-contained smtplib send from the connected account — never touches the
+		# shared site's default Email Account; log the Communication only on success
+		_smtp_send(acc, recipients, cc_final, subj, content, attachments)
+		comm = _log_communication(doctype, name, subj, content, recipients, cc_final)
+	else:
+		comm = _log_communication(doctype, name, subj, content, recipients, cc_final)
+		frappe.sendmail(
+			recipients=recipients, cc=cc_final or None, subject=subj, content=content,
+			attachments=attachments, communication=comm.name,
+			reference_doctype=doctype, reference_name=name,
+		)
+	return {"sent_to": recipients, "sandbox": bool(sandbox), "intended": to,
+			"communication": comm.name, "via": "smtp" if acc else "site"}
+
+
+def _log_communication(doctype, name, subject, content, recipients, cc):
+	"""A Sent Communication linked to the document so the email shows in its timeline."""
+	return frappe.get_doc({
 		"doctype": "Communication",
 		"communication_type": "Communication",
 		"communication_medium": "Email",
 		"sent_or_received": "Sent",
-		"subject": subj,
+		"subject": subject,
 		"content": content,
 		"recipients": ", ".join(recipients),
-		"cc": ", ".join(cc_final) or None,
+		"cc": ", ".join(cc) or None,
 		"reference_doctype": doctype,
 		"reference_name": name,
 		"status": "Linked",
 	}).insert(ignore_permissions=True)
 
-	frappe.sendmail(
-		recipients=recipients,
-		cc=cc_final or None,
-		subject=subj,
-		content=content,
-		attachments=attachments,
-		communication=comm.name,
-		reference_doctype=doctype,
-		reference_name=name,
-	)
-	return {"sent_to": recipients, "sandbox": bool(sandbox), "intended": to, "communication": comm.name}
+
+# ---------------------------------------------------- connected sending account
+
+def _smtp_account():
+	"""The connected ExportFlow sending account (Settings) if both an address and an
+	app password are set — else None (fall back to the site's default email)."""
+	s = frappe.get_single("ExportFlow Settings")
+	if s.get("smtp_email") and s.get_password("smtp_password", raise_exception=False):
+		return s
+	return None
+
+
+def _smtp_send(acc, recipients, cc, subject, html, attachments):
+	"""Send via the connected account's own SMTP (self-contained; does not use Frappe's
+	site-wide Email Account)."""
+	import re
+	import smtplib
+	import ssl as _ssl
+	from email.message import EmailMessage
+	from email.utils import formataddr
+
+	pw = acc.get_password("smtp_password")
+	host = acc.smtp_host or "smtp.gmail.com"
+	use_ssl = int(acc.get("smtp_use_ssl") or 0)
+	port = int(acc.smtp_port or (465 if use_ssl else 587))
+
+	msg = EmailMessage()
+	msg["Subject"] = subject
+	msg["From"] = formataddr((acc.get("smtp_sender_name") or acc.smtp_email, acc.smtp_email))
+	msg["To"] = ", ".join(recipients)
+	if cc:
+		msg["Cc"] = ", ".join(cc)
+	msg.set_content(re.sub(r"<[^>]+>", "", html))  # plain-text fallback
+	msg.add_alternative(html, subtype="html")
+	for a in attachments or []:
+		msg.add_attachment(a["fcontent"], maintype="application", subtype="pdf", filename=a["fname"])
+
+	ctx = _ssl.create_default_context()
+	server = smtplib.SMTP_SSL(host, port, context=ctx, timeout=30) if use_ssl else smtplib.SMTP(host, port, timeout=30)
+	try:
+		if not use_ssl:
+			server.starttls(context=ctx)
+		server.login(acc.smtp_email, pw)
+		server.send_message(msg, to_addrs=recipients + list(cc or []))
+	finally:
+		try:
+			server.quit()
+		except Exception:
+			pass
+
+
+@frappe.whitelist()
+def get_email_account() -> dict:
+	"""The connected sending account (never returns the password)."""
+	frappe.has_permission("ExportFlow Settings", "read", throw=True)
+	s = frappe.get_single("ExportFlow Settings")
+	return {
+		"email": s.get("smtp_email"),
+		"sender_name": s.get("smtp_sender_name"),
+		"host": s.get("smtp_host") or "smtp.gmail.com",
+		"port": s.get("smtp_port") or 465,
+		"use_ssl": bool(int(s.get("smtp_use_ssl") or 0)),
+		"has_password": bool(s.get_password("smtp_password", raise_exception=False)),
+		"configured": bool(_smtp_account()),
+	}
+
+
+@frappe.whitelist()
+def save_email_account(email, sender_name=None, host=None, port=None, use_ssl=1, password=None) -> dict:
+	"""Save the connected sending account. The app password is stored encrypted; it is
+	only overwritten when a new one is supplied."""
+	frappe.has_permission("ExportFlow Settings", "write", throw=True)
+	email = (email or "").strip()
+	if email:
+		validate_email_address(email, throw=True)
+	s = frappe.get_single("ExportFlow Settings")
+	s.smtp_email = email
+	s.smtp_sender_name = (sender_name or "").strip() or None
+	s.smtp_host = (host or "").strip() or "smtp.gmail.com"
+	s.smtp_port = int(port or 465)
+	s.smtp_use_ssl = 1 if str(use_ssl) in ("1", "true", "True") else 0
+	if password:
+		s.smtp_password = password
+	s.save(ignore_permissions=True)
+	frappe.db.commit()
+	return {"ok": True, "configured": bool(_smtp_account())}
+
+
+@frappe.whitelist()
+def test_email_account() -> dict:
+	"""Verify the connected account's SMTP login (connect + auth, no message sent)."""
+	frappe.has_permission("ExportFlow Settings", "write", throw=True)
+	acc = _smtp_account()
+	if not acc:
+		frappe.throw(_("Enter the email address and app password, Save, then test."))
+	import smtplib
+	import ssl as _ssl
+
+	host = acc.smtp_host or "smtp.gmail.com"
+	use_ssl = int(acc.get("smtp_use_ssl") or 0)
+	port = int(acc.smtp_port or (465 if use_ssl else 587))
+	try:
+		ctx = _ssl.create_default_context()
+		server = smtplib.SMTP_SSL(host, port, context=ctx, timeout=20) if use_ssl else smtplib.SMTP(host, port, timeout=20)
+		if not use_ssl:
+			server.starttls(context=ctx)
+		server.login(acc.smtp_email, acc.get_password("smtp_password"))
+		server.quit()
+	except Exception as e:
+		frappe.throw(_("Could not connect: {0}").format(str(e)[:160]))
+	return {"ok": True, "email": acc.smtp_email}
