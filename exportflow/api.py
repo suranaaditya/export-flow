@@ -34,6 +34,8 @@ def get_so_money_summary(sales_order: str) -> dict:
 			"incoterm",
 			"named_place",
 			"payment_terms_narrative",
+			"tc_name",
+			"terms",
 			"company",
 		],
 		as_dict=True,
@@ -156,6 +158,15 @@ def get_new_so_context() -> dict:
 		),
 		"countries": frappe.get_all("Country", pluck="name", order_by="name asc", limit_page_length=300),
 		"item_tax_templates": _item_tax_templates(company),
+		# selling-side terms templates only — the same master the PO uses,
+		# segregated by the native selling/buying flags (see get_new_po_context)
+		"terms_templates": frappe.get_all(
+			"Terms and Conditions",
+			filters={"disabled": 0, "selling": 1},
+			pluck="name",
+			order_by="name asc",
+			limit_page_length=100,
+		),
 	}
 
 
@@ -404,6 +415,8 @@ def create_export_sales_order(deal) -> dict:
 			"incoterm": deal.get("incoterm") or None,
 			"named_place": deal.get("named_place"),
 			"payment_terms_narrative": deal.get("payment_terms_narrative"),
+			"tc_name": deal.get("tc_name") or None,
+			"terms": deal.get("terms"),
 			"items": [
 				{
 					"item_code": row["item_code"],
@@ -527,6 +540,8 @@ def get_sales_order_for_edit(name: str) -> dict:
 			"incoterm",
 			"named_place",
 			"payment_terms_narrative",
+			"tc_name",
+			"terms",
 			"docstatus",
 		],
 		as_dict=True,
@@ -578,6 +593,8 @@ def update_sales_order(name: str, deal) -> dict:
 	doc.incoterm = deal.get("incoterm") or None
 	doc.named_place = deal.get("named_place")
 	doc.payment_terms_narrative = deal.get("payment_terms_narrative")
+	doc.tc_name = deal.get("tc_name") or None
+	doc.terms = deal.get("terms")
 	doc.set(
 		"items",
 		[

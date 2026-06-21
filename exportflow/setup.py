@@ -169,8 +169,87 @@ def seed_checklist_rules():
 		).insert(ignore_permissions=True)
 
 
+# Sample payment / T&C templates so the client can see the mechanism. Segregated
+# by the native Terms and Conditions selling/buying flags: selling rows show in
+# the Sales-Order picker, buying rows in the Purchase-Order picker.
+SAMPLE_TERMS = [
+	# (title, selling, buying, terms text)
+	(
+		"Sales — 30% advance, 70% against B/L",
+		1,
+		0,
+		"30% advance by telegraphic transfer with order confirmation; balance 70% "
+		"against a scanned copy of the Bill of Lading / Airway Bill before the "
+		"originals are couriered.",
+	),
+	(
+		"Sales — 100% irrevocable LC at sight",
+		1,
+		0,
+		"100% irrevocable Letter of Credit at sight, confirmed by a prime "
+		"international bank, payable on presentation of the shipping documents.",
+	),
+	(
+		"Sales — 100% advance (TT)",
+		1,
+		0,
+		"100% advance payment by telegraphic transfer before dispatch of the goods.",
+	),
+	(
+		"Sales — Cash against documents (CAD)",
+		1,
+		0,
+		"Payment 100% against documents (D/P) through the bank on first presentation.",
+	),
+	(
+		"Purchase — 50% advance, 50% before dispatch",
+		0,
+		1,
+		"50% advance with the purchase order; balance 50% before dispatch from the "
+		"supplier's works.",
+	),
+	(
+		"Purchase — Net 30 days",
+		0,
+		1,
+		"Net 30 days from the date of the supplier invoice / receipt of the goods.",
+	),
+	(
+		"Purchase — 100% against delivery",
+		0,
+		1,
+		"100% payment against delivery of the goods together with the documents.",
+	),
+	(
+		"Purchase — 100% advance",
+		0,
+		1,
+		"100% advance payment with the purchase order.",
+	),
+]
+
+
+def seed_terms_templates():
+	"""Insert sample selling/buying Terms and Conditions templates so the SO and
+	PO payment-terms pickers have realistic examples. Existing records (by name)
+	are left untouched — idempotent."""
+	for title, selling, buying, terms in SAMPLE_TERMS:
+		if frappe.db.exists("Terms and Conditions", title):
+			continue
+		frappe.get_doc(
+			{
+				"doctype": "Terms and Conditions",
+				"title": title,
+				"selling": selling,
+				"buying": buying,
+				"terms": terms,
+			}
+		).insert(ignore_permissions=True)
+
+
 def after_install():
 	setup_export_role_permissions()
 	seed_ports()
 	seed_document_types()
 	seed_checklist_rules()
+	seed_terms_templates()

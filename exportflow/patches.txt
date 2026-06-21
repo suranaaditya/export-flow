@@ -14,3 +14,4 @@ exportflow.patches.v0_1.seed_document_catalog #3 repair auto-filled responsible 
 exportflow.patches.v0_1.default_trade_type
 exportflow.patches.v0_1.default_mtt_import_value_auto
 exportflow.patches.v0_1.grant_grn_permissions
+exportflow.patches.v0_1.seed_sample_terms

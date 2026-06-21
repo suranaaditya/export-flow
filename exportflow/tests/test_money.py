@@ -8,6 +8,7 @@ except ImportError:  # frappe < 16
 
 from exportflow.api import (
 	create_export_sales_order,
+	get_new_so_context,
 	get_so_money_summary,
 	pfi_set_status,
 	submit_sales_order,
@@ -323,6 +324,79 @@ class TestMoneyFlow(IntegrationTestCase):
 					"items": [{"item_code": item.name, "qty": 5, "rate": 0}],
 				}
 			)
+
+	def test_sales_order_terms_template(self):
+		"""The SO carries a Terms & Conditions template (tc_name + terms text), and
+		the new-SO context lists only selling-tagged templates — segregated from the
+		PO's buying-tagged ones (feedback point #2)."""
+		sfx = _suffix()
+		selling_tc = frappe.get_doc(
+			{
+				"doctype": "Terms and Conditions",
+				"title": f"_Test EF Selling Terms {sfx}",
+				"selling": 1,
+				"buying": 0,
+				"terms": "100% advance by TT before dispatch.",
+			}
+		).insert(ignore_permissions=True)
+		buying_tc = frappe.get_doc(
+			{
+				"doctype": "Terms and Conditions",
+				"title": f"_Test EF Buying Terms {sfx}",
+				"selling": 0,
+				"buying": 1,
+				"terms": "Net 30 days from invoice.",
+			}
+		).insert(ignore_permissions=True)
+
+		ctx = get_new_so_context()
+		self.assertIn(selling_tc.name, ctx["terms_templates"], "Selling template offered on the SO")
+		self.assertNotIn(
+			buying_tc.name, ctx["terms_templates"], "Buying-only template must not show on the SO"
+		)
+
+		item = frappe.get_doc(
+			{
+				"doctype": "Item",
+				"item_code": f"_Test EF Terms Item {sfx}",
+				"item_group": frappe.db.get_value("Item Group", {"is_group": 0}, "name"),
+				"stock_uom": "Kg",
+				"is_stock_item": 0,
+				"is_sales_item": 1,
+			}
+		).insert(ignore_permissions=True)
+		customer = make_customer(f"_Test EF Customer Terms {sfx}")
+		result = create_export_sales_order(
+			{
+				"customer": customer,
+				"delivery_date": add_days(nowdate(), 30),
+				"currency": frappe.db.get_value("Company", self.company, "default_currency"),
+				"conversion_rate": 1,
+				"tc_name": selling_tc.name,
+				"terms": "100% advance by TT before dispatch.",
+				"items": [{"item_code": item.name, "qty": 10, "rate": 5}],
+			}
+		)
+		so = frappe.get_doc("Sales Order", result["name"])
+		self.assertEqual(so.tc_name, selling_tc.name)
+		self.assertEqual(so.terms, "100% advance by TT before dispatch.")
+		# the detail summary surfaces the chosen template
+		self.assertEqual(get_so_money_summary(so.name)["so"]["tc_name"], selling_tc.name)
+
+	def test_seed_terms_templates_idempotent(self):
+		"""Seeding sample sales/purchase terms is a no-op on re-run and tags each
+		row to the right side (feedback point #2)."""
+		from exportflow.setup import SAMPLE_TERMS, seed_terms_templates
+
+		seed_terms_templates()
+		seed_terms_templates()  # second run must not error or duplicate
+		for title, selling, buying, _terms in SAMPLE_TERMS:
+			self.assertTrue(frappe.db.exists("Terms and Conditions", title), f"{title} seeded")
+			row = frappe.db.get_value(
+				"Terms and Conditions", title, ["selling", "buying"], as_dict=True
+			)
+			self.assertEqual(int(row.selling), selling)
+			self.assertEqual(int(row.buying), buying)
 
 	def test_lc_alerts_skip_closed(self):
 		so, _customer = make_money_so(self.company)

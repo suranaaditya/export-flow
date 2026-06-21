@@ -316,6 +316,12 @@ export function SalesOrderDetail() {
 						{so.payment_terms_narrative}
 					</span>
 				)}
+				{so.tc_name && (
+					<span className="kv">
+						<b>Terms</b>
+						{so.tc_name}
+					</span>
+				)}
 			</div>
 
 			<div className="grid detail">

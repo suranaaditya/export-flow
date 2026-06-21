@@ -12,7 +12,11 @@ import type { MasterDef, OptionSource } from '@/lib/masters';
 
 type Values = Record<string, string | boolean>;
 
-function seed(def: MasterDef, record: Record<string, unknown> | null): Values {
+function seed(
+	def: MasterDef,
+	record: Record<string, unknown> | null,
+	defaults?: Values,
+): Values {
 	const v: Values = {};
 	for (const f of def.fields) {
 		// a field can derive its value from the full doc when it isn't a plain
@@ -22,6 +26,12 @@ function seed(def: MasterDef, record: Record<string, unknown> | null): Values {
 			continue;
 		}
 		const raw = record?.[f.key];
+		if (raw == null && !record && defaults && f.key in defaults) {
+			// create-mode seed value (e.g. default a Terms template to selling/buying
+			// for the form that opened the quick-create)
+			v[f.key] = f.type === 'check' ? !!defaults[f.key] : String(defaults[f.key] ?? '');
+			continue;
+		}
 		v[f.key] = f.type === 'check' ? !!raw : raw != null ? String(raw) : '';
 	}
 	return v;
@@ -33,12 +43,15 @@ export function MasterModal({
 	def,
 	options,
 	record,
+	defaults,
 	onClose,
 	onSaved,
 }: {
 	def: MasterDef;
 	options: Record<OptionSource, string[]>;
 	record: Record<string, unknown> | null;
+	/** create-mode seed values (e.g. default a new Terms template to selling/buying) */
+	defaults?: Values;
 	onClose: () => void;
 	onSaved: (name: string) => void;
 }) {
@@ -51,7 +64,7 @@ export function MasterModal({
 		recordName ?? '',
 		recordName ? undefined : null,
 	);
-	const [values, setValues] = useState<Values>(() => seed(def, record));
+	const [values, setValues] = useState<Values>(() => seed(def, record, defaults));
 	const [err, setErr] = useState<string | null>(null);
 	useEffect(() => {
 		if (fullDoc.data) setValues(seed(def, fullDoc.data));

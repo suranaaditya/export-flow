@@ -701,6 +701,7 @@ export function NewPurchaseOrder() {
 					def={quickCreate === 'supplier' ? SUPPLIER_DEF : quickCreate === 'item' ? ITEM_DEF : TC_DEF}
 					options={masterOptions}
 					record={null}
+					defaults={quickCreate === 'terms' ? { buying: true } : undefined}
 					onClose={() => setQuickCreate(null)}
 					onSaved={(name) => {
 						const which = quickCreate;

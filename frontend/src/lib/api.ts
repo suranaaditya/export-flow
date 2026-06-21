@@ -13,6 +13,8 @@ export interface SOHeader {
 	incoterm: string | null;
 	named_place: string | null;
 	payment_terms_narrative: string | null;
+	tc_name: string | null;
+	terms: string | null;
 	company: string;
 }
 
@@ -33,6 +35,7 @@ export interface NewSOContext {
 	uoms: string[];
 	countries: string[];
 	item_tax_templates: string[];
+	terms_templates: string[];
 }
 
 export interface ItemInfo {
@@ -109,6 +112,8 @@ export interface SalesOrderForEdit {
 	incoterm: string | null;
 	named_place: string | null;
 	payment_terms_narrative: string | null;
+	tc_name: string | null;
+	terms: string | null;
 	docstatus: 0 | 1 | 2;
 	items: { item_code: string; item_name: string; qty: number; uom: string | null; rate: number }[];
 }

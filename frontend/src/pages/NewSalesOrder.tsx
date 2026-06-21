@@ -11,6 +11,7 @@ import { MASTERS, STATIC_OPTIONS, type OptionSource } from '@/lib/masters';
 
 const CUSTOMER_DEF = MASTERS.find((m) => m.doctype === 'Customer')!;
 const ITEM_DEF = MASTERS.find((m) => m.doctype === 'Item')!;
+const TC_DEF = MASTERS.find((m) => m.doctype === 'Terms and Conditions')!;
 
 interface DealRow {
 	item_code: string;
@@ -41,6 +42,7 @@ export function NewSalesOrder() {
 	);
 
 	const { call: fetchItemInfo } = useFrappePostCall<{ message: ItemInfo }>(API.itemInfo);
+	const { call: fetchTerms } = useFrappePostCall<{ message: string }>(API.termsText);
 	const { call: createSo, loading: saving } = useFrappePostCall<{
 		message: { name: string; docstatus: number };
 	}>(API.createSo);
@@ -57,10 +59,12 @@ export function NewSalesOrder() {
 	const [rateTouched, setRateTouched] = useState(false);
 	const [incoterm, setIncoterm] = useState('');
 	const [namedPlace, setNamedPlace] = useState('');
-	const [terms, setTerms] = useState('');
+	const [paymentTerms, setPaymentTerms] = useState('');
+	const [tcName, setTcName] = useState('');
+	const [tcText, setTcText] = useState('');
 	const [rows, setRows] = useState<DealRow[]>([{ ...EMPTY_ROW }]);
 	const [err, setErr] = useState<string | null>(null);
-	const [quickCreate, setQuickCreate] = useState<'customer' | 'item' | null>(null);
+	const [quickCreate, setQuickCreate] = useState<'customer' | 'item' | 'terms' | null>(null);
 
 	// prefill from the existing order when editing (seed exactly once)
 	const seeded = useRef(false);
@@ -80,7 +84,9 @@ export function NewSalesOrder() {
 		setRateTouched(true); // keep the order's stored rate, don't auto-suggest over it
 		setIncoterm(d.incoterm ?? '');
 		setNamedPlace(d.named_place ?? '');
-		setTerms(d.payment_terms_narrative ?? '');
+		setPaymentTerms(d.payment_terms_narrative ?? '');
+		setTcName(d.tc_name ?? '');
+		setTcText(d.terms ?? '');
 		setRows(
 			(d.items ?? []).length
 				? d.items.map((it) => ({
@@ -147,6 +153,17 @@ export function NewSalesOrder() {
 		}
 	}
 
+	async function onTemplate(v: string) {
+		setTcName(v);
+		if (!v) return;
+		try {
+			const text = (await fetchTerms({ template: v })).message;
+			setTcText(text.replace(/<[^>]*>/g, ''));
+		} catch {
+			// template text is a convenience — leave the field as typed
+		}
+	}
+
 	const total = useMemo(
 		() => rows.reduce((sum, r) => sum + (Number(r.qty) || 0) * (Number(r.rate) || 0), 0),
 		[rows],
@@ -173,7 +190,9 @@ export function NewSalesOrder() {
 			conversion_rate: Number(rate) || 1,
 			incoterm: incoterm || null,
 			named_place: namedPlace,
-			payment_terms_narrative: terms,
+			payment_terms_narrative: paymentTerms,
+			tc_name: tcName || null,
+			terms: tcText,
 			submit: submit ? 1 : 0,
 			items: kept.map((r) => ({
 				item_code: r.item_code,
@@ -227,6 +246,7 @@ export function NewSalesOrder() {
 		label: i.item_name,
 		sub: [i.pharmacopoeia_grade, i.stock_uom].filter(Boolean).join(' · ') || undefined,
 	}));
+	const termsOptions = (ctx?.terms_templates ?? []).map((t) => ({ value: t }));
 
 	return (
 		<main className="tight">
@@ -287,7 +307,7 @@ export function NewSalesOrder() {
 						<Field label="Incoterm">
 							<SearchSelect value={incoterm} onChange={setIncoterm} options={(ctx?.incoterms ?? []).map((i) => ({ value: i }))} placeholder="Search incoterms…" />
 						</Field>
-						<Field label="Named port / place" hint="Pick a port or type any place">
+						<Field label="Delivery port" hint="Pick a port or type any place">
 							<TextInput value={namedPlace} onChange={setNamedPlace} listId="ef-ports" placeholder="e.g. Jebel Ali" />
 							<datalist id="ef-ports">
 								{(ctx?.ports ?? []).map((p) => (
@@ -299,7 +319,22 @@ export function NewSalesOrder() {
 						</Field>
 						<div className="span2">
 							<Field label="Payment terms" hint="As negotiated, e.g. 30% advance, 70% against B/L copy">
-								<TextArea value={terms} onChange={setTerms} rows={2} />
+								<TextArea value={paymentTerms} onChange={setPaymentTerms} rows={2} />
+							</Field>
+						</div>
+						<Field label="Terms template" hint="Sales templates — manage in Settings">
+							<SearchSelect
+								value={tcName}
+								onChange={(v) => void onTemplate(v)}
+								options={termsOptions}
+								placeholder="Search templates…"
+								onCreate={() => setQuickCreate('terms')}
+								createLabel="New terms template"
+							/>
+						</Field>
+						<div className="span2">
+							<Field label="Terms &amp; conditions text">
+								<TextArea value={tcText} onChange={setTcText} rows={3} placeholder="Boilerplate payment, delivery, quality and documentation conditions…" />
 							</Field>
 						</div>
 					</div>
@@ -386,9 +421,10 @@ export function NewSalesOrder() {
 
 			{quickCreate !== null && (
 				<MasterModal
-					def={quickCreate === 'customer' ? CUSTOMER_DEF : ITEM_DEF}
+					def={quickCreate === 'customer' ? CUSTOMER_DEF : quickCreate === 'terms' ? TC_DEF : ITEM_DEF}
 					options={masterOptions}
 					record={null}
+					defaults={quickCreate === 'terms' ? { selling: true } : undefined}
 					onClose={() => setQuickCreate(null)}
 					onSaved={(name) => {
 						const which = quickCreate;
@@ -396,6 +432,8 @@ export function NewSalesOrder() {
 						void ctxResult.mutate();
 						if (which === 'customer') {
 							setCustomer(name);
+						} else if (which === 'terms') {
+							void onTemplate(name);
 						} else {
 							// select the new item on the first empty row (or append one)
 							setRows((rs) => {
