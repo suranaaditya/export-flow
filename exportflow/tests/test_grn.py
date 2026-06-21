@@ -13,6 +13,7 @@ from exportflow.api import (
 	add_grn_document,
 	cancel_grn,
 	cancel_return,
+	close_order,
 	create_grn,
 	create_return,
 	create_shipment,
@@ -20,6 +21,7 @@ from exportflow.api import (
 	get_po_detail,
 	get_return_context,
 	remove_grn_document,
+	reopen_order,
 	submit_grn,
 	submit_return,
 )
@@ -261,6 +263,96 @@ class TestGRN(IntegrationTestCase):
 		self.assertEqual(stock.balance(item, self.warehouse), 105)
 		# anything past the cap is still blocked
 		self.assertRaises(frappe.ValidationError, submit_grn, self._receive(po, item, 1))
+
+	def test_over_receipt_uses_default_tolerance_when_unset(self):
+		# A docfield default is NOT back-filled into an already-saved Single, so an
+		# untouched site has no Singles row → the guard must still grant the intended
+		# 5% (regression: an unset value once blocked at exactly the ordered qty).
+		frappe.db.delete(
+			"Singles", {"doctype": "ExportFlow Settings", "field": "grn_over_receipt_tolerance_pct"}
+		)
+		po, item = self._po(qty=100)
+		submit_grn(self._receive(po, item, 104))  # 4% over — allowed by the default 5%
+		self.assertEqual(stock.balance(item, self.warehouse), 104)
+		self.assertRaises(frappe.ValidationError, submit_grn, self._receive(po, item, 2))  # 106% blocked
+
+	def test_zero_tolerance_blocks_all_over_receipt(self):
+		# A deliberate 0 (per the field's help text) blocks ANY over-receipt — it must
+		# NOT be swallowed by the default-5 fallback (unset vs real 0 are distinguished).
+		frappe.db.set_single_value("ExportFlow Settings", "grn_over_receipt_tolerance_pct", 0)
+		po, item = self._po(qty=100)
+		submit_grn(self._receive(po, item, 100))  # exact qty OK
+		self.assertRaises(frappe.ValidationError, submit_grn, self._receive(po, item, 1))  # any over blocked
+
+	def test_over_receipt_message_names_the_cap(self):
+		frappe.db.set_single_value("ExportFlow Settings", "grn_over_receipt_tolerance_pct", 5)
+		po, item = self._po(qty=100)
+		with self.assertRaises(frappe.ValidationError) as cm:
+			submit_grn(self._receive(po, item, 130))
+		msg = str(cm.exception)
+		self.assertIn("105", msg, "message must name the real cap (100 + 5%)")
+		self.assertIn("5%", msg, "message must name the tolerance %")
+		self.assertNotIn("0%", msg, "the old message wrongly read 'by more than 0%'")
+
+	# ---- PO status: Close on full receipt, re-open on return/cancel -------------
+
+	def _po_status(self, po):
+		return frappe.db.get_value("Purchase Order", po.name, "status")
+
+	def test_full_receipt_closes_po(self):
+		po, item = self._po(qty=100)
+		self.assertNotEqual(self._po_status(po), "Closed")
+		submit_grn(self._receive(po, item, 100))
+		self.assertEqual(self._po_status(po), "Closed", "a fully-received PO is Closed")
+
+	def test_partial_receipt_does_not_close_po(self):
+		po, item = self._po(qty=100)
+		submit_grn(self._receive(po, item, 40))
+		self.assertNotEqual(self._po_status(po), "Closed", "a partly-received PO stays open")
+
+	def test_cancel_grn_reopens_closed_po(self):
+		po, item = self._po(qty=100)
+		grn = self._receive(po, item, 100)
+		submit_grn(grn)
+		self.assertEqual(self._po_status(po), "Closed")
+		cancel_grn(grn)
+		self.assertNotEqual(self._po_status(po), "Closed", "cancelling the receipt re-opens the PO")
+
+	def test_return_reopens_and_cancel_recloses_po(self):
+		po, item = self._po(qty=100)
+		grn = self._receive(po, item, 100)
+		submit_grn(grn)
+		self.assertEqual(self._po_status(po), "Closed")
+		ret = self._return(grn, item, 30)
+		submit_return(ret)
+		self.assertNotEqual(self._po_status(po), "Closed", "a return below full re-opens the PO")
+		cancel_return(ret)
+		self.assertEqual(self._po_status(po), "Closed", "cancelling the return re-closes the now-full PO")
+
+	def test_manual_close_survives_grn_cycle(self):
+		# An operator deliberately Closes a PO by hand; completing then cancelling a
+		# receipt must NOT clobber that manual Close (no goods-receipt provenance).
+		po, item = self._po(qty=100)
+		close_order("Purchase Order", po.name)
+		self.assertEqual(self._po_status(po), "Closed")
+		grn = self._receive(po, item, 100)
+		submit_grn(grn)  # receipt completes, but the PO is already manually Closed
+		self.assertEqual(self._po_status(po), "Closed")
+		cancel_grn(grn)
+		self.assertEqual(self._po_status(po), "Closed", "a manual Close is not re-opened by a GRN cancel")
+
+	def test_reopen_survives_within_tolerance_topup(self):
+		# After goods-receipt Closes a full PO, an operator re-opens it by hand; a later
+		# within-tolerance top-up receipt must NOT slam it shut again (close on the
+		# not-full→full transition only).
+		frappe.db.set_single_value("ExportFlow Settings", "grn_over_receipt_tolerance_pct", 5)
+		po, item = self._po(qty=100)
+		submit_grn(self._receive(po, item, 100))
+		self.assertEqual(self._po_status(po), "Closed")
+		reopen_order("Purchase Order", po.name)
+		self.assertNotEqual(self._po_status(po), "Closed")
+		submit_grn(self._receive(po, item, 3))  # 103 ≤ 105 cap — allowed, must stay open
+		self.assertNotEqual(self._po_status(po), "Closed", "a deliberate re-open is not re-closed")
 
 	# ---- material returns ------------------------------------------------------
 

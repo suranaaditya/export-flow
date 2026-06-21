@@ -83,6 +83,21 @@ class GoodsReceiptNote(Document):
 		self.assert_not_consumed()
 		stock.reverse(stock.GRN_VOUCHER, self.name)
 
+	def after_delete(self):
+		"""The deleted receipt no longer counts toward the PO — re-open the PO if its
+		removal dropped a goods-receipt-Closed PO below fully received. Driven off the
+		grn_auto_closed provenance flag, so it works even on an ignore_on_trash delete
+		(where on_trash is skipped)."""
+		try:
+			from exportflow.api import _grn_sync_po_status
+
+			_grn_sync_po_status(self.purchase_order)
+		except Exception:
+			frappe.log_error(
+				title=f"GRN after_delete PO-status sync failed: {self.name}",
+				message=frappe.get_traceback(),
+			)
+
 	def _validate_items(self):
 		if not self.items:
 			frappe.throw(_("Add at least one received line."))

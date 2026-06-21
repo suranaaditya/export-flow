@@ -517,6 +517,10 @@ def reopen_order(doctype: str, name: str) -> dict:
 	doc.check_permission("write")
 	if doc.status == "Closed":
 		doc.update_status("Draft")
+		# operator now owns the open state — drop goods-receipt Close-provenance so a
+		# later receipt/return doesn't auto-re-close or re-open it from under them.
+		if doctype == "Purchase Order" and doc.get("grn_auto_closed"):
+			doc.db_set("grn_auto_closed", 0)
 	return {"name": name, "status": frappe.db.get_value(doctype, name, "status")}
 
 
@@ -1800,6 +1804,41 @@ def _grn_writeback_invoice(grn) -> None:
 		)
 
 
+def _grn_sync_po_status(po_name: str, was_full: bool = False) -> None:
+	"""Reflect goods-receipt completeness in the linked Purchase Order's lifecycle
+	status: Close the PO once every line is fully received (net of returns), and
+	re-open a PO that goods-receipt itself Closed when a later cancellation, return or
+	deletion drops the net below the ordered quantity. Best-effort — a status-sync
+	failure must never block the receipt/return action.
+
+	Two guards keep this from fighting an operator's deliberate decisions:
+	- CLOSE only on the not-full→full transition (`was_full` is the PO's fully-received
+	  state from BEFORE this action) — so a PO an operator re-opened by hand is not
+	  slammed shut again by an unrelated within-tolerance receipt.
+	- RE-OPEN only a PO WE Closed, tracked by the `grn_auto_closed` provenance flag
+	  (cleared by reopen_order) — never undoing a Close an operator made by hand.
+
+	A Delivered PO (drop-ship, flipped to Delivered at ship time) and an On-Hold PO are
+	left as-is; merchanting POs never receive. This runs as a system side-effect of an
+	already write-permission-checked receipt/return — like the ship-time Delivered flip
+	— so it does not separately check Purchase Order write permission."""
+	try:
+		po = frappe.get_doc("Purchase Order", po_name)
+		if po.docstatus != 1 or po.get("merchanting_trade"):
+			return
+		full = _po_grn_summary(po_name)["fully_received"]
+		if full and not was_full and po.status not in ("Closed", "Cancelled", "Delivered", "On Hold"):
+			po.update_status("Closed")
+			po.db_set("grn_auto_closed", 1)  # provenance: this Close is goods-receipt-driven
+		elif not full and po.status == "Closed" and po.get("grn_auto_closed"):
+			po.db_set("grn_auto_closed", 0)
+			po.update_status("Draft")  # documented re-open sentinel; recomputes the real status
+	except Exception:
+		frappe.log_error(
+			title=f"GRN PO-status sync failed: {po_name}", message=frappe.get_traceback()
+		)
+
+
 def _grn_assert_single_warehouse(doc) -> None:
 	"""One purchase order is received into ONE warehouse — keeps the shipment's
 	per-line warehouse resolution unambiguous (it picks the PO's Received GRN). A
@@ -1824,11 +1863,26 @@ def _grn_assert_single_warehouse(doc) -> None:
 		)
 
 
+def _grn_over_receipt_tolerance() -> float:
+	"""Over-receipt tolerance % from ExportFlow Settings. The docfield default (5) is
+	NOT back-filled into an already-saved Single, so read the raw Singles row to tell
+	'never configured' (→ default 5) from a deliberate value — including a deliberate 0,
+	which means 'block any over-receipt' per the field's own help text."""
+	rows = frappe.db.sql(
+		"SELECT `value` FROM `tabSingles` WHERE doctype=%s AND field=%s",
+		("ExportFlow Settings", "grn_over_receipt_tolerance_pct"),
+	)
+	raw = rows[0][0] if rows else None
+	return flt(raw) if raw not in (None, "") else 5.0
+
+
 def _grn_assert_within_ordered(doc) -> None:
-	"""Cumulative NET received quantity (this GRN + other Received GRNs − returns)
-	may not exceed each PO line's ordered quantity beyond the configured tolerance
-	(ExportFlow Settings.grn_over_receipt_tolerance_pct, for weighing variance)."""
-	tol = flt(frappe.db.get_single_value("ExportFlow Settings", "grn_over_receipt_tolerance_pct"))
+	"""Cumulative NET received quantity (this GRN + other Received GRNs − returns) may
+	not exceed each PO line's ordered quantity beyond the over-receipt tolerance
+	(ExportFlow Settings.grn_over_receipt_tolerance_pct — default 5% for weighing
+	variance; 0 blocks any over-receipt). Reports every over-receiving line at once,
+	and the cap shown is the cap enforced (both rounded to 3 dp)."""
+	tol = _grn_over_receipt_tolerance()
 	ordered = {
 		r.name: flt(r.qty)
 		for r in frappe.get_all(
@@ -1840,15 +1894,20 @@ def _grn_assert_within_ordered(doc) -> None:
 	for r in doc.items:
 		if r.po_detail:
 			by_line[r.po_detail] = by_line.get(r.po_detail, 0.0) + flt(r.received_qty)
+	violations = []
 	for po_detail, qty in by_line.items():
-		cap = flt(ordered.get(po_detail, 0)) * (1 + tol / 100.0)
-		if flt(already.get(po_detail, 0)) + qty > cap + 1e-6:
+		ord_qty = flt(ordered.get(po_detail, 0))
+		cap = flt(ord_qty * (1 + tol / 100.0), 3)  # round once so display == enforced
+		cumulative = flt(already.get(po_detail, 0)) + qty
+		if cumulative > cap + 1e-6:
 			item = next((r.item_code for r in doc.items if r.po_detail == po_detail), po_detail)
-			frappe.throw(
-				_("Receiving {0} of {1} would exceed the ordered quantity ({2}) by more than {3}%.").format(
-					qty, item, flt(ordered.get(po_detail, 0)), tol
+			violations.append(
+				_("{0}: received total {1} exceeds the maximum {2} ({3} ordered + {4}% tolerance).").format(
+					item, flt(cumulative, 3), cap, flt(ord_qty, 3), "%g" % tol
 				)
 			)
+	if violations:
+		frappe.throw("<br>".join(violations), title=_("Over-receipt"))
 
 
 @frappe.whitelist()
@@ -1866,8 +1925,10 @@ def submit_grn(name: str) -> dict:
 		frappe.throw(_("Only a draft Goods Receipt Note can be received"))
 	if not doc.items:
 		frappe.throw(_("Nothing to receive"))
+	frappe.db.get_value("Purchase Order", doc.purchase_order, "name", for_update=True)  # serialize PO-status sync
 	_grn_assert_single_warehouse(doc)
 	_grn_assert_within_ordered(doc)
+	was_full = _po_grn_summary(doc.purchase_order)["fully_received"]  # state before this receipt counts
 	if stock.maintain_stock_enabled():
 		# stock-IN in the line's transaction UOM — the shipment posts OUT in the
 		# same unit (Export Shipment Item.qty), so the ledger nets to zero once the
@@ -1876,6 +1937,7 @@ def submit_grn(name: str) -> dict:
 		stock.post_in(rows, stock.GRN_VOUCHER, doc.name, company=doc.company)
 	doc.db_set("status", "Received")
 	_grn_writeback_invoice(doc)
+	_grn_sync_po_status(doc.purchase_order, was_full=was_full)  # this receipt completed it → Close
 	return {"name": name, "status": "Received"}
 
 
@@ -1890,9 +1952,11 @@ def cancel_grn(name: str) -> dict:
 	doc.check_permission("write")
 	if doc.status == "Cancelled":
 		return {"name": name, "status": "Cancelled"}
+	frappe.db.get_value("Purchase Order", doc.purchase_order, "name", for_update=True)  # serialize PO-status sync
 	doc.assert_not_consumed()
 	stock.reverse(stock.GRN_VOUCHER, doc.name)
 	doc.db_set("status", "Cancelled")
+	_grn_sync_po_status(doc.purchase_order)  # dropped below full → re-open if we Closed it
 	return {"name": name, "status": "Cancelled"}
 
 
@@ -2208,10 +2272,12 @@ def submit_return(name: str) -> dict:
 	if not doc.items:
 		frappe.throw(_("Nothing to return"))
 	_return_assert_returnable(doc)
+	frappe.db.get_value("Purchase Order", doc.purchase_order, "name", for_update=True)  # serialize PO-status sync
 	if stock.maintain_stock_enabled():
 		rows = [(r.item_code, doc.warehouse, flt(r.returned_qty)) for r in doc.items]
 		stock.post_out(rows, stock.RETURN_VOUCHER, doc.name, company=doc.company)
 	doc.db_set("status", "Returned")
+	_grn_sync_po_status(doc.purchase_order)  # net received dropped → re-open if we Closed it
 	return {"name": name, "status": "Returned"}
 
 
@@ -2225,8 +2291,11 @@ def cancel_return(name: str) -> dict:
 	doc.check_permission("write")
 	if doc.status == "Cancelled":
 		return {"name": name, "status": "Cancelled"}
+	frappe.db.get_value("Purchase Order", doc.purchase_order, "name", for_update=True)  # serialize PO-status sync
+	was_full = _po_grn_summary(doc.purchase_order)["fully_received"]  # state before the return is undone
 	stock.reverse(stock.RETURN_VOUCHER, doc.name)
 	doc.db_set("status", "Cancelled")
+	_grn_sync_po_status(doc.purchase_order, was_full=was_full)  # net restored → may re-close
 	return {"name": name, "status": "Cancelled"}
 
 

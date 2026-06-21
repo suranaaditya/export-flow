@@ -213,6 +213,21 @@
  },
  {
   "doctype": "Custom Field",
+  "name": "Purchase Order-grn_auto_closed",
+  "dt": "Purchase Order",
+  "fieldname": "grn_auto_closed",
+  "fieldtype": "Check",
+  "label": "Closed by goods receipt",
+  "insert_after": "merchanting_trade",
+  "hidden": 1,
+  "read_only": 1,
+  "no_copy": 1,
+  "print_hide": 1,
+  "description": "System flag: this Purchase Order was auto-Closed because its goods were fully received (Goods Receipt Note). Cleared when a cancel/return re-opens it, or when an operator re-opens it by hand. Used as Close-provenance so goods-receipt never re-opens a PO an operator deliberately Closed.",
+  "module": "ExportFlow"
+ },
+ {
+  "doctype": "Custom Field",
   "name": "Purchase Order Item-specification",
   "dt": "Purchase Order Item",
   "fieldname": "specification",
