@@ -742,6 +742,8 @@ export interface PODetailData {
 		sales_order: string | null;
 		sales_order_item: string | null;
 		delivered_by_supplier: 0 | 1;
+		specification: string | null;
+		packaging: string | null;
 	}[];
 	extra_charges: { description: string; account_head: string; amount: number }[];
 	shipments: { shipment: string; current_milestone: string; mode: string; etd: string | null }[];

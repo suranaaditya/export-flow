@@ -210,5 +210,27 @@
   "insert_after": "gst_export_deadline",
   "description": "Goods bought overseas and shipped directly to a foreign buyer without entering India (FEMA merchanting). GST is nil; must be linked to the export sales order.",
   "module": "ExportFlow"
+ },
+ {
+  "doctype": "Custom Field",
+  "name": "Purchase Order Item-specification",
+  "dt": "Purchase Order Item",
+  "fieldname": "specification",
+  "fieldtype": "Small Text",
+  "label": "Specification",
+  "insert_after": "description",
+  "description": "Per-line product specification (grade, purity, particle size, pharmacopoeia, etc.) — printed on the purchase order.",
+  "module": "ExportFlow"
+ },
+ {
+  "doctype": "Custom Field",
+  "name": "Purchase Order Item-packaging",
+  "dt": "Purchase Order Item",
+  "fieldname": "packaging",
+  "fieldtype": "Small Text",
+  "label": "Packaging Required",
+  "insert_after": "specification",
+  "description": "Per-line packaging requirement (e.g. 25 kg HDPE drums, double LDPE liner) — printed on the purchase order.",
+  "module": "ExportFlow"
  }
 ]

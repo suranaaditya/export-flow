@@ -40,6 +40,7 @@
   "auto_cha_third_country",
   "auto_create_realization",
   "auto_create_incentive",
+  "default_charge_account",
   "section_stock",
   "maintain_stock",
   "grn_over_receipt_tolerance_pct",
@@ -318,6 +319,13 @@
    "label": "Auto-create incentive claims when a Commercial Invoice is generated"
   },
   {
+   "fieldname": "default_charge_account",
+   "fieldtype": "Link",
+   "options": "Account",
+   "label": "Default expense account for PO charges",
+   "description": "Cartage, freight and other extra charges on a purchase order post to this expense account automatically, so users enter only the charge name and amount. Leave blank to use the company's 'Freight and Forwarding Charges' account."
+  },
+  {
    "fieldname": "section_stock",
    "fieldtype": "Section Break",
    "label": "Stock & Receipts"
@@ -351,7 +359,7 @@
  "index_web_pages_for_search": 0,
  "issingle": 1,
  "links": [],
- "modified": "2026-06-18 10:00:00.000000",
+ "modified": "2026-06-21 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "ExportFlow",
  "name": "ExportFlow Settings",

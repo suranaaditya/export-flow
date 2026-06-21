@@ -659,9 +659,13 @@ def _delivered_shipped_split(so_detail: str) -> tuple[float, float]:
 
 
 @frappe.whitelist()
-def get_so_procurement(sales_order: str) -> dict:
+def get_so_procurement(sales_order: str, exclude_po: str | None = None) -> dict:
 	"""Per-line procurement state for the SO screen: ordered (submitted),
-	draft-covered, remaining, shipped/in-transit, and the POs per line."""
+	draft-covered, remaining, shipped/in-transit, and the POs per line.
+
+	exclude_po drops that draft PO's own contribution from the draft/remaining
+	figures — the PO edit form passes its own name so the live "remaining on SO"
+	caption doesn't double-count the quantities already on the PO being edited."""
 	frappe.has_permission("Sales Order", "read", doc=sales_order, throw=True)
 	frappe.has_permission("Purchase Order", "read", throw=True)
 
@@ -683,7 +687,7 @@ def get_so_procurement(sales_order: str) -> dict:
 	)
 	for line in lines:
 		line["ordered_qty"] = flt(_ordered_in_txn_uom(line), 3)
-		line["draft_qty"] = flt(_draft_po_qty(line.so_detail), 3)
+		line["draft_qty"] = flt(_draft_po_qty(line.so_detail, exclude_po), 3)
 		line["remaining"] = flt(
 			max(0.0, flt(line.qty) - line["ordered_qty"] - line["draft_qty"]), 3
 		)
@@ -900,11 +904,78 @@ def _supplier_is_foreign(supplier: str) -> bool:
 	return False
 
 
-def _build_po_doc(podata, validate_remaining: bool = True, target=None, exclude_po: str | None = None):
+def _default_charge_account(company: str, create_if_missing: bool = True) -> str | None:
+	"""The expense account a cartage/freight charge posts to when the user does not
+	pick one — feedback #11, where users enter only a charge name + amount. It is
+	configurable via ExportFlow Settings.default_charge_account and falls back to the
+	company's standard "Freight and Forwarding Charges" expense head, creating one
+	under the company's expense group if somehow absent. Always a real, non-group
+	Expense account (ERPNext rejects an Actual tax row otherwise); the caller guards
+	against it colliding with the taxes template's GST heads.
+
+	create_if_missing=False (the live preview, which must have NO side effects)
+	returns None instead of inserting an account — the caller skips the charge row."""
+	if not company:
+		frappe.throw(_("No company is configured for ExportFlow — set it in ExportFlow Settings."))
+	configured = frappe.db.get_single_value("ExportFlow Settings", "default_charge_account")
+	if configured:
+		acc = frappe.db.get_value(
+			"Account", configured, ["company", "is_group", "root_type"], as_dict=True
+		)
+		if acc and acc.company == company and not acc.is_group and acc.root_type == "Expense":
+			return configured
+	existing = frappe.db.get_value(
+		"Account",
+		{
+			"company": company,
+			"is_group": 0,
+			"root_type": "Expense",
+			"account_name": "Freight and Forwarding Charges",
+		},
+		"name",
+	)
+	if existing:
+		return existing
+	if not create_if_missing:
+		return None
+	parent = frappe.db.get_value(
+		"Account", {"company": company, "is_group": 1, "account_name": "Indirect Expenses"}, "name"
+	) or frappe.db.get_value(
+		"Account", {"company": company, "is_group": 1, "root_type": "Expense"}, "name"
+	)
+	if not parent:
+		frappe.throw(
+			_("No expense account is configured for charges — set a default in ExportFlow Settings.")
+		)
+	return (
+		frappe.get_doc(
+			{
+				"doctype": "Account",
+				"company": company,
+				"parent_account": parent,
+				"account_name": "Freight and Forwarding Charges",
+				"root_type": "Expense",
+				"account_type": "Expense Account",
+				"is_group": 0,
+			}
+		)
+		.insert(ignore_permissions=True)
+		.name
+	)
+
+
+def _build_po_doc(
+	podata,
+	validate_remaining: bool = True,
+	target=None,
+	exclude_po: str | None = None,
+	allow_account_create: bool = True,
+):
 	"""Construct the PO the standalone form describes: header, mixed
 	SO-linked/free rows, taxes template rows, and extra charge heads. Shared by
 	the live tax preview, the create, and (with target=an existing draft) the
-	edit path. exclude_po drops the edited PO's own draft contribution from the
+	edit path. allow_account_create=False (preview) forbids the side effect of
+	auto-creating a default charge account. exclude_po drops the edited PO's own draft contribution from the
 	remaining-qty check so an in-place edit isn't rejected for double-counting."""
 	items = podata.get("items") or []
 	if not items:
@@ -938,6 +1009,9 @@ def _build_po_doc(podata, validate_remaining: bool = True, target=None, exclude_
 			"qty": flt(row["qty"]),
 			"rate": flt(row["rate"]),
 			"schedule_date": schedule_date,
+			# per-line specification + packaging (feedback #13) — printed on the PO
+			"specification": row.get("specification"),
+			"packaging": row.get("packaging"),
 		}
 		if row.get("so_detail"):
 			so_row = frappe.db.get_value(
@@ -968,6 +1042,8 @@ def _build_po_doc(podata, validate_remaining: bool = True, target=None, exclude_
 			)
 		po_rows.append(po_row)
 
+	company = exportflow_company()
+
 	# taxes: template rows first, then freeform charge heads (cartage etc.)
 	taxes = []
 	taxes_template = podata.get("taxes_template")
@@ -977,15 +1053,39 @@ def _build_po_doc(podata, validate_remaining: bool = True, target=None, exclude_
 		for tax in get_taxes_and_charges("Purchase Taxes and Charges Template", taxes_template) or []:
 			taxes.append(tax)
 	template_accounts = {t.get("account_head") for t in taxes}
+	default_charge_account = None  # resolved lazily, once, only if a charge needs it
 	for charge in podata.get("extra_charges") or []:
-		if not (charge.get("account_head") and flt(charge.get("amount"))):
+		amount = flt(charge.get("amount"))
+		if amount <= 0:
 			continue
-		if charge["account_head"] in template_accounts:
+		user_account = charge.get("account_head")
+		account_head = user_account
+		if not account_head:
+			# users enter only a charge name + amount — the expense account is filled
+			# in behind the scenes from the configured default (feedback #11)
+			if default_charge_account is None:
+				default_charge_account = _default_charge_account(
+					company, create_if_missing=allow_account_create
+				)
+			account_head = default_charge_account
+		if not account_head:
+			# preview with no resolvable default (account creation suppressed) — skip
+			# the row rather than persist an account during a side-effect-free preview
+			continue
+		if account_head in template_accounts:
 			# the engine maps actual amounts item-wise by account head — a
 			# percentage row sharing the account would silently compute zero
+			if user_account:
+				frappe.throw(
+					_("Charge '{0}': pick an account that is not already used by the taxes template").format(
+						charge.get("description") or account_head
+					)
+				)
+			# the user can no longer pick an account — point the admin at the setting
 			frappe.throw(
-				_("Charge '{0}': pick an account that is not already used by the taxes template").format(
-					charge.get("description") or charge["account_head"]
+				_(
+					"The default charge account is already used by the taxes template — choose a"
+					" different 'Default expense account for PO charges' in ExportFlow Settings."
 				)
 			)
 		taxes.append(
@@ -994,15 +1094,14 @@ def _build_po_doc(podata, validate_remaining: bool = True, target=None, exclude_
 				"category": "Total",
 				"add_deduct_tax": "Add",
 				"charge_type": "Actual",
-				"account_head": charge["account_head"],
-				"description": charge.get("description") or charge["account_head"],
-				"tax_amount": flt(charge["amount"]),
+				"account_head": account_head,
+				"description": charge.get("description") or "Charges",
+				"tax_amount": amount,
 			}
 		)
 
 	# currency — buying can be in the supplier's currency (foreign suppliers),
 	# base_rate (INR) is still derived via the rate so outlay/margin are unaffected
-	company = exportflow_company()
 	company_currency = frappe.db.get_value("Company", company, "default_currency")
 	currency = podata.get("currency") or company_currency
 	conversion_rate = 1.0 if currency == company_currency else flt(podata.get("conversion_rate"))
@@ -1123,7 +1222,8 @@ def preview_purchase_order(podata) -> dict:
 	if isinstance(podata, str):
 		podata = json.loads(podata)
 
-	po = _build_po_doc(podata, validate_remaining=False)
+	# the preview must have NO side effects — never auto-create a charge account
+	po = _build_po_doc(podata, validate_remaining=False, allow_account_create=False)
 	# set_missing_values fetches each item's item_tax_rate (the per-item GST
 	# override from its Item Tax Template) and supplier defaults; validate then
 	# runs the full ERPNext + india_compliance pipeline (HSN GST autofill) — the
@@ -1280,6 +1380,8 @@ def get_po_detail(name: str) -> dict:
 			"sales_order": row.sales_order,
 			"sales_order_item": row.sales_order_item,
 			"delivered_by_supplier": row.delivered_by_supplier,
+			"specification": row.get("specification"),
+			"packaging": row.get("packaging"),
 		}
 		for row in po.items
 	]

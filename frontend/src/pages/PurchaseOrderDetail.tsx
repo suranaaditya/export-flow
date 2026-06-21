@@ -261,6 +261,16 @@ export function PurchaseOrderDetail() {
 										<td>
 											<div className="c1">{it.item_name}</div>
 											<div className="c2">{it.item_code}</div>
+											{it.specification && (
+												<div className="c2" style={{ whiteSpace: 'pre-wrap' }}>
+													<b>Spec:</b> {it.specification}
+												</div>
+											)}
+											{it.packaging && (
+												<div className="c2" style={{ whiteSpace: 'pre-wrap' }}>
+													<b>Packing:</b> {it.packaging}
+												</div>
+											)}
 										</td>
 										<td className="num">
 											{it.qty} {it.uom ? <span className="dim">{it.uom}</span> : null}

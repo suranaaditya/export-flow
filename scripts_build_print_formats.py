@@ -558,6 +558,27 @@ EFX_TXN_LINES = """
   </table>
 """
 
+# Purchase-order variant of the line table — adds per-line specification and
+# packaging sub-lines (feedback #13). Forked so the shared EFX_TXN_LINES (used by
+# the Sales Order and other transaction prints) is unaffected.
+EFX_TXN_LINES_PO = """
+  <table class="lines">
+    <thead><tr><th style="width:22px">Sr</th><th>Description</th><th style="width:84px">HSN</th><th class="r" style="width:80px">Qty</th><th class="r" style="width:90px">Rate</th><th class="r" style="width:106px">Amount ({{ doc.currency }})</th></tr></thead>
+    <tbody>
+    {% for row in doc.items %}
+      <tr>
+        <td class="c mono">{{ loop.index }}</td>
+        <td><b>{{ row.item_name }}</b>{% if row.item_code != row.item_name %} <span class="muted mono" style="font-size:8.6px">{{ row.item_code }}</span>{% endif %}{% if row.get("specification") %}<div class="muted" style="font-size:8.6px;white-space:pre-wrap"><b>Spec:</b> {{ row.specification }}</div>{% endif %}{% if row.get("packaging") %}<div class="muted" style="font-size:8.6px;white-space:pre-wrap"><b>Packing:</b> {{ row.packaging }}</div>{% endif %}</td>
+        <td class="mono">{{ row.get("gst_hsn_code") or "—" }}</td>
+        <td class="r mono">{{ frappe.utils.flt(row.qty) }} {{ row.uom or "" }}</td>
+        <td class="r mono">{{ frappe.utils.fmt_money(row.rate, currency=doc.currency) }}</td>
+        <td class="r mono">{{ frappe.utils.fmt_money(row.amount, currency=doc.currency) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+"""
+
 EFX_TXN_TOTALS = """
   <table>
     <tr>
@@ -641,7 +662,7 @@ PURCHASE_ORDER = (
       <td><span class="lbl">Delivery</span>{% if sos %}Drop-ship &mdash; deliver direct to the port of shipment.{% else %}As advised.{% endif %}</td>
     </tr>
   </table>
-""" + EFX_TXN_LINES + EFX_TXN_TOTALS + _TERMS + _efx_txn_sign(_SYS_GEN) + """
+""" + EFX_TXN_LINES_PO + EFX_TXN_TOTALS + _TERMS + _efx_txn_sign(_SYS_GEN) + """
 </div></div>
 """
 )
@@ -750,6 +771,9 @@ if __name__ == "__main__":
 	# every format shares the bordered EFX style + the letterhead banner — one stamp;
 	# bump it on any edit so migrate re-syncs the standard print formats
 	REDESIGN = "2026-06-17 22:00:00.000000"
+	# the PO format alone changed (per-line spec/packaging, feedback #13) — give it
+	# its own newer stamp so only it re-syncs, not all 13 formats
+	PO_REDESIGN = "2026-06-21 12:00:00.000000"
 	write_format(
 		"exportflow_commercial_invoice", "ExportFlow Commercial Invoice", COMMERCIAL_INVOICE, modified=REDESIGN
 	)
@@ -770,7 +794,7 @@ if __name__ == "__main__":
 	)
 	write_format(
 		"exportflow_purchase_order", "ExportFlow Purchase Order", PURCHASE_ORDER,
-		doc_type="Purchase Order", modified=REDESIGN,
+		doc_type="Purchase Order", modified=PO_REDESIGN,
 	)
 	write_format(
 		"pro_forma_invoice", "Pro Forma Invoice", PRO_FORMA,

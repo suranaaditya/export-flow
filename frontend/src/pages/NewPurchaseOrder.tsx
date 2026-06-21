@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useFrappeGetCall, useFrappePostCall } from 'frappe-react-sdk';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
@@ -30,6 +30,8 @@ interface PORow {
 	sales_order: string | null;
 	so_detail: string | null;
 	max_qty: number | null;
+	specification: string;
+	packaging: string;
 }
 
 interface ChargeRow {
@@ -39,7 +41,9 @@ interface ChargeRow {
 }
 
 const GRID = '1.8fr 1fr 90px 70px 120px 120px 34px';
-const CHARGE_GRID = '1.6fr 1.6fr 130px 34px';
+// charge name + amount + remove — the expense account is filled in behind the
+// scenes from the configured default (feedback #11), so users never pick one
+const CHARGE_GRID = '1fr 130px 34px';
 
 function todayISO(): string {
 	const d = new Date();
@@ -119,8 +123,9 @@ export function NewPurchaseOrder() {
 				amount: String(c.amount),
 			})),
 		);
+		const editItems = d.items ?? [];
 		setRows(
-			(d.items ?? []).map((it) => ({
+			editItems.map((it) => ({
 				item_code: it.item_code,
 				item_name: it.item_name,
 				qty: String(it.qty),
@@ -129,15 +134,22 @@ export function NewPurchaseOrder() {
 				sales_order: it.sales_order,
 				so_detail: it.sales_order_item,
 				max_qty: null, // editing existing lines — backend skips the remaining guard
+				specification: it.specification ?? '',
+				packaging: it.packaging ?? '',
 			})),
 		);
+		// surface the live "remaining on SO" caption while editing — load the
+		// linked SO's lines (soProcurement excludes this PO via exclude_po)
+		const firstSo = editItems.find((it) => it.sales_order)?.sales_order;
+		if (firstSo) setSoPick(firstSo);
 		seeded.current = true;
 	}, [isEdit, editResult.data]);
 
-	// lines of the picked SO, to pull into the order
+	// lines of the picked SO, to pull into the order. When editing, exclude this
+	// PO's own draft contribution so the live remaining caption isn't double-counted
 	const soLines = useFrappeGetCall<{ message: SOProcurement }>(
 		API.soProcurement,
-		{ sales_order: soPick },
+		{ sales_order: soPick, exclude_po: isEdit ? editId : null },
 		soPick ? undefined : null,
 	);
 	// suggest the day's BUYING exchange rate when the PO currency changes; a
@@ -188,14 +200,18 @@ export function NewPurchaseOrder() {
 			schedule_date: requiredBy || null,
 			currency: currency || null,
 			conversion_rate: isCompanyCurrency ? 1 : Number(convRate) || 0,
-			merchant_export_scheme: merchanting ? 0 : mes ? 1 : 0,
-			merchanting_trade: merchanting ? 1 : 0,
+			// only the scheme applicable to this supplier type is sent — the other
+			// checkbox is disabled (and forced off), so it can never leak (#9)
+			merchant_export_scheme: !supplierIsForeign && mes ? 1 : 0,
+			merchanting_trade: supplierIsForeign && merchanting ? 1 : 0,
 			taxes_template: taxesTemplate || null,
+			// charges need only a name + amount; the expense account is resolved
+			// server-side from the configured default when omitted (#11)
 			extra_charges: charges
-				.filter((c) => c.account_head && Number(c.amount) > 0)
+				.filter((c) => Number(c.amount) > 0)
 				.map((c) => ({
-					description: c.description || c.account_head,
-					account_head: c.account_head,
+					description: c.description || 'Charges',
+					account_head: c.account_head || null,
 					amount: Number(c.amount),
 				})),
 			tc_name: tcName || null,
@@ -207,6 +223,8 @@ export function NewPurchaseOrder() {
 				rate: Number(r.rate),
 				sales_order: r.sales_order,
 				so_detail: r.so_detail,
+				specification: r.specification || null,
+				packaging: r.packaging || null,
 			})),
 		};
 	}
@@ -219,6 +237,7 @@ export function NewPurchaseOrder() {
 		currency,
 		convRate,
 		merchanting,
+		mes,
 		rows: rows.map((r) => [r.item_code, r.qty, r.rate]),
 	});
 	const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -268,6 +287,47 @@ export function NewPurchaseOrder() {
 		(l) => l.remaining > 0 && !addedDetails.has(l.so_detail),
 	);
 
+	// live "remaining on SO" per line: the server figure (which excludes this PO
+	// when editing, via exclude_po) minus what the current form rows consume —
+	// so reducing a line's qty immediately frees its SO quantity in the caption (#10)
+	const soLineByDetail = new Map((soLines.data?.message.lines ?? []).map((l) => [l.so_detail, l]));
+	const usedByForm = useMemo(() => {
+		const m: Record<string, number> = {};
+		for (const r of rows) {
+			if (r.so_detail) m[r.so_detail] = (m[r.so_detail] ?? 0) + (Number(r.qty) || 0);
+		}
+		return m;
+	}, [rows]);
+	function liveRemaining(soDetail: string | null): number | null {
+		if (!soDetail) return null;
+		const l = soLineByDetail.get(soDetail);
+		if (!l) return null;
+		return Math.round((l.remaining - (usedByForm[soDetail] ?? 0)) * 1000) / 1000;
+	}
+
+	// per-row specification + packaging editor (feedback #13) — collapsed by default
+	const [expanded, setExpanded] = useState<Set<number>>(new Set());
+	const toggleExpand = (i: number) =>
+		setExpanded((s) => {
+			const n = new Set(s);
+			if (n.has(i)) n.delete(i);
+			else n.add(i);
+			return n;
+		});
+	// remove an item row AND remap the index-keyed expand state so the open flag
+	// stays with the right row after the array reindexes
+	const removeRow = (i: number) => {
+		setRows((rs) => rs.filter((_, idx) => idx !== i));
+		setExpanded((s) => {
+			const n = new Set<number>();
+			for (const x of s) {
+				if (x === i) continue;
+				n.add(x > i ? x - 1 : x);
+			}
+			return n;
+		});
+	};
+
 	function addSoLine(soDetail: string) {
 		const l = (soLines.data?.message.lines ?? []).find((x) => x.so_detail === soDetail);
 		if (!l) return;
@@ -282,6 +342,8 @@ export function NewPurchaseOrder() {
 				sales_order: soPick,
 				so_detail: l.so_detail,
 				max_qty: l.remaining,
+				specification: '',
+				packaging: '',
 			},
 		]);
 	}
@@ -300,6 +362,8 @@ export function NewPurchaseOrder() {
 				sales_order: null,
 				so_detail: null,
 				max_qty: null,
+				specification: '',
+				packaging: '',
 			},
 		]);
 		if (!listed) {
@@ -340,8 +404,8 @@ export function NewPurchaseOrder() {
 			if (!r.rate || Number(r.rate) <= 0) return setErr(`Row ${i + 1}: buying rate is required.`);
 		}
 		for (const [i, c] of charges.entries()) {
-			if ((c.amount && Number(c.amount) > 0) !== !!c.account_head)
-				return setErr(`Charge ${i + 1}: needs both an account and an amount.`);
+			if (!c.amount || Number(c.amount) <= 0)
+				return setErr(`Charge ${i + 1}: enter an amount.`);
 		}
 		setErr(null);
 		try {
@@ -391,7 +455,6 @@ export function NewPurchaseOrder() {
 		sub: s.customer_name,
 	}));
 	const freeItems = (ctx?.items ?? []).map((i) => ({ value: i.name, label: i.item_name, sub: i.stock_uom }));
-	const accountOptions = (ctx?.accounts ?? []).map((a) => ({ value: a.name, label: a.account_name }));
 	const taxTemplateOptions = (ctx?.taxes_templates ?? []).map((t) => ({ value: t.name }));
 	const termsOptions = (ctx?.terms_templates ?? []).map((t) => ({ value: t }));
 
@@ -424,16 +487,35 @@ export function NewPurchaseOrder() {
 								createLabel="New supplier"
 							/>
 						</Field>
-						<div style={{ paddingTop: 22 }}>
-							{supplierIsForeign ? (
+						{/* both schemes are always shown; only the one applicable to the
+						    selected supplier is enabled — more intuitive than swapping (#9) */}
+						<div style={{ paddingTop: 22, display: 'grid', gap: 8 }}>
+							<div>
+								<CheckInput
+									checked={mes}
+									disabled={supplierIsForeign || !supplier}
+									onChange={setMes}
+									label="Merchant export scheme (0.1% GST)"
+								/>
+								{(supplierIsForeign || !supplier) && (
+									<div className="c2" style={{ marginLeft: 26, marginTop: 2 }}>
+										For domestic GST-registered suppliers
+									</div>
+								)}
+							</div>
+							<div>
 								<CheckInput
 									checked={merchanting}
+									disabled={!supplierIsForeign}
 									onChange={setMerchanting}
 									label="Third-country / merchanting trade"
 								/>
-							) : (
-								<CheckInput checked={mes} onChange={setMes} label="Merchant export scheme (0.1% GST)" />
-							)}
+								{!supplierIsForeign && (
+									<div className="c2" style={{ marginLeft: 26, marginTop: 2 }}>
+										Available for overseas suppliers
+									</div>
+								)}
+							</div>
 						</div>
 						<Field label="Currency">
 							<SearchSelect
@@ -484,40 +566,89 @@ export function NewPurchaseOrder() {
 					{rows.length === 0 && (
 						<EmptyMsg title="No items yet" text="Pull lines from a sales order below, or add a free item." />
 					)}
-					{rows.map((r, i) => (
-						<div className="reqrow" key={`${r.item_code}-${r.so_detail ?? i}`} style={{ gridTemplateColumns: GRID }}>
-							<span>
-								<span className="c1" style={{ display: 'block' }}>
-									{r.item_name}
-								</span>
-							</span>
-							{r.sales_order ? (
-								<span className="id id-sm" style={{ alignSelf: 'center' }}>
-									{r.sales_order}
-								</span>
-							) : (
-								<span className="dim" style={{ alignSelf: 'center' }}>
-									—
-								</span>
-							)}
-							<TextInput type="number" value={r.qty} onChange={(v) => setRow(i, { qty: v })} />
-							<span className="dim" style={{ alignSelf: 'center' }}>
-								{r.uom || '—'}
-							</span>
-							<TextInput type="number" value={r.rate} onChange={(v) => setRow(i, { rate: v })} />
-							<span className="num" style={{ textAlign: 'right', alignSelf: 'center' }}>
-								{fmtMoney((Number(r.qty) || 0) * (Number(r.rate) || 0), currency)}
-							</span>
-							<button
-								type="button"
-								className="xbtn"
-								aria-label={`Remove ${r.item_name}`}
-								onClick={() => setRows((rs) => rs.filter((_, idx) => idx !== i))}
-							>
-								<Icon name="close" size={14} />
-							</button>
-						</div>
-					))}
+					{rows.map((r, i) => {
+						const rem = liveRemaining(r.so_detail);
+						const open = expanded.has(i) || !!r.specification || !!r.packaging;
+						return (
+							<Fragment key={`${r.item_code}-${r.so_detail ?? i}`}>
+								<div className="reqrow" style={{ gridTemplateColumns: GRID }}>
+									<span>
+										<span className="c1" style={{ display: 'block' }}>
+											{r.item_name}
+										</span>
+										<button
+											type="button"
+											onClick={() => toggleExpand(i)}
+											style={{
+												background: 'none',
+												border: 0,
+												padding: 0,
+												marginTop: 2,
+												cursor: 'pointer',
+												color: 'var(--brand-iris, var(--text-link))',
+												font: 'inherit',
+												fontSize: 11,
+											}}
+										>
+											{open ? '▾' : '▸'} Spec &amp; packing{r.specification || r.packaging ? ' ✓' : ''}
+										</button>
+									</span>
+									{r.sales_order ? (
+										<span style={{ alignSelf: 'center' }}>
+											<span className="id id-sm">{r.sales_order}</span>
+											{rem !== null && (
+												<span className="c2" style={{ display: 'block' }}>
+													{rem < 0
+														? `${Math.abs(rem)} ${r.uom ?? ''} over SO`
+														: `${rem} ${r.uom ?? ''} left on SO`}
+												</span>
+											)}
+										</span>
+									) : (
+										<span className="dim" style={{ alignSelf: 'center' }}>
+											—
+										</span>
+									)}
+									<TextInput type="number" value={r.qty} onChange={(v) => setRow(i, { qty: v })} />
+									<span className="dim" style={{ alignSelf: 'center' }}>
+										{r.uom || '—'}
+									</span>
+									<TextInput type="number" value={r.rate} onChange={(v) => setRow(i, { rate: v })} />
+									<span className="num" style={{ textAlign: 'right', alignSelf: 'center' }}>
+										{fmtMoney((Number(r.qty) || 0) * (Number(r.rate) || 0), currency)}
+									</span>
+									<button
+										type="button"
+										className="xbtn"
+										aria-label={`Remove ${r.item_name}`}
+										onClick={() => removeRow(i)}
+									>
+										<Icon name="close" size={14} />
+									</button>
+								</div>
+								{open && (
+									<div style={{ padding: '0 18px 12px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+										<Field label="Specification">
+											<TextArea
+												value={r.specification}
+												onChange={(v) => setRow(i, { specification: v })}
+												rows={2}
+												placeholder="Grade, purity, particle size, pharmacopoeia…"
+											/>
+										</Field>
+										<Field label="Packaging required">
+											<TextArea
+												value={r.packaging}
+												onChange={(v) => setRow(i, { packaging: v })}
+												rows={2}
+												placeholder="e.g. 25 kg HDPE drums, double LDPE liner"
+											/>
+										</Field>
+									</div>
+								)}
+							</Fragment>
+						);
+					})}
 
 					<div style={{ padding: '12px 18px', display: 'grid', gap: 10 }}>
 						<div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
@@ -568,7 +699,6 @@ export function NewPurchaseOrder() {
 					{charges.length > 0 && (
 						<div className="reqhead" style={{ gridTemplateColumns: CHARGE_GRID }}>
 							<span>Charge</span>
-							<span>Expense account</span>
 							<span>Amount</span>
 							<span />
 						</div>
@@ -576,12 +706,6 @@ export function NewPurchaseOrder() {
 					{charges.map((c, i) => (
 						<div className="reqrow" key={i} style={{ gridTemplateColumns: CHARGE_GRID }}>
 							<TextInput value={c.description} onChange={(v) => setCharge(i, { description: v })} placeholder="e.g. Cartage to CFS" />
-							<SearchSelect
-								value={c.account_head}
-								onChange={(v) => setCharge(i, { account_head: v })}
-								options={accountOptions}
-								placeholder="Search accounts…"
-							/>
 							<TextInput type="number" value={c.amount} onChange={(v) => setCharge(i, { amount: v })} />
 							<button
 								type="button"
@@ -601,6 +725,11 @@ export function NewPurchaseOrder() {
 						>
 							<Icon name="plus" size={15} /> Add charge (cartage, freight…)
 						</button>
+						{charges.length > 0 && (
+							<div className="c2" style={{ marginTop: 6 }}>
+								Charges post to the default expense account automatically — set it in Settings.
+							</div>
+						)}
 					</div>
 
 					{/* ---- terms (after items & taxes, per ERPNext) ---- */}

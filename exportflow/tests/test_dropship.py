@@ -185,6 +185,106 @@ class TestDropShipFlow(IntegrationTestCase):
 			)
 			self.assertEqual(po_row.qty, expected_so_row.qty)
 
+	def test_default_charge_account_fills_in(self):
+		"""Feedback #11: a charge with only a name + amount (no account picked) posts
+		to the configured/standard default expense account, resolved server-side."""
+		from exportflow.api import _build_po_doc, _default_charge_account
+
+		sfx = _suffix()
+		supplier = make_supplier(f"_Test EF Sup Charge {sfx}")
+		item = make_dropship_item(f"_Test EF Item Charge {sfx}", supplier, self.company)
+		doc = _build_po_doc(
+			{
+				"supplier": supplier,
+				"items": [{"item_code": item, "qty": 10, "rate": 100}],
+				"extra_charges": [{"description": "Cartage to CFS", "amount": 500}],
+			},
+			validate_remaining=False,
+		)
+		actuals = [t for t in doc.taxes if t.charge_type == "Actual"]
+		self.assertEqual(len(actuals), 1, "the account-less charge still becomes a tax row")
+		self.assertEqual(actuals[0].tax_amount, 500)
+		expected = _default_charge_account(self.company)
+		self.assertEqual(actuals[0].account_head, expected, "filled from the default account")
+		acc = frappe.db.get_value("Account", expected, ["is_group", "root_type"], as_dict=True)
+		self.assertFalse(acc.is_group, "default must be a postable (non-group) account")
+		self.assertEqual(acc.root_type, "Expense")
+
+	def test_preview_does_not_create_charge_account(self):
+		"""Batch-2 review fix: the live preview has NO side effects — an account-less
+		charge never triggers auto-creation of a GL account during preview."""
+		from exportflow.api import preview_purchase_order
+
+		sfx = _suffix()
+		supplier = make_supplier(f"_Test EF Sup Prev {sfx}")
+		item = make_dropship_item(f"_Test EF Item Prev {sfx}", supplier, self.company)
+		before = frappe.db.count("Account", {"company": self.company})
+		preview_purchase_order(
+			{
+				"supplier": supplier,
+				"items": [{"item_code": item, "qty": 2, "rate": 100}],
+				"extra_charges": [{"description": "Cartage", "amount": 300}],
+			}
+		)
+		after = frappe.db.count("Account", {"company": self.company})
+		self.assertEqual(before, after, "preview must not create any Account")
+
+	def test_po_line_specification_and_packaging(self):
+		"""Feedback #13: per-line specification + packaging are captured and persist."""
+		from exportflow.api import _build_po_doc
+
+		sfx = _suffix()
+		supplier = make_supplier(f"_Test EF Sup Spec {sfx}")
+		item = make_dropship_item(f"_Test EF Item Spec {sfx}", supplier, self.company)
+		po = _build_po_doc(
+			{
+				"supplier": supplier,
+				"items": [
+					{
+						"item_code": item,
+						"qty": 5,
+						"rate": 50,
+						"specification": "USP grade, min 99% purity",
+						"packaging": "25 kg HDPE drums",
+					}
+				],
+			},
+			validate_remaining=False,
+		).insert(ignore_permissions=True)
+		po.reload()
+		self.assertEqual(po.items[0].specification, "USP grade, min 99% purity")
+		self.assertEqual(po.items[0].packaging, "25 kg HDPE drums")
+
+	def test_so_procurement_excludes_edited_po(self):
+		"""Feedback #10: get_so_procurement(exclude_po=...) drops that draft PO's own
+		contribution so the PO edit form's live "remaining on SO" doesn't double-count."""
+		from exportflow.api import _build_po_doc, get_so_procurement
+
+		sfx = _suffix()
+		supplier = make_supplier(f"_Test EF Sup Rem {sfx}")
+		item = make_dropship_item(f"_Test EF Item Rem {sfx}", supplier, self.company)
+		customer = make_customer(f"_Test EF Cust Rem {sfx}")
+		so = make_dropship_so(customer, self.company, [{"item_code": item, "qty": 100}])
+		so_detail = so.items[0].name
+		po = _build_po_doc(
+			{
+				"supplier": supplier,
+				"items": [
+					{"item_code": item, "qty": 40, "rate": 10, "sales_order": so.name, "so_detail": so_detail}
+				],
+			}
+		).insert(ignore_permissions=True)
+
+		base = {l["so_detail"]: l for l in get_so_procurement(so.name)["lines"]}[so_detail]
+		self.assertEqual(base["draft_qty"], 40, "the draft PO covers 40")
+		self.assertEqual(base["remaining"], 60)
+
+		excl = {
+			l["so_detail"]: l for l in get_so_procurement(so.name, exclude_po=po.name)["lines"]
+		}[so_detail]
+		self.assertEqual(excl["draft_qty"], 0, "this PO's own draft is excluded")
+		self.assertEqual(excl["remaining"], 100)
+
 	def test_no_stock_movement_through_delivery(self):
 		"""Spec §4.1: the full drop-ship leg — SO → PO → supplier delivers
 		directly — produces no Delivery Note and no stock ledger entries."""
