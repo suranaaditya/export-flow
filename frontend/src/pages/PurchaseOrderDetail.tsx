@@ -36,8 +36,11 @@ export function PurchaseOrderDetail() {
 		{ name: id },
 	);
 	const { call: submitPo, loading: submitting } = useFrappePostCall(API.submitPo);
-	const { call: amendDoc, loading: amending } = useFrappePostCall<{ message: { name: string } }>(
-		API.amendDoc,
+	const { call: amendDoc, loading: amending } = useFrappePostCall<{
+		message: { name: string; resumed: boolean };
+	}>(API.amendDoc);
+	const { call: getAmendedDraft } = useFrappePostCall<{ message: { name: string | null } }>(
+		API.amendedDraft,
 	);
 	const { call: closeOrder, loading: closing } = useFrappePostCall(API.closeOrder);
 	const { call: reopenOrder, loading: reopening } = useFrappePostCall(API.reopenOrder);
@@ -93,8 +96,23 @@ export function PurchaseOrderDetail() {
 		setActionErr(null);
 		try {
 			const r = await amendDoc({ doctype: 'Purchase Order', name: id });
-			toast.ok('Amended draft created');
+			toast.ok(r.message.resumed ? 'Resumed existing amendment' : 'Amended draft created');
 			navigate('/purchases/' + r.message.name + '/edit');
+		} catch (e) {
+			setActionErr(parseServerError(e));
+			toast.err(parseServerError(e));
+		}
+	}
+
+	async function onContinueAmend() {
+		setActionErr(null);
+		try {
+			const r = await getAmendedDraft({ doctype: 'Purchase Order', name: id });
+			if (r.message.name) navigate('/purchases/' + r.message.name + '/edit');
+			else {
+				toast.err('No amended draft found to continue.');
+				await mutate(); // the draft is gone — drop the now-defunct button
+			}
 		} catch (e) {
 			setActionErr(parseServerError(e));
 			toast.err(parseServerError(e));
@@ -225,6 +243,11 @@ export function PurchaseOrderDetail() {
 				{can.amend && (
 					<button className="btn" disabled={amending} onClick={() => void onAmend()}>
 						<Icon name="refresh" size={15} /> {amending ? 'Amending…' : 'Amend'}
+					</button>
+				)}
+				{can.resume_amend && (
+					<button className="btn primary" onClick={() => void onContinueAmend()}>
+						<Icon name="refresh" size={15} /> Continue amendment
 					</button>
 				)}
 				{can.close && (

@@ -450,6 +450,17 @@ def submit_sales_order(name: str) -> dict:
 
 # orders whose lifecycle can be Closed / Re-opened (ERPNext update_status)
 CLOSEABLE_DOCTYPES = ("Sales Order", "Purchase Order")
+AMENDABLE_DOCTYPES = ("Sales Order", "Purchase Order")
+
+
+def _existing_amended_draft(doctype: str, name: str) -> str | None:
+	"""An unsubmitted (docstatus=0) document already amended from `name` — the
+	in-progress amend draft, if a previous amend cancelled the original but the
+	editable-copy step was lost (e.g. a slow cancel + page refresh). Deterministic
+	(newest first) so the same draft is always resumed even if more than one exists."""
+	return frappe.db.get_value(
+		doctype, {"amended_from": name, "docstatus": 0}, "name", order_by="creation desc"
+	)
 
 
 def _doc_can(doctype: str, name: str, *, amendable: bool = True, status: str | None = None) -> dict:
@@ -473,6 +484,11 @@ def _doc_can(doctype: str, name: str, *, amendable: bool = True, status: str | N
 		st = status if status is not None else frappe.db.get_value(doctype, name, "status")
 		out["close"] = bool(can_write and docstatus == 1 and st not in ("Closed", "Cancelled"))
 		out["reopen"] = bool(can_write and st == "Closed")
+	# a Cancelled order with an in-progress amended draft the user may continue
+	if doctype in AMENDABLE_DOCTYPES and docstatus == 2 and amendable:
+		out["resume_amend"] = bool(
+			frappe.has_permission(doctype, "amend", doc=name) and _existing_amended_draft(doctype, name)
+		)
 	return out
 
 
@@ -506,13 +522,24 @@ def reopen_order(doctype: str, name: str) -> dict:
 
 @frappe.whitelist()
 def amend_document(doctype: str, name: str) -> dict:
-	"""ERPNext-faithful amend: cancel the submitted document and reopen it as an
-	editable draft (amended_from set). Raises a clear error when downstream
-	links (PFIs, submitted POs, …) block the cancel — exactly as the desk does."""
-	if doctype not in ("Sales Order", "Purchase Order"):
+	"""ERPNext-faithful, IDEMPOTENT amend: cancel the submitted document and reopen
+	it as an editable draft (amended_from set). Safe to retry — if an amended draft
+	already exists (a previous slow cancel committed but the draft step was lost on
+	a refresh), return that draft instead of cancelling again. Raises a clear error
+	when downstream links (PFIs, submitted POs, …) block the cancel."""
+	if doctype not in AMENDABLE_DOCTYPES:
 		frappe.throw(_("{0} cannot be amended here").format(doctype))
+	frappe.has_permission(doctype, "amend", doc=name, throw=True)
+	# serialize concurrent amends on the same original: a second caller then either
+	# sees the first's draft (resume) or the original already Cancelled (guard),
+	# instead of both racing to create a duplicate draft
+	frappe.db.get_value(doctype, name, "name", for_update=True)
+	# recovery / idempotency FIRST — a retry sees the original already Cancelled
+	# (docstatus=2), so this must run before the docstatus==1 guard below
+	existing = _existing_amended_draft(doctype, name)
+	if existing:
+		return {"name": existing, "doctype": doctype, "resumed": True}
 	doc = frappe.get_doc(doctype, name)
-	doc.check_permission("amend")
 	if doc.docstatus != 1:
 		frappe.throw(_("Only a submitted document can be amended"))
 	doc.cancel()
@@ -520,7 +547,17 @@ def amend_document(doctype: str, name: str) -> dict:
 	amended.amended_from = name
 	amended.docstatus = 0
 	amended.insert()
-	return {"name": amended.name, "doctype": doctype}
+	return {"name": amended.name, "doctype": doctype, "resumed": False}
+
+
+@frappe.whitelist()
+def get_amended_draft(doctype: str, name: str) -> dict:
+	"""Any in-progress amended draft of `name` — lets the detail screen of a
+	Cancelled order offer "Continue amendment"."""
+	if doctype not in AMENDABLE_DOCTYPES:
+		frappe.throw(_("{0} cannot be amended here").format(doctype))
+	frappe.has_permission(doctype, "read", doc=name, throw=True)
+	return {"name": _existing_amended_draft(doctype, name)}
 
 
 @frappe.whitelist()

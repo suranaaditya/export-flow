@@ -77,6 +77,7 @@ export interface DocCan {
 	amend: boolean; // submitted doc the user may amend
 	close?: boolean; // closeable orders (SO/PO): submitted & not yet closed
 	reopen?: boolean; // closeable orders (SO/PO): currently closed
+	resume_amend?: boolean; // cancelled order with an in-progress amended draft
 }
 
 export interface SOItemLine {
@@ -175,6 +176,7 @@ export const API = {
 	updatePo: 'exportflow.api.update_purchase_order_doc',
 	updateShipment: 'exportflow.api.update_shipment',
 	amendDoc: 'exportflow.api.amend_document',
+	amendedDraft: 'exportflow.api.get_amended_draft',
 	closeOrder: 'exportflow.api.close_order',
 	reopenOrder: 'exportflow.api.reopen_order',
 	companyLogo: 'exportflow.api.get_company_logo',

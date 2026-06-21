@@ -313,6 +313,33 @@ class TestDropShipFlow(IntegrationTestCase):
 		with self.assertRaises(frappe.ValidationError):
 			list_doc_attachments("Item", item)
 
+	def test_amend_is_idempotent_and_recoverable(self):
+		"""Feedback #4: amend is idempotent + recoverable — a retry after the original
+		is cancelled returns the SAME draft (no re-cancel / duplicate), and
+		get_amended_draft / _doc_can.resume_amend surface it for "Continue amendment"."""
+		from exportflow.api import _doc_can, amend_document, get_amended_draft
+
+		sfx = _suffix()
+		supplier = make_supplier(f"_Test EF Sup Amend {sfx}")
+		item = make_dropship_item(f"_Test EF Item Amend {sfx}", supplier, self.company)
+		customer = make_customer(f"_Test EF Cust Amend {sfx}")
+		so = make_dropship_so(customer, self.company, [{"item_code": item, "qty": 10}])
+
+		first = amend_document("Sales Order", so.name)
+		self.assertFalse(first["resumed"], "first amend cancels + creates a draft")
+		draft = first["name"]
+		self.assertEqual(frappe.db.get_value("Sales Order", so.name, "docstatus"), 2, "original cancelled")
+		self.assertEqual(frappe.db.get_value("Sales Order", draft, "amended_from"), so.name)
+
+		# the original is now Cancelled (docstatus=2) — a retry must NOT throw the
+		# "only a submitted document can be amended" guard, but return the same draft
+		again = amend_document("Sales Order", so.name)
+		self.assertTrue(again["resumed"], "retry resumes the existing draft")
+		self.assertEqual(again["name"], draft, "no duplicate draft is created")
+
+		self.assertEqual(get_amended_draft("Sales Order", so.name)["name"], draft)
+		self.assertTrue(_doc_can("Sales Order", so.name).get("resume_amend"))
+
 	def test_no_stock_movement_through_delivery(self):
 		"""Spec §4.1: the full drop-ship leg — SO → PO → supplier delivers
 		directly — produces no Delivery Note and no stock ledger entries."""

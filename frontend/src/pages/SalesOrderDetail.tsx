@@ -46,8 +46,11 @@ export function SalesOrderDetail() {
 		{ sales_order: id },
 	);
 	const { call: submitSo, loading: submitting } = useFrappePostCall(API.submitSo);
-	const { call: amendDoc, loading: amending } = useFrappePostCall<{ message: { name: string } }>(
-		API.amendDoc,
+	const { call: amendDoc, loading: amending } = useFrappePostCall<{
+		message: { name: string; resumed: boolean };
+	}>(API.amendDoc);
+	const { call: getAmendedDraft } = useFrappePostCall<{ message: { name: string | null } }>(
+		API.amendedDraft,
 	);
 	const { call: closeOrder, loading: closing } = useFrappePostCall(API.closeOrder);
 	const { call: reopenOrder, loading: reopening } = useFrappePostCall(API.reopenOrder);
@@ -67,8 +70,23 @@ export function SalesOrderDetail() {
 		setActionErr(null);
 		try {
 			const r = await amendDoc({ doctype: 'Sales Order', name: id });
-			toast.ok('Amended draft created');
+			toast.ok(r.message.resumed ? 'Resumed existing amendment' : 'Amended draft created');
 			navigate('/sales-orders/' + r.message.name + '/edit');
+		} catch (e) {
+			setActionErr(parseServerError(e));
+			toast.err(parseServerError(e));
+		}
+	}
+
+	async function onContinueAmend() {
+		setActionErr(null);
+		try {
+			const r = await getAmendedDraft({ doctype: 'Sales Order', name: id });
+			if (r.message.name) navigate('/sales-orders/' + r.message.name + '/edit');
+			else {
+				toast.err('No amended draft found to continue.');
+				await mutate(); // the draft is gone — drop the now-defunct button
+			}
 		} catch (e) {
 			setActionErr(parseServerError(e));
 			toast.err(parseServerError(e));
@@ -304,6 +322,11 @@ export function SalesOrderDetail() {
 								<Icon name="refresh" size={15} /> {amending ? 'Amending…' : 'Amend'}
 							</button>
 						)}
+						{can.resume_amend && (
+							<button className="btn primary" onClick={() => void onContinueAmend()}>
+								<Icon name="refresh" size={15} /> Continue amendment
+							</button>
+						)}
 						{can.close && (
 							<button className="btn" disabled={closing} onClick={() => void onCloseOrder()}>
 								<Icon name="lock" size={15} /> {closing ? 'Closing…' : 'Close'}
@@ -314,12 +337,17 @@ export function SalesOrderDetail() {
 								<Icon name="unlock" size={15} /> {reopening ? 'Reopening…' : 'Re-open'}
 							</button>
 						)}
-						<button className="btn" onClick={() => navigate('/lc/new?so=' + id)}>
-							<Icon name="calendar" size={15} /> New letter of credit
-						</button>
-						<button className="btn primary" onClick={() => navigate('/pfi/new?so=' + id)}>
-							<Icon name="banknote" size={15} /> New pro forma
-						</button>
+						{/* LC / PFI only make sense for a live (submitted) order, not a cancelled one */}
+						{so.docstatus === 1 && (
+							<>
+								<button className="btn" onClick={() => navigate('/lc/new?so=' + id)}>
+									<Icon name="calendar" size={15} /> New letter of credit
+								</button>
+								<button className="btn primary" onClick={() => navigate('/pfi/new?so=' + id)}>
+									<Icon name="banknote" size={15} /> New pro forma
+								</button>
+							</>
+						)}
 					</>
 				)}
 			</div>
