@@ -8,8 +8,10 @@ import {
 	useFrappeUpdateDoc,
 } from 'frappe-react-sdk';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useConfirm } from '@/components/ConfirmDialog';
 import { EmailComposer } from '@/components/EmailComposer';
 import { Icon } from '@/components/Icon';
+import { useToast } from '@/components/Toast';
 import { Field, SearchSelect, SelectInput, TextArea, TextInput } from '@/components/form';
 import { Card, CHead, Facts, Tag } from '@/components/ui';
 import {
@@ -129,6 +131,8 @@ export function ProFormaInvoicePage() {
 	const [saveError, setSaveError] = useState<string | null>(null);
 	const [actionError, setActionError] = useState<string | null>(null);
 	const [emailing, setEmailing] = useState(false);
+	const confirm = useConfirm();
+	const toast = useToast();
 
 	// Seed form state once per doc name — background revalidation (e.g. after a
 	// payment lands) must not clobber in-progress edits.
@@ -201,14 +205,25 @@ export function ProFormaInvoicePage() {
 
 	async function doStatus(action: 'sent' | 'cancel') {
 		if (!name) return;
-		if (action === 'cancel' && !window.confirm('Cancel this pro forma invoice?')) return;
+		if (
+			action === 'cancel' &&
+			!(await confirm({
+				title: 'Cancel pro forma invoice',
+				message: 'Cancel this pro forma invoice? This cannot be undone.',
+				confirmLabel: 'Cancel PFI',
+				danger: true,
+			}))
+		)
+			return;
 		setActionError(null);
 		try {
 			await postStatus({ name, action });
 			await docResult.mutate();
 			await soResult.mutate();
+			toast.ok(action === 'cancel' ? 'Pro forma invoice cancelled' : 'Marked as sent');
 		} catch (e) {
 			setActionError(parseServerError(e));
+			toast.err(parseServerError(e));
 		}
 	}
 

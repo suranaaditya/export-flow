@@ -1,6 +1,8 @@
 import { useRef, useState } from 'react';
 import { useFrappeFileUpload, useFrappeGetCall, useFrappePostCall } from 'frappe-react-sdk';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useConfirm } from '@/components/ConfirmDialog';
+import { useToast } from '@/components/Toast';
 import { Icon } from '@/components/Icon';
 import { SearchSelect } from '@/components/form';
 import { Card, CHead, EmptyMsg, Facts, LRow, Tag } from '@/components/ui';
@@ -31,6 +33,8 @@ export function GoodsReceiptNoteDetail() {
 	);
 	const { upload, loading: uploading } = useFrappeFileUpload();
 	const [actionErr, setActionErr] = useState<string | null>(null);
+	const confirm = useConfirm();
+	const toast = useToast();
 	const [docType, setDocType] = useState('');
 	const fileRef = useRef<HTMLInputElement | null>(null);
 	const docFileRef = useRef<HTMLInputElement | null>(null);
@@ -41,22 +45,43 @@ export function GoodsReceiptNoteDetail() {
 	}));
 
 	async function onReceive() {
+		if (
+			!(await confirm({
+				title: 'Receive goods',
+				message: 'Mark these goods as received? This posts the quantities into stock.',
+				confirmLabel: 'Receive',
+			}))
+		)
+			return;
 		setActionErr(null);
 		try {
 			await submitGrn({ name: id });
 			await mutate();
+			toast.ok('Goods received into stock');
 		} catch (e) {
 			setActionErr(parseServerError(e));
+			toast.err(parseServerError(e));
 		}
 	}
 
 	async function onCancel() {
+		if (
+			!(await confirm({
+				title: 'Cancel goods receipt',
+				message: 'Cancel this goods receipt? Any stock it posted will be reversed.',
+				confirmLabel: 'Cancel receipt',
+				danger: true,
+			}))
+		)
+			return;
 		setActionErr(null);
 		try {
 			await cancelGrn({ name: id });
 			await mutate();
+			toast.ok('Goods receipt cancelled');
 		} catch (e) {
 			setActionErr(parseServerError(e));
+			toast.err(parseServerError(e));
 		}
 	}
 

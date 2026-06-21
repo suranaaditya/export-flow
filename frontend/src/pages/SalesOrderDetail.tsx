@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useFrappeGetCall, useFrappeGetDocList, useFrappePostCall } from 'frappe-react-sdk';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { AttachmentsCard } from '@/components/AttachmentsCard';
+import { useConfirm } from '@/components/ConfirmDialog';
+import { useToast } from '@/components/Toast';
 import { Icon } from '@/components/Icon';
 import { SearchSelect, TextInput } from '@/components/form';
 import { Card, CHead, EmptyMsg, Facts, LRow, Modal, Tag } from '@/components/ui';
@@ -50,24 +52,46 @@ export function SalesOrderDetail() {
 	const { call: closeOrder, loading: closing } = useFrappePostCall(API.closeOrder);
 	const { call: reopenOrder, loading: reopening } = useFrappePostCall(API.reopenOrder);
 	const [actionErr, setActionErr] = useState<string | null>(null);
+	const confirm = useConfirm();
+	const toast = useToast();
 
 	async function onAmend() {
+		if (
+			!(await confirm({
+				title: 'Amend sales order',
+				message: 'Amending cancels this order and opens an editable copy. Continue?',
+				confirmLabel: 'Amend',
+			}))
+		)
+			return;
 		setActionErr(null);
 		try {
 			const r = await amendDoc({ doctype: 'Sales Order', name: id });
+			toast.ok('Amended draft created');
 			navigate('/sales-orders/' + r.message.name + '/edit');
 		} catch (e) {
 			setActionErr(parseServerError(e));
+			toast.err(parseServerError(e));
 		}
 	}
 
 	async function onCloseOrder() {
+		if (
+			!(await confirm({
+				title: 'Close sales order',
+				message: 'Closing stops further billing and delivery on this order. You can re-open it later.',
+				confirmLabel: 'Close order',
+			}))
+		)
+			return;
 		setActionErr(null);
 		try {
 			await closeOrder({ doctype: 'Sales Order', name: id });
 			await mutate();
+			toast.ok('Sales order closed');
 		} catch (e) {
 			setActionErr(parseServerError(e));
+			toast.err(parseServerError(e));
 		}
 	}
 
@@ -76,8 +100,10 @@ export function SalesOrderDetail() {
 		try {
 			await reopenOrder({ doctype: 'Sales Order', name: id });
 			await mutate();
+			toast.ok('Sales order re-opened');
 		} catch (e) {
 			setActionErr(parseServerError(e));
+			toast.err(parseServerError(e));
 		}
 	}
 
@@ -102,12 +128,22 @@ export function SalesOrderDetail() {
 	const [poErr, setPoErr] = useState<string | null>(null);
 
 	async function onSubmitOrder() {
+		if (
+			!(await confirm({
+				title: 'Submit sales order',
+				message: 'Submit this order? Once submitted it must be amended to change.',
+				confirmLabel: 'Submit',
+			}))
+		)
+			return;
 		setActionErr(null);
 		try {
 			await submitSo({ name: id });
 			mutate();
+			toast.ok('Sales order submitted');
 		} catch (e) {
 			setActionErr(parseServerError(e));
+			toast.err(parseServerError(e));
 		}
 	}
 
@@ -166,6 +202,7 @@ export function SalesOrderDetail() {
 			setPoOpen(false);
 			void proc.mutate();
 			const made = result.message.purchase_orders;
+			toast.ok(made.length === 1 ? 'Purchase order created' : `${made.length} purchase orders created`);
 			if (made.length === 1) navigate('/purchases/' + made[0].name);
 		} catch (e) {
 			setPoErr(parseServerError(e));

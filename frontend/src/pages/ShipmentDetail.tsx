@@ -7,6 +7,8 @@ import {
 	useFrappeUpdateDoc,
 } from 'frappe-react-sdk';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useConfirm } from '@/components/ConfirmDialog';
+import { useToast } from '@/components/Toast';
 import { DocumentChecklist } from '@/components/DocumentChecklist';
 import { IncentiveModal, RealizationModal } from '@/components/financeModals';
 import { PackEditor, editToPayload, packToEdit, type PackEdit } from '@/components/packEditor';
@@ -66,6 +68,8 @@ export function ShipmentDetail() {
 	const [finNonce, setFinNonce] = useState(0);
 	const refreshFinance = () => setFinNonce((n) => n + 1);
 	const [actionErr, setActionErr] = useState<string | null>(null);
+	const confirm = useConfirm();
+	const toast = useToast();
 	const [editing, setEditing] = useState(false);
 	const [editingShipment, setEditingShipment] = useState(false);
 
@@ -157,12 +161,22 @@ export function ShipmentDetail() {
 
 	async function onComplete() {
 		if (!nextPending) return;
+		if (
+			!(await confirm({
+				title: 'Complete milestone',
+				message: `Mark "${nextPending.milestone}" as completed? Completing the departure milestone posts the goods out of stock.`,
+				confirmLabel: 'Complete',
+			}))
+		)
+			return;
 		setActionErr(null);
 		try {
 			await setMilestone({ shipment: id, row: nextPending.name, completed: 1 });
 			mutate();
+			toast.ok(`Milestone "${nextPending.milestone}" completed`);
 		} catch (e) {
 			setActionErr(parseServerError(e));
+			toast.err(parseServerError(e));
 		}
 	}
 

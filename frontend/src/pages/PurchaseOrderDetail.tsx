@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useFrappeGetCall, useFrappePostCall, useFrappeUpdateDoc } from 'frappe-react-sdk';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { AttachmentsCard } from '@/components/AttachmentsCard';
+import { useConfirm } from '@/components/ConfirmDialog';
+import { useToast } from '@/components/Toast';
 import { EmailComposer } from '@/components/EmailComposer';
 import { Icon } from '@/components/Icon';
 import { Field, TextInput } from '@/components/form';
@@ -44,6 +46,8 @@ export function PurchaseOrderDetail() {
 	const [invoiceErr, setInvoiceErr] = useState<string | null>(null);
 	const [invoiceNo, setInvoiceNo] = useState('');
 	const [invoiceDate, setInvoiceDate] = useState('');
+	const confirm = useConfirm();
+	const toast = useToast();
 
 	const po = data?.message.po;
 
@@ -58,32 +62,62 @@ export function PurchaseOrderDetail() {
 	}, [po]);
 
 	async function onSubmitOrder() {
+		if (
+			!(await confirm({
+				title: 'Submit purchase order',
+				message: 'Submit this order? Once submitted it must be amended to change.',
+				confirmLabel: 'Submit',
+			}))
+		)
+			return;
 		setActionErr(null);
 		try {
 			await submitPo({ name: id });
 			await mutate();
+			toast.ok('Purchase order submitted');
 		} catch (e) {
 			setActionErr(parseServerError(e));
+			toast.err(parseServerError(e));
 		}
 	}
 
 	async function onAmend() {
+		if (
+			!(await confirm({
+				title: 'Amend purchase order',
+				message: 'Amending cancels this order and opens an editable copy. Continue?',
+				confirmLabel: 'Amend',
+			}))
+		)
+			return;
 		setActionErr(null);
 		try {
 			const r = await amendDoc({ doctype: 'Purchase Order', name: id });
+			toast.ok('Amended draft created');
 			navigate('/purchases/' + r.message.name + '/edit');
 		} catch (e) {
 			setActionErr(parseServerError(e));
+			toast.err(parseServerError(e));
 		}
 	}
 
 	async function onCloseOrder() {
+		if (
+			!(await confirm({
+				title: 'Close purchase order',
+				message: 'Closing stops further receipts/billing on this order. You can re-open it later.',
+				confirmLabel: 'Close order',
+			}))
+		)
+			return;
 		setActionErr(null);
 		try {
 			await closeOrder({ doctype: 'Purchase Order', name: id });
 			await mutate();
+			toast.ok('Purchase order closed');
 		} catch (e) {
 			setActionErr(parseServerError(e));
+			toast.err(parseServerError(e));
 		}
 	}
 
@@ -92,8 +126,10 @@ export function PurchaseOrderDetail() {
 		try {
 			await reopenOrder({ doctype: 'Purchase Order', name: id });
 			await mutate();
+			toast.ok('Purchase order re-opened');
 		} catch (e) {
 			setActionErr(parseServerError(e));
+			toast.err(parseServerError(e));
 		}
 	}
 

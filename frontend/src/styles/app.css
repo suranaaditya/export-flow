@@ -607,3 +607,18 @@ footer b { color: var(--fg-3); font-weight: 500 }
 .hbar { position: relative; height: 18px; border-radius: 5px; background: var(--bg-sunken); overflow: hidden; display: flex; align-items: center }
 .hbar i { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(90deg, var(--iris-tint), var(--cyan-tint)); border-radius: 5px }
 .hbar span { position: relative; font-size: 11px; color: var(--fg-2); padding-left: 7px; font-variant-numeric: tabular-nums }
+
+/* --- toast notifications + confirm dialog (#22) --- */
+.toaststack { position: fixed; right: 18px; bottom: 18px; z-index: 200; display: flex; flex-direction: column; gap: 8px; max-width: 380px; pointer-events: none }
+.toast { pointer-events: auto; display: flex; align-items: center; gap: 9px; padding: 10px 12px; border-radius: 12px; background: var(--surface-1); border: 1px solid var(--hairline); box-shadow: 0 10px 28px rgba(0,0,0,.14); font-size: 12.5px; color: var(--fg-1); animation: toastIn .25s var(--spring) }
+.toast svg { flex: 0 0 auto }
+.toast.ok svg { color: var(--ok) }
+.toast.err { border-color: var(--err) }
+.toast.err svg { color: var(--err) }
+.toast.info svg { color: var(--pending) }
+.toastmsg { flex: 1 1 auto; line-height: 1.4 }
+.toastx { background: none; border: 0; padding: 2px; margin: -2px -2px -2px 2px; cursor: pointer; color: var(--fg-3); display: inline-flex }
+.toastx:hover { color: var(--fg-1) }
+@keyframes toastIn { from { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: translateY(0) } }
+@media (prefers-reduced-motion: reduce) { .toast { animation: none } }
+.confirmbody { padding: 2px 2px 14px; font-size: 13px; color: var(--fg-2); line-height: 1.55 }

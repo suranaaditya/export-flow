@@ -2,6 +2,8 @@ import { FrappeProvider, useFrappeAuth } from 'frappe-react-sdk';
 import type { ReactNode } from 'react';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { AppShell } from '@/components/AppShell';
+import { ConfirmProvider } from '@/components/ConfirmDialog';
+import { ToastProvider } from '@/components/Toast';
 import { ThemeProvider } from '@/lib/theme';
 import { Compliance } from '@/pages/Compliance';
 import { Dashboard } from '@/pages/Dashboard';
@@ -51,6 +53,8 @@ export default function App() {
 		// injects boot/sitename Raven-style and passes siteName/socketPort.
 		<FrappeProvider enableSocket={false}>
 			<ThemeProvider>
+				<ToastProvider>
+				<ConfirmProvider>
 				<AuthGate>
 					<BrowserRouter basename="/exportflow">
 						<Routes>
@@ -88,6 +92,8 @@ export default function App() {
 						</Routes>
 					</BrowserRouter>
 				</AuthGate>
+				</ConfirmProvider>
+				</ToastProvider>
 			</ThemeProvider>
 		</FrappeProvider>
 	);

@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useFrappeGetCall, useFrappePostCall } from 'frappe-react-sdk';
 import { Link, useParams } from 'react-router-dom';
+import { useConfirm } from '@/components/ConfirmDialog';
+import { useToast } from '@/components/Toast';
 import { Icon } from '@/components/Icon';
 import { Card, CHead, Tag } from '@/components/ui';
 import { API, parseServerError, type ReturnDetailData } from '@/lib/api';
@@ -21,24 +23,47 @@ export function MaterialReturnDetail() {
 	const { call: confirmReturn, loading: confirming } = useFrappePostCall(API.submitReturn);
 	const { call: cancelReturn, loading: cancelling } = useFrappePostCall(API.cancelReturn);
 	const [actionErr, setActionErr] = useState<string | null>(null);
+	const confirm = useConfirm();
+	const toast = useToast();
 
 	async function onConfirm() {
+		if (
+			!(await confirm({
+				title: 'Confirm material return',
+				message: 'Confirm this return? It posts the returned quantities out of stock and reopens them on the purchase order.',
+				confirmLabel: 'Confirm return',
+			}))
+		)
+			return;
 		setActionErr(null);
 		try {
 			await confirmReturn({ name: id });
 			await mutate();
+			toast.ok('Material return confirmed');
 		} catch (e) {
 			setActionErr(parseServerError(e));
+			toast.err(parseServerError(e));
 		}
 	}
 
 	async function onCancel() {
+		if (
+			!(await confirm({
+				title: 'Cancel material return',
+				message: 'Cancel this material return? Any stock it reversed will be restored.',
+				confirmLabel: 'Cancel return',
+				danger: true,
+			}))
+		)
+			return;
 		setActionErr(null);
 		try {
 			await cancelReturn({ name: id });
 			await mutate();
+			toast.ok('Material return cancelled');
 		} catch (e) {
 			setActionErr(parseServerError(e));
+			toast.err(parseServerError(e));
 		}
 	}
 

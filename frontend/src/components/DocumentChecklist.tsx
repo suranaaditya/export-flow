@@ -6,6 +6,7 @@ import {
 	useFrappePostCall,
 } from 'frappe-react-sdk';
 import { Link } from 'react-router-dom';
+import { useConfirm } from '@/components/ConfirmDialog';
 import { Icon } from '@/components/Icon';
 import { Field, SearchSelect, SelectInput, TextArea, TextInput } from '@/components/form';
 import { Card, CHead, EmptyMsg, Modal, Tag } from '@/components/ui';
@@ -118,6 +119,7 @@ export function DocumentChecklist({
 	);
 	const [genName, setGenName] = useState<string | null>(null);
 	const [genErr, setGenErr] = useState<{ name: string; msg: string } | null>(null);
+	const confirm = useConfirm();
 	const [bulkBusy, setBulkBusy] = useState(false);
 	const [bulkMsg, setBulkMsg] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null);
 
@@ -147,6 +149,14 @@ export function DocumentChecklist({
 	}
 
 	async function onGenerateAll() {
+		if (
+			!(await confirm({
+				title: 'Generate all documents',
+				message: 'Generate every pending document for this shipment? Existing generated PDFs are refreshed.',
+				confirmLabel: 'Generate all',
+			}))
+		)
+			return;
 		setGenErr(null);
 		setBulkMsg(null);
 		setBulkBusy(true);

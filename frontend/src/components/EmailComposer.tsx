@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useFrappePostCall } from 'frappe-react-sdk';
+import { useConfirm } from '@/components/ConfirmDialog';
 import { CheckInput, Field, TextArea, TextInput } from '@/components/form';
 import { Icon } from '@/components/Icon';
 import { Modal } from '@/components/ui';
@@ -26,6 +27,7 @@ export function EmailComposer({
 		message: { sent_to: string[]; sandbox: boolean; intended: string };
 	}>(API.emailSend);
 
+	const confirm = useConfirm();
 	const [loading, setLoading] = useState(true);
 	const [drafting, setDrafting] = useState(false);
 	const [sending, setSending] = useState(false);
@@ -83,6 +85,14 @@ export function EmailComposer({
 	}
 
 	async function runSend() {
+		if (
+			!(await confirm({
+				title: 'Send email',
+				message: `Send this email to ${to || 'the recipient'}${cc ? ` (cc ${cc})` : ''}?`,
+				confirmLabel: 'Send',
+			}))
+		)
+			return;
 		setSending(true);
 		setErr(null);
 		try {
