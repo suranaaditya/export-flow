@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useFrappeGetCall, useFrappePostCall, useFrappeUpdateDoc } from 'frappe-react-sdk';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { AttachmentsCard } from '@/components/AttachmentsCard';
+import { BusyOverlay } from '@/components/BusyOverlay';
 import { useConfirm } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/Toast';
 import { EmailComposer } from '@/components/EmailComposer';
@@ -211,6 +212,7 @@ export function PurchaseOrderDetail() {
 
 	return (
 		<main className="tight">
+			<BusyOverlay show={amending} message="Amending order — this can take a few moments…" />
 			<div className="eyebrow">Buying · Purchase order</div>
 			<div className="crumb" style={{ marginTop: 6 }}>
 				<Link to="/purchases">Purchases</Link> / <span className="data">{id}</span>

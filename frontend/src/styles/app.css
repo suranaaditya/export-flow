@@ -622,3 +622,15 @@ footer b { color: var(--fg-3); font-weight: 500 }
 @keyframes toastIn { from { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: translateY(0) } }
 @media (prefers-reduced-motion: reduce) { .toast { animation: none } }
 .confirmbody { padding: 2px 2px 14px; font-size: 13px; color: var(--fg-2); line-height: 1.55 }
+
+/* --- blocking busy overlay for slow actions (e.g. Amend) --- */
+.busyoverlay { position: fixed; inset: 0; z-index: 300; display: flex; align-items: center; justify-content: center;
+	background: rgba(15, 20, 32, .42); backdrop-filter: blur(2px); animation: toastIn .18s var(--ease) }
+.busycard { display: flex; flex-direction: column; align-items: center; gap: 13px; padding: 24px 30px;
+	background: var(--surface-1); border: 1px solid var(--hairline); border-radius: 16px;
+	box-shadow: 0 18px 48px rgba(0,0,0,.22) }
+.busyspin { width: 30px; height: 30px; border-radius: 50%; border: 3px solid var(--hairline);
+	border-top-color: var(--iris); animation: busyspin .8s linear infinite }
+.busymsg { font-size: 13px; color: var(--fg-1); font-weight: 500 }
+@keyframes busyspin { to { transform: rotate(360deg) } }
+@media (prefers-reduced-motion: reduce) { .busyspin { animation-duration: 2s } .busyoverlay { animation: none } }

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useFrappeGetCall, useFrappeGetDocList, useFrappePostCall } from 'frappe-react-sdk';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { AttachmentsCard } from '@/components/AttachmentsCard';
+import { BusyOverlay } from '@/components/BusyOverlay';
 import { useConfirm } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/Toast';
 import { Icon } from '@/components/Icon';
@@ -272,6 +273,7 @@ export function SalesOrderDetail() {
 
 	return (
 		<main className="tight">
+			<BusyOverlay show={amending} message="Amending order — this can take a few moments…" />
 			<div className="eyebrow">Selling · Sales order</div>
 			<div className="crumb" style={{ marginTop: 6 }}>
 				<Link to="/sales-orders">Sales orders</Link> / <span className="data">{id}</span>
