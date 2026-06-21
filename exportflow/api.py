@@ -1444,6 +1444,52 @@ def get_po_detail(name: str) -> dict:
 	}
 
 
+# --- generic multi-file attachments (SO / PO supporting docs, feedback #17) ------
+
+_ATTACHABLE_DOCTYPES = ("Sales Order", "Purchase Order")
+
+
+@frappe.whitelist()
+def list_doc_attachments(doctype: str, name: str) -> list[dict]:
+	"""Files attached to a Sales/Purchase Order — backs the multi-file 'Attachments'
+	card. Read-gated on the parent document."""
+	if doctype not in _ATTACHABLE_DOCTYPES:
+		frappe.throw(_("{0} does not support attachments here").format(doctype))
+	frappe.has_permission(doctype, "read", doc=name, throw=True)
+	return frappe.get_all(
+		"File",
+		filters={"attached_to_doctype": doctype, "attached_to_name": name},
+		fields=["name", "file_name", "file_url", "is_private", "file_size", "creation"],
+		order_by="creation desc",
+	)
+
+
+@frappe.whitelist()
+def remove_doc_attachment(doctype: str, name: str, file_url: str) -> dict:
+	"""Delete a file attached to a Sales/Purchase Order. Write-gated on the parent;
+	only removes a File that is actually attached to that document."""
+	if doctype not in _ATTACHABLE_DOCTYPES:
+		frappe.throw(_("{0} does not support attachments here").format(doctype))
+	# orders are usually submitted (docstatus=1, not writable), but their files must
+	# stay manageable — so gate removal on being an editor of the doctype (the same
+	# capability that lets a user attach), plus read on this specific document
+	frappe.has_permission(doctype, "read", doc=name, throw=True)
+	if not frappe.has_permission(doctype, "write"):
+		frappe.throw(
+			_("You do not have permission to manage attachments on {0}").format(doctype),
+			frappe.PermissionError,
+		)
+	file_name = frappe.db.get_value(
+		"File",
+		{"attached_to_doctype": doctype, "attached_to_name": name, "file_url": file_url},
+		"name",
+	)
+	if not file_name:
+		frappe.throw(_("That file is not attached to {0}").format(name))
+	frappe.delete_doc("File", file_name, ignore_permissions=True)
+	return {"ok": True}
+
+
 # --- Goods Receipt Note (receive PO goods into a warehouse; quantity stock-in) --
 
 

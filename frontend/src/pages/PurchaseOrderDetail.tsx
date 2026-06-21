@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useFrappeGetCall, useFrappePostCall, useFrappeUpdateDoc } from 'frappe-react-sdk';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { AttachmentsCard } from '@/components/AttachmentsCard';
 import { EmailComposer } from '@/components/EmailComposer';
 import { Icon } from '@/components/Icon';
 import { Field, TextInput } from '@/components/form';
@@ -470,6 +471,8 @@ export function PurchaseOrderDetail() {
 							]}
 						/>
 					</Card>
+
+					<AttachmentsCard doctype="Purchase Order" name={id} canWrite={!!can.write} />
 				</div>
 			</div>
 

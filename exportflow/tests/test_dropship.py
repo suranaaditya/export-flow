@@ -285,6 +285,34 @@ class TestDropShipFlow(IntegrationTestCase):
 		self.assertEqual(excl["draft_qty"], 0, "this PO's own draft is excluded")
 		self.assertEqual(excl["remaining"], 100)
 
+	def test_doc_attachments_list_and_remove(self):
+		"""Feedback #17: generic multi-file attachments on a Sales/Purchase Order —
+		list returns attached files, remove deletes only an attached file, and the
+		doctype allow-list is enforced."""
+		from frappe.utils.file_manager import save_file
+
+		from exportflow.api import list_doc_attachments, remove_doc_attachment
+
+		sfx = _suffix()
+		supplier = make_supplier(f"_Test EF Sup Att {sfx}")
+		item = make_dropship_item(f"_Test EF Item Att {sfx}", supplier, self.company)
+		customer = make_customer(f"_Test EF Cust Att {sfx}")
+		so = make_dropship_so(customer, self.company, [{"item_code": item, "qty": 5}])
+
+		filedoc = save_file("spec.txt", "specification text", "Sales Order", so.name, is_private=1)
+		rows = list_doc_attachments("Sales Order", so.name)
+		self.assertEqual(len(rows), 1)
+		# frappe appends a hash to the stored name; match the file we just attached
+		self.assertEqual(rows[0]["file_url"], filedoc.file_url)
+		self.assertTrue(rows[0]["file_name"].startswith("spec"))
+
+		remove_doc_attachment("Sales Order", so.name, filedoc.file_url)
+		self.assertEqual(len(list_doc_attachments("Sales Order", so.name)), 0)
+		self.assertFalse(frappe.db.exists("File", filedoc.name), "the File row is deleted")
+
+		with self.assertRaises(frappe.ValidationError):
+			list_doc_attachments("Item", item)
+
 	def test_no_stock_movement_through_delivery(self):
 		"""Spec §4.1: the full drop-ship leg — SO → PO → supplier delivers
 		directly — produces no Delivery Note and no stock ledger entries."""

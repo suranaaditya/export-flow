@@ -196,6 +196,8 @@ export const API = {
 	submitGrn: 'exportflow.api.submit_grn',
 	cancelGrn: 'exportflow.api.cancel_grn',
 	attachGrnInvoice: 'exportflow.api.attach_grn_invoice',
+	listDocAttachments: 'exportflow.api.list_doc_attachments',
+	removeDocAttachment: 'exportflow.api.remove_doc_attachment',
 	grnPacks: 'exportflow.api.get_grn_packs',
 	receivablePos: 'exportflow.api.get_receivable_pos',
 	addGrnDocument: 'exportflow.api.add_grn_document',
@@ -651,6 +653,16 @@ export interface POTotals {
 	grand_total: number;
 	taxes: POTaxRow[];
 	by_item: POItemTax[];
+}
+
+/** A file attached to a Sales/Purchase Order (multi-file attachments card). */
+export interface DocAttachment {
+	name: string;
+	file_name: string;
+	file_url: string;
+	is_private: 0 | 1;
+	file_size: number;
+	creation: string;
 }
 
 /** Frappe print endpoints, generic. */
