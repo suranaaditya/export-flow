@@ -36,6 +36,7 @@ export interface NewSOContext {
 	countries: string[];
 	item_tax_templates: string[];
 	terms_templates: string[];
+	payment_terms_templates: string[];
 }
 
 export interface ItemInfo {
@@ -154,6 +155,7 @@ export const API = {
 	setMilestone: 'exportflow.api.set_shipment_milestone',
 	newPoContext: 'exportflow.api.get_new_po_context',
 	termsText: 'exportflow.api.get_terms_text',
+	paymentTermsText: 'exportflow.api.get_payment_terms_text',
 	createPoDraft: 'exportflow.api.create_purchase_order_draft',
 	previewPo: 'exportflow.api.preview_purchase_order',
 	poExchangeRate: 'exportflow.api.get_po_exchange_rate',
@@ -625,6 +627,7 @@ export interface NewPOContext {
 	}[];
 	items: { name: string; item_name: string; stock_uom: string }[];
 	terms_templates: string[];
+	payment_terms_templates: string[];
 	taxes_templates: { name: string; is_default: 0 | 1 }[];
 	accounts: { name: string; account_name: string }[];
 	sales_orders: { name: string; customer_name: string }[];
@@ -743,6 +746,7 @@ export interface PODetailData {
 		taxes_and_charges: string | null;
 		tc_name: string | null;
 		terms: string | null;
+		payment_terms_narrative: string | null;
 	};
 	totals: POTotals;
 	items: {

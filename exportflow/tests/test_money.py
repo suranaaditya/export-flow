@@ -384,13 +384,13 @@ class TestMoneyFlow(IntegrationTestCase):
 		self.assertEqual(get_so_money_summary(so.name)["so"]["tc_name"], selling_tc.name)
 
 	def test_seed_terms_templates_idempotent(self):
-		"""Seeding sample sales/purchase terms is a no-op on re-run and tags each
-		row to the right side (feedback point #2)."""
-		from exportflow.setup import SAMPLE_TERMS, seed_terms_templates
+		"""Seeding sample T&C templates is a no-op on re-run and tags each row to the
+		right side (feedback point #2)."""
+		from exportflow.setup import STANDARD_TC, seed_terms_templates
 
 		seed_terms_templates()
 		seed_terms_templates()  # second run must not error or duplicate
-		for title, selling, buying, _terms in SAMPLE_TERMS:
+		for title, selling, buying, _terms in STANDARD_TC:
 			self.assertTrue(frappe.db.exists("Terms and Conditions", title), f"{title} seeded")
 			row = frappe.db.get_value(
 				"Terms and Conditions", title, ["selling", "buying"], as_dict=True

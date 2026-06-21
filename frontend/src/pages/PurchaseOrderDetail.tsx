@@ -508,6 +508,15 @@ export function PurchaseOrderDetail() {
 						</Card>
 					)}
 
+					{po.payment_terms_narrative && (
+						<Card>
+							<CHead icon="banknote" title="Payment terms" />
+							<div className="c2" style={{ padding: '12px 18px', whiteSpace: 'pre-wrap' }}>
+								{po.payment_terms_narrative}
+							</div>
+						</Card>
+					)}
+
 					{(po.tc_name || po.terms) && (
 						<Card>
 							<CHead icon="file-text" title="Terms & conditions" count={po.tc_name ?? undefined} />

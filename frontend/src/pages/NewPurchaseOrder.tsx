@@ -19,6 +19,7 @@ import { MASTERS, STATIC_OPTIONS, type OptionSource } from '@/lib/masters';
 const SUPPLIER_DEF = MASTERS.find((m) => m.doctype === 'Supplier')!;
 const ITEM_DEF = MASTERS.find((m) => m.doctype === 'Item')!;
 const TC_DEF = MASTERS.find((m) => m.doctype === 'Terms and Conditions')!;
+const PAYMENT_DEF = MASTERS.find((m) => m.doctype === 'Export Payment Term')!;
 
 /** A PO line — SO-linked rows carry the deal references, free rows don't. */
 interface PORow {
@@ -71,13 +72,18 @@ export function NewPurchaseOrder() {
 	const [requiredBy, setRequiredBy] = useState('');
 	const [tcName, setTcName] = useState('');
 	const [terms, setTerms] = useState('');
+	const [paymentTerms, setPaymentTerms] = useState('');
+	// payment-terms picker selection — display-only within the session (the chosen
+	// template just fills the narrative, which is the saved/printed value; the ref is
+	// not persisted, so this resets to blank on edit)
+	const [ptName, setPtName] = useState('');
 	const [taxesTemplate, setTaxesTemplate] = useState('');
 	const [taxDefaulted, setTaxDefaulted] = useState(false);
 	const [charges, setCharges] = useState<ChargeRow[]>([]);
 	const [rows, setRows] = useState<PORow[]>([]);
 	const [soPick, setSoPick] = useState(searchParams.get('so') ?? '');
 	const [err, setErr] = useState<string | null>(null);
-	const [quickCreate, setQuickCreate] = useState<'supplier' | 'item' | 'terms' | null>(null);
+	const [quickCreate, setQuickCreate] = useState<'supplier' | 'item' | 'terms' | 'payment' | null>(null);
 	const [preview, setPreview] = useState<POTotals | null>(null);
 	const [currency, setCurrency] = useState('');
 	const [convRate, setConvRate] = useState('');
@@ -114,6 +120,7 @@ export function NewPurchaseOrder() {
 		setRequiredBy(d.po.schedule_date ?? '');
 		setTcName(d.po.tc_name ?? '');
 		setTerms(d.po.terms ?? '');
+		setPaymentTerms(d.po.payment_terms_narrative ?? '');
 		setTaxesTemplate(d.po.taxes_and_charges ?? '');
 		setTaxDefaulted(true);
 		setCharges(
@@ -181,6 +188,7 @@ export function NewPurchaseOrder() {
 	);
 
 	const { call: fetchTerms } = useFrappePostCall<{ message: string }>(API.termsText);
+	const { call: fetchPaymentTerms } = useFrappePostCall<{ message: string }>(API.paymentTermsText);
 	const { call: fetchItemInfo } = useFrappePostCall<{ message: { stock_uom: string; item_name: string } }>(
 		API.itemInfo,
 	);
@@ -216,6 +224,7 @@ export function NewPurchaseOrder() {
 				})),
 			tc_name: tcName || null,
 			terms,
+			payment_terms_narrative: paymentTerms,
 			submit: submit ? 1 : 0,
 			items: rows.map((r) => ({
 				item_code: r.item_code,
@@ -277,6 +286,18 @@ export function NewPurchaseOrder() {
 		try {
 			const text = (await fetchTerms({ template: v })).message;
 			setTerms(text.replace(/<[^>]*>/g, ''));
+		} catch {
+			// template text is a convenience — leave the field as typed
+		}
+	}
+
+	async function onPaymentTemplate(v: string) {
+		setPtName(v);
+		if (!v) return;
+		try {
+			// Export Payment Term.terms is plain text (printed via | e) — assign as-is,
+			// no HTML strip (unlike the rich-text T&C path).
+			setPaymentTerms((await fetchPaymentTerms({ template: v })).message);
 		} catch {
 			// template text is a convenience — leave the field as typed
 		}
@@ -457,6 +478,7 @@ export function NewPurchaseOrder() {
 	const freeItems = (ctx?.items ?? []).map((i) => ({ value: i.name, label: i.item_name, sub: i.stock_uom }));
 	const taxTemplateOptions = (ctx?.taxes_templates ?? []).map((t) => ({ value: t.name }));
 	const termsOptions = (ctx?.terms_templates ?? []).map((t) => ({ value: t }));
+	const paymentTermsOptions = (ctx?.payment_terms_templates ?? []).map((t) => ({ value: t }));
 
 	const totals = preview;
 	// only the lines that actually bear tax — keeps the per-item breakup honest
@@ -735,6 +757,21 @@ export function NewPurchaseOrder() {
 					{/* ---- terms (after items & taxes, per ERPNext) ---- */}
 					<div className="docgrp">Terms &amp; conditions</div>
 					<div className="formgrid">
+						<Field label="Payment terms template" hint="Payment templates — manage in Settings">
+							<SearchSelect
+								value={ptName}
+								onChange={(v) => void onPaymentTemplate(v)}
+								options={paymentTermsOptions}
+								placeholder="Search payment templates…"
+								onCreate={() => setQuickCreate('payment')}
+								createLabel="New payment terms template"
+							/>
+						</Field>
+						<div className="span2">
+							<Field label="Payment terms" hint="Picked from a template or typed; this text prints">
+								<TextArea value={paymentTerms} onChange={setPaymentTerms} rows={2} placeholder="e.g. 30% advance, balance against goods receipt…" />
+							</Field>
+						</div>
 						<Field label="Terms template" hint="Manage templates in Settings">
 							<SearchSelect
 								value={tcName}
@@ -747,7 +784,7 @@ export function NewPurchaseOrder() {
 						</Field>
 						<div className="span2">
 							<Field label="Terms text">
-								<TextArea value={terms} onChange={setTerms} rows={4} placeholder="Payment, delivery, quality and documentation conditions…" />
+								<TextArea value={terms} onChange={setTerms} rows={4} placeholder="Delivery, quality, jurisdiction and documentation conditions…" />
 							</Field>
 						</div>
 					</div>
@@ -827,10 +864,18 @@ export function NewPurchaseOrder() {
 
 			{quickCreate !== null && (
 				<MasterModal
-					def={quickCreate === 'supplier' ? SUPPLIER_DEF : quickCreate === 'item' ? ITEM_DEF : TC_DEF}
+					def={
+						quickCreate === 'supplier'
+							? SUPPLIER_DEF
+							: quickCreate === 'item'
+								? ITEM_DEF
+								: quickCreate === 'payment'
+									? PAYMENT_DEF
+									: TC_DEF
+					}
 					options={masterOptions}
 					record={null}
-					defaults={quickCreate === 'terms' ? { buying: true } : undefined}
+					defaults={quickCreate === 'terms' || quickCreate === 'payment' ? { buying: true } : undefined}
 					onClose={() => setQuickCreate(null)}
 					onSaved={(name) => {
 						const which = quickCreate;
@@ -838,6 +883,7 @@ export function NewPurchaseOrder() {
 						void ctxResult.mutate();
 						if (which === 'supplier') onSupplier(name);
 						else if (which === 'item') void addFreeRow(name);
+						else if (which === 'payment') void onPaymentTemplate(name);
 						else void onTemplate(name);
 					}}
 				/>

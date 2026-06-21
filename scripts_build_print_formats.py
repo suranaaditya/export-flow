@@ -597,6 +597,7 @@ EFX_TXN_TOTALS = """
 """
 
 _TERMS = """
+  {% if doc.get("payment_terms_narrative") %}<div class="gd" style="border-top:0.7px solid #b9bec8;white-space:pre-wrap;font-size:9.6px"><span class="lbl">Payment terms</span>{{ doc.payment_terms_narrative | e }}</div>{% endif %}
   {% if doc.terms %}<div class="gd" style="border-top:0.7px solid #b9bec8;white-space:pre-wrap;font-size:9.6px"><span class="lbl">Terms &amp; conditions{% if doc.tc_name %} &middot; {{ doc.tc_name }}{% endif %}</span>{{ doc.terms | striptags }}</div>{% endif %}
 """
 
@@ -628,7 +629,6 @@ SALES_ORDER = (
           <tr><td class="lbl" style="border:0;padding:0 0 1px">Currency / incoterm</td></tr>
           <tr><td style="border:0;padding:0 0 3px"><span class="mono">{{ doc.currency }}</span>{% if doc.incoterm %} &middot; {{ doc.incoterm }}{% if doc.named_place %} ({{ doc.named_place }}){% endif %}{% endif %}</td></tr>
           {% if doc.po_no %}<tr><td class="lbl" style="border:0;padding:0 0 1px">Buyer's ref</td></tr><tr><td style="border:0;padding:0 0 3px"><span class="mono">{{ doc.po_no }}</span></td></tr>{% endif %}
-          {% if doc.payment_terms_template %}<tr><td class="lbl" style="border:0;padding:0 0 1px">Payment terms</td></tr><tr><td style="border:0;padding:0">{{ doc.payment_terms_template }}</td></tr>{% endif %}
         </table>
       </td>
     </tr>
@@ -774,6 +774,9 @@ if __name__ == "__main__":
 	# the PO format alone changed (per-line spec/packaging, feedback #13) — give it
 	# its own newer stamp so only it re-syncs, not all 13 formats
 	PO_REDESIGN = "2026-06-21 12:00:00.000000"
+	# SO + PO grew a dedicated "Payment terms" line (separate from T&C) — bump both
+	# so only those two re-sync
+	PAYMENT_TERMS_REDESIGN = "2026-06-22 09:00:00.000000"
 	write_format(
 		"exportflow_commercial_invoice", "ExportFlow Commercial Invoice", COMMERCIAL_INVOICE, modified=REDESIGN
 	)
@@ -790,11 +793,11 @@ if __name__ == "__main__":
 	write_format("exportflow_export_value_declaration", "ExportFlow Export Value Declaration", EXPORT_VALUE_DECL, modified=REDESIGN)
 	write_format(
 		"exportflow_sales_order", "ExportFlow Sales Order", SALES_ORDER,
-		doc_type="Sales Order", modified=REDESIGN,
+		doc_type="Sales Order", modified=PAYMENT_TERMS_REDESIGN,
 	)
 	write_format(
 		"exportflow_purchase_order", "ExportFlow Purchase Order", PURCHASE_ORDER,
-		doc_type="Purchase Order", modified=PO_REDESIGN,
+		doc_type="Purchase Order", modified=PAYMENT_TERMS_REDESIGN,
 	)
 	write_format(
 		"pro_forma_invoice", "Pro Forma Invoice", PRO_FORMA,

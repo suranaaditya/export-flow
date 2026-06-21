@@ -228,6 +228,17 @@
  },
  {
   "doctype": "Custom Field",
+  "name": "Purchase Order-payment_terms_narrative",
+  "dt": "Purchase Order",
+  "fieldname": "payment_terms_narrative",
+  "fieldtype": "Small Text",
+  "label": "Payment Terms Narrative",
+  "insert_after": "terms",
+  "description": "Payment terms agreed with the supplier, e.g. 30% advance, balance against goods receipt.",
+  "module": "ExportFlow"
+ },
+ {
+  "doctype": "Custom Field",
   "name": "Purchase Order Item-specification",
   "dt": "Purchase Order Item",
   "fieldname": "specification",

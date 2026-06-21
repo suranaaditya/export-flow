@@ -12,6 +12,7 @@ import { MASTERS, STATIC_OPTIONS, type OptionSource } from '@/lib/masters';
 const CUSTOMER_DEF = MASTERS.find((m) => m.doctype === 'Customer')!;
 const ITEM_DEF = MASTERS.find((m) => m.doctype === 'Item')!;
 const TC_DEF = MASTERS.find((m) => m.doctype === 'Terms and Conditions')!;
+const PAYMENT_DEF = MASTERS.find((m) => m.doctype === 'Export Payment Term')!;
 
 interface DealRow {
 	item_code: string;
@@ -43,6 +44,7 @@ export function NewSalesOrder() {
 
 	const { call: fetchItemInfo } = useFrappePostCall<{ message: ItemInfo }>(API.itemInfo);
 	const { call: fetchTerms } = useFrappePostCall<{ message: string }>(API.termsText);
+	const { call: fetchPaymentTerms } = useFrappePostCall<{ message: string }>(API.paymentTermsText);
 	const { call: createSo, loading: saving } = useFrappePostCall<{
 		message: { name: string; docstatus: number };
 	}>(API.createSo);
@@ -60,11 +62,15 @@ export function NewSalesOrder() {
 	const [incoterm, setIncoterm] = useState('');
 	const [namedPlace, setNamedPlace] = useState('');
 	const [paymentTerms, setPaymentTerms] = useState('');
+	// payment-terms picker selection — display-only within the session (the chosen
+	// template just fills the narrative, which is the saved/printed value; the ref is
+	// not persisted, so this resets to blank on edit)
+	const [ptName, setPtName] = useState('');
 	const [tcName, setTcName] = useState('');
 	const [tcText, setTcText] = useState('');
 	const [rows, setRows] = useState<DealRow[]>([{ ...EMPTY_ROW }]);
 	const [err, setErr] = useState<string | null>(null);
-	const [quickCreate, setQuickCreate] = useState<'customer' | 'item' | 'terms' | null>(null);
+	const [quickCreate, setQuickCreate] = useState<'customer' | 'item' | 'terms' | 'payment' | null>(null);
 
 	// prefill from the existing order when editing (seed exactly once)
 	const seeded = useRef(false);
@@ -164,6 +170,18 @@ export function NewSalesOrder() {
 		}
 	}
 
+	async function onPaymentTemplate(v: string) {
+		setPtName(v);
+		if (!v) return;
+		try {
+			// Export Payment Term.terms is plain text (printed via | e) — assign as-is,
+			// no HTML strip (unlike the rich-text T&C path).
+			setPaymentTerms((await fetchPaymentTerms({ template: v })).message);
+		} catch {
+			// template text is a convenience — leave the field as typed
+		}
+	}
+
 	const total = useMemo(
 		() => rows.reduce((sum, r) => sum + (Number(r.qty) || 0) * (Number(r.rate) || 0), 0),
 		[rows],
@@ -247,6 +265,7 @@ export function NewSalesOrder() {
 		sub: [i.pharmacopoeia_grade, i.stock_uom].filter(Boolean).join(' · ') || undefined,
 	}));
 	const termsOptions = (ctx?.terms_templates ?? []).map((t) => ({ value: t }));
+	const paymentTermsOptions = (ctx?.payment_terms_templates ?? []).map((t) => ({ value: t }));
 
 	return (
 		<main className="tight">
@@ -317,8 +336,18 @@ export function NewSalesOrder() {
 								))}
 							</datalist>
 						</Field>
+						<Field label="Payment terms template" hint="Payment templates — manage in Settings">
+							<SearchSelect
+								value={ptName}
+								onChange={(v) => void onPaymentTemplate(v)}
+								options={paymentTermsOptions}
+								placeholder="Search payment templates…"
+								onCreate={() => setQuickCreate('payment')}
+								createLabel="New payment terms template"
+							/>
+						</Field>
 						<div className="span2">
-							<Field label="Payment terms" hint="As negotiated, e.g. 30% advance, 70% against B/L copy">
+							<Field label="Payment terms" hint="Picked from a template or typed; this text prints">
 								<TextArea value={paymentTerms} onChange={setPaymentTerms} rows={2} />
 							</Field>
 						</div>
@@ -421,10 +450,18 @@ export function NewSalesOrder() {
 
 			{quickCreate !== null && (
 				<MasterModal
-					def={quickCreate === 'customer' ? CUSTOMER_DEF : quickCreate === 'terms' ? TC_DEF : ITEM_DEF}
+					def={
+						quickCreate === 'customer'
+							? CUSTOMER_DEF
+							: quickCreate === 'terms'
+								? TC_DEF
+								: quickCreate === 'payment'
+									? PAYMENT_DEF
+									: ITEM_DEF
+					}
 					options={masterOptions}
 					record={null}
-					defaults={quickCreate === 'terms' ? { selling: true } : undefined}
+					defaults={quickCreate === 'terms' || quickCreate === 'payment' ? { selling: true } : undefined}
 					onClose={() => setQuickCreate(null)}
 					onSaved={(name) => {
 						const which = quickCreate;
@@ -434,6 +471,8 @@ export function NewSalesOrder() {
 							setCustomer(name);
 						} else if (which === 'terms') {
 							void onTemplate(name);
+						} else if (which === 'payment') {
+							void onPaymentTemplate(name);
 						} else {
 							// select the new item on the first empty row (or append one)
 							setRows((rs) => {

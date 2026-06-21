@@ -167,6 +167,13 @@ def get_new_so_context() -> dict:
 			order_by="name asc",
 			limit_page_length=100,
 		),
+		"payment_terms_templates": frappe.get_all(
+			"Export Payment Term",
+			filters={"disabled": 0, "selling": 1},
+			pluck="name",
+			order_by="name asc",
+			limit_page_length=100,
+		),
 	}
 
 
@@ -894,6 +901,13 @@ def get_new_po_context() -> dict:
 			order_by="name asc",
 			limit_page_length=100,
 		),
+		"payment_terms_templates": frappe.get_all(
+			"Export Payment Term",
+			filters={"disabled": 0, "buying": 1},
+			pluck="name",
+			order_by="name asc",
+			limit_page_length=100,
+		),
 		"taxes_templates": frappe.get_all(
 			"Purchase Taxes and Charges Template",
 			filters={"company": company, "disabled": 0},
@@ -931,6 +945,14 @@ def get_new_po_context() -> dict:
 def get_terms_text(template: str) -> str:
 	frappe.has_permission("Terms and Conditions", "read", throw=True)
 	return frappe.db.get_value("Terms and Conditions", template, "terms") or ""
+
+
+@frappe.whitelist()
+def get_payment_terms_text(template: str) -> str:
+	"""Resolve an Export Payment Term template to its text — copied into the order's
+	editable payment-terms narrative (which is the value that prints)."""
+	frappe.has_permission("Export Payment Term", "read", throw=True)
+	return frappe.db.get_value("Export Payment Term", template, "terms") or ""
 
 
 def _supplier_is_foreign(supplier: str) -> bool:
@@ -1172,6 +1194,7 @@ def _build_po_doc(
 		"taxes_and_charges": taxes_template or None,
 		"tc_name": podata.get("tc_name") or None,
 		"terms": podata.get("terms"),
+		"payment_terms_narrative": podata.get("payment_terms_narrative"),
 	}
 	if target is not None:
 		# editing an existing draft — keep its name, replace header/lines/taxes
@@ -1469,6 +1492,7 @@ def get_po_detail(name: str) -> dict:
 			"taxes_and_charges": po.taxes_and_charges,
 			"tc_name": po.tc_name,
 			"terms": po.terms,
+			"payment_terms_narrative": po.get("payment_terms_narrative"),
 		},
 		"totals": _po_totals(po),
 		"items": items,

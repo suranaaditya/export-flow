@@ -198,6 +198,24 @@ export const MASTERS: MasterDef[] = [
 		],
 	},
 	{
+		doctype: 'Export Payment Term',
+		title: 'Payment terms',
+		singular: 'payment terms template',
+		icon: 'banknote',
+		listFields: ['name', 'buying', 'selling', 'disabled'],
+		columns: [
+			{ key: 'name', label: 'Template' },
+			{ key: 'buying', label: 'Buying', dim: true },
+			{ key: 'selling', label: 'Selling', dim: true },
+		],
+		fields: [
+			{ key: 'template_name', label: 'Template name', type: 'text', required: true, createOnly: true },
+			{ key: 'terms', label: 'Payment terms text', type: 'textarea' },
+			{ key: 'buying', label: 'Use for purchasing', type: 'check' },
+			{ key: 'selling', label: 'Use for selling', type: 'check' },
+		],
+	},
+	{
 		doctype: 'Port',
 		title: 'Ports',
 		singular: 'port',
