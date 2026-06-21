@@ -1,9 +1,15 @@
 import { useMemo, useState } from 'react';
 import { useFrappeGetCall } from 'frappe-react-sdk';
 import { useNavigate } from 'react-router-dom';
-import { TextInput } from '@/components/form';
-import { Card, CHead, EmptyMsg, Tag } from '@/components/ui';
-import { API, parseServerError, type GRNListRow } from '@/lib/api';
+import { Icon } from '@/components/Icon';
+import { Field, SearchSelect, TextInput } from '@/components/form';
+import { Card, CHead, EmptyMsg, Modal, Tag } from '@/components/ui';
+import {
+	API,
+	parseServerError,
+	type GRNListRow,
+	type ReceivablePO,
+} from '@/lib/api';
 import { fmtDate } from '@/lib/format';
 
 const STATUS_TONE: Record<string, 'ok' | 'pend' | 'err'> = {
@@ -12,9 +18,92 @@ const STATUS_TONE: Record<string, 'ok' | 'pend' | 'err'> = {
 	Cancelled: 'err',
 };
 
+/** Pick a supplier, then one of their open POs, to start a receipt straight from
+ *  the Goods receipts screen (the PO detail's "Create GRN" is the other entry). */
+function NewReceiptModal({ onClose }: { onClose: () => void }) {
+	const navigate = useNavigate();
+	const { data, isLoading, error } = useFrappeGetCall<{ message: ReceivablePO[] }>(
+		API.receivablePos,
+		undefined,
+	);
+	const [supplier, setSupplier] = useState('');
+	const [po, setPo] = useState('');
+
+	const pos = data?.message ?? [];
+	const supplierOptions = useMemo(() => {
+		const seen = new Map<string, string>();
+		for (const p of pos) if (!seen.has(p.supplier)) seen.set(p.supplier, p.supplier_name || p.supplier);
+		return [...seen].map(([value, label]) => ({ value, label }));
+	}, [pos]);
+	const poOptions = useMemo(
+		() =>
+			pos
+				.filter((p) => p.supplier === supplier)
+				.map((p) => ({
+					value: p.name,
+					label: p.name,
+					sub: `${p.remaining_lines} line${p.remaining_lines === 1 ? '' : 's'} to receive · ${fmtDate(p.transaction_date)}`,
+				})),
+		[pos, supplier],
+	);
+
+	return (
+		<Modal title="New goods receipt" icon="package" onClose={onClose}>
+			<div style={{ padding: '14px 18px', display: 'grid', gap: 14 }}>
+				{isLoading ? (
+					<div className="sub">Loading open purchase orders…</div>
+				) : error ? (
+					<div className="ferr">{parseServerError(error)}</div>
+				) : pos.length === 0 ? (
+					<EmptyMsg
+						title="No open purchase orders"
+						text="Every submitted purchase order is already fully received (merchanting POs never receive goods)."
+					/>
+				) : (
+					<>
+						<Field label="Supplier">
+							<SearchSelect
+								value={supplier}
+								onChange={(v) => {
+									setSupplier(v);
+									setPo('');
+								}}
+								options={supplierOptions}
+								placeholder="Pick a supplier…"
+							/>
+						</Field>
+						<Field label="Purchase order" hint="only POs with goods still to receive">
+							<SearchSelect
+								value={po}
+								onChange={setPo}
+								options={poOptions}
+								placeholder={supplier ? 'Pick a purchase order…' : 'Pick a supplier first'}
+								disabled={!supplier}
+							/>
+						</Field>
+						<div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+							<button className="btn" onClick={onClose}>
+								Cancel
+							</button>
+							<button
+								className="btn primary"
+								disabled={!po}
+								onClick={() => navigate(`/grns/new?po=${po}`)}
+							>
+								<Icon name="package" size={15} /> Continue to receipt
+							</button>
+						</div>
+					</>
+				)}
+			</div>
+		</Modal>
+	);
+}
+
 export function GoodsReceiptNotes() {
 	const navigate = useNavigate();
 	const [query, setQuery] = useState('');
+	const [picking, setPicking] = useState(false);
 
 	const { data, error, isLoading } = useFrappeGetCall<{ message: GRNListRow[] }>(API.grns, undefined);
 
@@ -54,7 +143,12 @@ export function GoodsReceiptNotes() {
 				<div className="field" style={{ width: 300 }}>
 					<TextInput value={query} onChange={setQuery} placeholder="Search GRN, PO, supplier or warehouse" />
 				</div>
+				<button className="btn primary" onClick={() => setPicking(true)}>
+					<Icon name="plus" size={15} /> New receipt
+				</button>
 			</div>
+
+			{picking && <NewReceiptModal onClose={() => setPicking(false)} />}
 
 			<Card accent>
 				<CHead icon="package" title="Goods receipt notes" count={`${rows.length} shown`} />
@@ -68,7 +162,7 @@ export function GoodsReceiptNotes() {
 						text={
 							query
 								? 'Try a different GRN, PO, supplier or warehouse.'
-								: 'Receive goods from a submitted purchase order — open one and use “Create GRN”.'
+								: 'Start a receipt with “New receipt”, or open a purchase order and use “Create GRN”.'
 						}
 					/>
 				) : (

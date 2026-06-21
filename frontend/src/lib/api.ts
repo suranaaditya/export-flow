@@ -192,6 +192,7 @@ export const API = {
 	cancelGrn: 'exportflow.api.cancel_grn',
 	attachGrnInvoice: 'exportflow.api.attach_grn_invoice',
 	grnPacks: 'exportflow.api.get_grn_packs',
+	receivablePos: 'exportflow.api.get_receivable_pos',
 } as const;
 
 export interface ForwardContract {
@@ -741,6 +742,16 @@ export interface GRNListRow {
 	status: 'Draft' | 'Received' | 'Cancelled';
 	posting_date: string;
 	supplier_invoice_no: string | null;
+}
+
+export interface ReceivablePO {
+	name: string;
+	supplier: string;
+	supplier_name: string | null;
+	transaction_date: string;
+	grand_total: number;
+	currency: string;
+	remaining_lines: number;
 }
 
 export interface GRNContextLine {

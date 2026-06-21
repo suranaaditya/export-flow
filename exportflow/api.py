@@ -1359,6 +1359,46 @@ def _grn_warehouses(company: str | None) -> list[dict]:
 
 
 @frappe.whitelist()
+def get_receivable_pos() -> list[dict]:
+	"""Submitted, non-merchanting purchase orders that still have goods to receive
+	(not fully covered by Received GRNs) — lets a GRN be started straight from the
+	Goods receipts screen by picking a supplier and one of their open POs."""
+	frappe.has_permission("Purchase Order", "read", throw=True)
+	frappe.has_permission("Goods Receipt Note", "create", throw=True)
+	company = exportflow_company()
+	filters = {"docstatus": 1}
+	if company:
+		filters["company"] = company
+	out = []
+	for po in frappe.get_all(
+		"Purchase Order",
+		filters=filters,
+		fields=[
+			"name",
+			"supplier",
+			"supplier_name",
+			"transaction_date",
+			"grand_total",
+			"currency",
+			"merchanting_trade",
+		],
+		order_by="transaction_date desc, creation desc",
+		limit_page_length=200,
+	):
+		if po.get("merchanting_trade"):
+			continue  # merchanting goods never enter India → no GRN
+		summary = _po_grn_summary(po.name)
+		if summary["fully_received"]:
+			continue
+		rec = summary["received_by_line"]
+		lines = frappe.get_all("Purchase Order Item", filters={"parent": po.name}, fields=["name", "qty"])
+		po["remaining_lines"] = sum(1 for l in lines if flt(rec.get(l.name, 0)) + 1e-6 < flt(l.qty))
+		po.pop("merchanting_trade", None)
+		out.append(po)
+	return out
+
+
+@frappe.whitelist()
 def get_grn_context(purchase_order: str) -> dict:
 	"""Everything the GRN create form needs: PO lines with ordered vs already-
 	received quantity, and the warehouse picklist."""
