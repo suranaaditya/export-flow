@@ -5,18 +5,19 @@
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
-  "label",
+  "document_type",
   "file",
-  "remarks"
+  "description"
  ],
  "fields": [
   {
    "columns": 4,
-   "description": "What this document is, e.g. Commercial Invoice, Certificate of Analysis, Packing List",
-   "fieldname": "label",
-   "fieldtype": "Data",
+   "description": "The kind of supplier document — maps to the shipment's document checklist (Certificate of Analysis, MSDS, …)",
+   "fieldname": "document_type",
+   "fieldtype": "Link",
    "in_list_view": 1,
-   "label": "Document",
+   "label": "Document Type",
+   "options": "Document Type",
    "reqd": 1
   },
   {
@@ -29,15 +30,15 @@
   },
   {
    "columns": 3,
-   "fieldname": "remarks",
+   "fieldname": "description",
    "fieldtype": "Data",
-   "label": "Remarks"
+   "label": "Note"
   }
  ],
  "index_web_pages_for_search": 0,
  "istable": 1,
  "links": [],
- "modified": "2026-06-21 12:00:00.000000",
+ "modified": "2026-06-21 13:00:00.000000",
  "modified_by": "Administrator",
  "module": "ExportFlow",
  "name": "Goods Receipt Note Document",

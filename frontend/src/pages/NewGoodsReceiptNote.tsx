@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useFrappeGetCall, useFrappePostCall } from 'frappe-react-sdk';
+import { useFrappeFileUpload, useFrappeGetCall, useFrappePostCall } from 'frappe-react-sdk';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
 import { Field, SearchSelect, TextArea, TextInput } from '@/components/form';
@@ -48,14 +48,27 @@ export function NewGoodsReceiptNote() {
 	const { call: updateGrn, loading: updating } = useFrappePostCall<{ message: { name: string } }>(
 		API.updateGrn,
 	);
+	const { upload, loading: uploadingInvoice } = useFrappeFileUpload();
 
 	const [warehouse, setWarehouse] = useState('');
 	const [invoiceNo, setInvoiceNo] = useState('');
 	const [invoiceDate, setInvoiceDate] = useState('');
+	const [invoiceFile, setInvoiceFile] = useState<string | null>(null);
 	const [remarks, setRemarks] = useState('');
 	const [lines, setLines] = useState<LineEdit[]>([]);
 	const [packs, setPacks] = useState<PackEdit[]>([]);
 	const [err, setErr] = useState<string | null>(null);
+	const invoiceFileRef = useRef<HTMLInputElement | null>(null);
+
+	async function onUploadInvoice(file: File) {
+		setErr(null);
+		try {
+			const res = await upload(file, { isPrivate: true });
+			setInvoiceFile(res.file_url);
+		} catch (e) {
+			setErr(parseServerError(e));
+		}
+	}
 
 	// seed once, when the source data arrives
 	const seeded = useRef(false);
@@ -67,6 +80,7 @@ export function NewGoodsReceiptNote() {
 			setWarehouse(d.grn.warehouse || '');
 			setInvoiceNo(d.grn.supplier_invoice_no ?? '');
 			setInvoiceDate(d.grn.supplier_invoice_date ?? '');
+			setInvoiceFile(d.grn.supplier_invoice_file ?? null);
 			setRemarks(d.grn.remarks ?? '');
 			setLines(
 				d.items.map((it) => ({
@@ -143,6 +157,7 @@ export function NewGoodsReceiptNote() {
 			warehouse,
 			supplier_invoice_no: invoiceNo.trim() || null,
 			supplier_invoice_date: invoiceDate || null,
+			supplier_invoice_file: invoiceFile,
 			remarks: remarks.trim() || null,
 			items: itemRows,
 			packs: editToPayload(packs, new Set(lines.map((l) => l.item_code))),
@@ -214,6 +229,38 @@ export function NewGoodsReceiptNote() {
 						</Field>
 						<Field label="Supplier invoice date">
 							<TextInput type="date" value={invoiceDate} onChange={setInvoiceDate} />
+						</Field>
+						<Field label="Invoice file" hint="upload the supplier's invoice now">
+							<input
+								ref={invoiceFileRef}
+								type="file"
+								style={{ display: 'none' }}
+								onChange={(e) => {
+									const f = e.target.files?.[0];
+									if (f) void onUploadInvoice(f);
+									e.target.value = '';
+								}}
+							/>
+							<button
+								type="button"
+								className="btn"
+								disabled={uploadingInvoice}
+								onClick={() => invoiceFileRef.current?.click()}
+							>
+								<Icon name="upload" size={15} />{' '}
+								{uploadingInvoice ? 'Uploading…' : invoiceFile ? 'Replace file' : 'Upload invoice'}
+							</button>
+							{invoiceFile && (
+								<a
+									className="data"
+									href={invoiceFile}
+									target="_blank"
+									rel="noreferrer"
+									style={{ marginLeft: 8, fontSize: 12 }}
+								>
+									View
+								</a>
+							)}
 						</Field>
 					</div>
 				</Card>

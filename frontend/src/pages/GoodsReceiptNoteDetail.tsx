@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { useFrappeFileUpload, useFrappeGetCall, useFrappePostCall } from 'frappe-react-sdk';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
-import { TextInput } from '@/components/form';
+import { SearchSelect } from '@/components/form';
 import { Card, CHead, EmptyMsg, Facts, Tag } from '@/components/ui';
 import { API, parseServerError, type GRNDetailData } from '@/lib/api';
 import { fmtDateLong } from '@/lib/format';
@@ -25,11 +25,20 @@ export function GoodsReceiptNoteDetail() {
 	const { call: attachInvoice } = useFrappePostCall(API.attachGrnInvoice);
 	const { call: addDocument, loading: addingDoc } = useFrappePostCall(API.addGrnDocument);
 	const { call: removeDocument } = useFrappePostCall(API.removeGrnDocument);
+	const { data: docTypesData } = useFrappeGetCall<{ message: { name: string; category: string | null }[] }>(
+		API.supplierDocTypes,
+		undefined,
+	);
 	const { upload, loading: uploading } = useFrappeFileUpload();
 	const [actionErr, setActionErr] = useState<string | null>(null);
-	const [docLabel, setDocLabel] = useState('');
+	const [docType, setDocType] = useState('');
 	const fileRef = useRef<HTMLInputElement | null>(null);
 	const docFileRef = useRef<HTMLInputElement | null>(null);
+	const docTypeOptions = (docTypesData?.message ?? []).map((t) => ({
+		value: t.name,
+		label: t.name,
+		sub: t.category ?? undefined,
+	}));
 
 	async function onReceive() {
 		setActionErr(null);
@@ -76,8 +85,8 @@ export function GoodsReceiptNoteDetail() {
 				fieldname: 'documents',
 				isPrivate: true,
 			});
-			await addDocument({ name: id, label: docLabel.trim(), file_url: res.file_url });
-			setDocLabel('');
+			await addDocument({ name: id, document_type: docType, file_url: res.file_url });
+			setDocType('');
 			await mutate();
 		} catch (e) {
 			setActionErr(parseServerError(e));
@@ -275,8 +284,8 @@ export function GoodsReceiptNoteDetail() {
 						<CHead icon="copy" title="Supplier documents" count={documents.length || undefined} />
 						<div style={{ padding: '6px 18px 16px' }}>
 							<div className="sub" style={{ marginBottom: documents.length ? 10 : 6 }}>
-								Invoice copy, certificate of analysis, packing list, test certificates… attach what the
-								supplier provides — it stays with the goods, ready for the export documentation.
+								Certificate of analysis, MSDS, test certificates… attach what the supplier provides.
+								Each one auto-fills the matching document on the shipment — uploaded once, never twice.
 							</div>
 							{documents.map((doc) => (
 								<div
@@ -291,7 +300,7 @@ export function GoodsReceiptNoteDetail() {
 								>
 									<Icon name="file-text" size={15} />
 									<span style={{ flex: 1 }}>
-										<span className="c1">{doc.label}</span>
+										<span className="c1">{doc.document_type}</span>
 										<a className="data" href={doc.file} target="_blank" rel="noreferrer" style={{ display: 'block', fontSize: 12 }}>
 											View file
 										</a>
@@ -316,14 +325,17 @@ export function GoodsReceiptNoteDetail() {
 								}}
 							/>
 							<div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-								<TextInput
-									value={docLabel}
-									onChange={setDocLabel}
-									placeholder="Document name, e.g. Certificate of Analysis"
-								/>
+								<div style={{ flex: 1 }}>
+									<SearchSelect
+										value={docType}
+										onChange={setDocType}
+										options={docTypeOptions}
+										placeholder="Document type, e.g. Certificate of Analysis"
+									/>
+								</div>
 								<button
 									className="btn"
-									disabled={!docLabel.trim() || addingDoc || uploading}
+									disabled={!docType || addingDoc || uploading}
 									onClick={() => docFileRef.current?.click()}
 								>
 									<Icon name="upload" size={15} /> {addingDoc ? 'Adding…' : 'Add file'}

@@ -62,6 +62,62 @@ def rebuild_for_rule_change(doc, method=None):
 		build_checklist(name)
 
 
+def forward_grn_documents(doc, method=None):
+	"""Export Shipment on_update (after the checklist is built): a supplier document
+	uploaded on a Goods Receipt Note (CoA, MSDS, …) auto-fills the matching, still-
+	empty Tracked Document Instance on this shipment — one upload, referenced in both
+	places, never re-uploaded. Idempotent; never overwrites a progressed/manual row."""
+	try:
+		_forward_grn_documents(doc)
+	except Exception:
+		frappe.log_error(
+			title=f"Forward GRN documents failed: {doc.name}", message=frappe.get_traceback()
+		)
+
+
+def _forward_grn_documents(shipment) -> int:
+	"""Attach GRN-held supplier files to this shipment's matching empty Tracked
+	Document Instances (status → Received). Returns how many were attached."""
+	from exportflow.exportflow.doctype.document_instance.document_instance import status_index
+
+	pos = set()
+	for line in shipment.items:
+		po = line.purchase_order or shipment._effective_po(line)[0]
+		if po:
+			pos.add(po)
+	if not pos:
+		return 0
+	rows = frappe.db.sql(
+		"""SELECT d.document_type AS document_type, d.file AS file
+		   FROM `tabGoods Receipt Note Document` d
+		   JOIN `tabGoods Receipt Note` g ON g.name = d.parent
+		   WHERE g.purchase_order IN %(pos)s AND g.status = 'Received'
+		         AND IFNULL(d.file, '') != '' AND IFNULL(d.document_type, '') != ''
+		   ORDER BY g.creation ASC, d.idx ASC""",
+		{"pos": tuple(pos)},
+		as_dict=True,
+	)
+	by_type = {r.document_type: r.file for r in rows}  # most recent receipt wins
+	if not by_type:
+		return 0
+	attached = 0
+	for di in frappe.get_all(
+		"Document Instance",
+		filters={"shipment": shipment.name, "document_type": ["in", list(by_type)], "origin": "Tracked"},
+		fields=["name", "document_type", "file", "status"],
+	):
+		if di.file or status_index(di.status) >= status_index("Received"):
+			continue  # never overwrite a manually-attached / progressed document
+		frappe.db.set_value(
+			"Document Instance",
+			di.name,
+			{"file": by_type[di.document_type], "status": "Received", "source": "Goods Receipt Note"},
+			update_modified=False,
+		)
+		attached += 1
+	return attached
+
+
 def rebuild_for_shipments(names):
 	for name in sorted(set(names)):
 		if frappe.db.exists("Export Shipment", name):

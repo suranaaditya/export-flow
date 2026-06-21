@@ -1473,6 +1473,35 @@ def _grn_item_rows(items) -> list[dict]:
 	return out
 
 
+def _grn_doc_rows(documents) -> list[dict]:
+	"""Normalise supplier-document rows (document_type + uploaded file)."""
+	out = []
+	for d in documents or []:
+		if not (d.get("document_type") and d.get("file")):
+			continue
+		out.append(
+			{
+				"document_type": d.get("document_type"),
+				"file": d.get("file"),
+				"description": d.get("description"),
+			}
+		)
+	return out
+
+
+@frappe.whitelist()
+def get_supplier_document_types() -> list[dict]:
+	"""Tracked document types a supplier provides with the goods (CoA, MSDS, …) —
+	for the GRN document picker. These map 1:1 to the shipment's checklist slots."""
+	frappe.has_permission("Document Type", "read", throw=True)
+	return frappe.get_all(
+		"Document Type",
+		filters={"origin": "Tracked", "responsible_party": "Supplier"},
+		fields=["name", "category"],
+		order_by="category, name",
+	)
+
+
 @frappe.whitelist()
 def create_grn(payload) -> dict:
 	frappe.has_permission("Goods Receipt Note", "create", throw=True)
@@ -1493,10 +1522,12 @@ def create_grn(payload) -> dict:
 			"posting_date": payload.get("posting_date") or nowdate(),
 			"supplier_invoice_no": payload.get("supplier_invoice_no"),
 			"supplier_invoice_date": payload.get("supplier_invoice_date") or None,
+			"supplier_invoice_file": payload.get("supplier_invoice_file") or None,
 			"remarks": payload.get("remarks"),
 			"status": "Draft",
 			"items": items,
 			"packs": _pack_rows(payload.get("packs")),
+			"documents": _grn_doc_rows(payload.get("documents")),
 		}
 	)
 	doc.insert()
@@ -1517,6 +1548,8 @@ def update_grn(name: str, payload) -> dict:
 		doc.posting_date = payload.get("posting_date")
 	doc.supplier_invoice_no = payload.get("supplier_invoice_no")
 	doc.supplier_invoice_date = payload.get("supplier_invoice_date") or None
+	if "supplier_invoice_file" in payload:
+		doc.supplier_invoice_file = payload.get("supplier_invoice_file") or None
 	doc.remarks = payload.get("remarks")
 	if payload.get("items") is not None:
 		doc.set("items", _grn_item_rows(payload.get("items")))
@@ -1730,7 +1763,12 @@ def get_grn_detail(name: str) -> dict:
 			for p in doc.packs
 		],
 		"documents": [
-			{"name": d.name, "label": d.label, "file": d.file, "remarks": d.remarks}
+			{
+				"name": d.name,
+				"document_type": d.document_type,
+				"file": d.file,
+				"description": d.description,
+			}
 			for d in doc.documents
 		],
 		"can": {
@@ -1742,20 +1780,22 @@ def get_grn_detail(name: str) -> dict:
 
 
 @frappe.whitelist()
-def add_grn_document(name: str, label: str, file_url: str, remarks: str | None = None) -> dict:
-	"""Attach a supplier-provided document (already uploaded to this GRN) as a
-	labelled row — captures the invoice copy, CoA, packing list, test certs, etc.
-	at the receipt, for the export documentation."""
+def add_grn_document(
+	name: str, document_type: str, file_url: str, description: str | None = None
+) -> dict:
+	"""Attach a supplier-provided document (already uploaded to this GRN) as a typed
+	row — CoA, MSDS, test certs, etc. The Document Type maps it to the shipment's
+	checklist, so the file forwards to the shipment without a second upload."""
 	doc = frappe.get_doc("Goods Receipt Note", name)
 	doc.check_permission("write")
-	if not (label or "").strip():
-		frappe.throw(_("Give the document a name (e.g. Certificate of Analysis)"))
+	if not (document_type or "").strip():
+		frappe.throw(_("Pick a document type (e.g. Certificate of Analysis)"))
 	if not frappe.db.exists(
 		"File",
 		{"file_url": file_url, "attached_to_doctype": "Goods Receipt Note", "attached_to_name": name},
 	):
 		frappe.throw(_("That file is not attached to {0}").format(name))
-	doc.append("documents", {"label": label.strip(), "file": file_url, "remarks": remarks})
+	doc.append("documents", {"document_type": document_type, "file": file_url, "description": description})
 	doc.save()
 	return {"name": name}
 
@@ -1768,6 +1808,18 @@ def remove_grn_document(name: str, row: str) -> dict:
 	doc.set("documents", [d for d in doc.documents if d.name != row])
 	doc.save()
 	return {"name": name}
+
+
+@frappe.whitelist()
+def sync_grn_documents(shipment: str) -> dict:
+	"""Pull supplier documents from the goods receipts into this shipment's checklist
+	— fills each matching, still-empty Tracked document with the GRN's file (no
+	re-upload). Runs automatically on save too; this is the manual re-sync."""
+	frappe.has_permission("Export Shipment", "write", doc=shipment, throw=True)
+	from exportflow.checklist import _forward_grn_documents
+
+	count = _forward_grn_documents(frappe.get_doc("Export Shipment", shipment))
+	return {"attached": count}
 
 
 @frappe.whitelist()

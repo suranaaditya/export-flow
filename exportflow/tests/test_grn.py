@@ -53,6 +53,9 @@ class TestGRN(IntegrationTestCase):
 	@classmethod
 	def setUpClass(cls):
 		super().setUpClass()
+		from exportflow.setup import seed_document_types
+
+		seed_document_types()  # supplier document types (Certificate of Analysis, …)
 		cls.company = frappe.db.get_single_value("Global Defaults", "default_company")
 		cls.warehouse = _ensure_warehouse(cls.company)
 
@@ -264,11 +267,45 @@ class TestGRN(IntegrationTestCase):
 		add_grn_document(grn, "Certificate of Analysis", f.file_url)
 		docs = frappe.get_doc("Goods Receipt Note", grn).documents
 		self.assertEqual(len(docs), 1)
-		self.assertEqual(docs[0].label, "Certificate of Analysis")
+		self.assertEqual(docs[0].document_type, "Certificate of Analysis")
 		# a file not attached to the GRN is refused
-		self.assertRaises(frappe.ValidationError, add_grn_document, grn, "Bogus", "/private/files/nope.pdf")
+		self.assertRaises(frappe.ValidationError, add_grn_document, grn, "MSDS", "/private/files/nope.pdf")
 		remove_grn_document(grn, docs[0].name)
 		self.assertEqual(len(frappe.get_doc("Goods Receipt Note", grn).documents), 0)
+
+	def test_grn_documents_forward_to_shipment(self):
+		from exportflow.api import add_document_instance
+		from exportflow.checklist import _forward_grn_documents
+
+		po, item = self._po(qty=10)
+		grn = frappe.get_doc("Goods Receipt Note", self._receive(po, item, 10))
+		f = frappe.get_doc(
+			{
+				"doctype": "File",
+				"file_name": f"coa-{_suffix()}.txt",
+				"attached_to_doctype": "Goods Receipt Note",
+				"attached_to_name": grn.name,
+				"is_private": 1,
+				"content": "coa",
+			}
+		).insert(ignore_permissions=True)
+		grn.append("documents", {"document_type": "Certificate of Analysis", "file": f.file_url})
+		grn.save()
+		submit_grn(grn.name)
+		shp = self._ship(po, item, 10)
+		# ensure the shipment has a Certificate of Analysis slot (create if no rule did)
+		di_name = frappe.db.get_value(
+			"Document Instance", {"shipment": shp, "document_type": "Certificate of Analysis"}
+		)
+		if not di_name:
+			add_document_instance(shp, "Certificate of Analysis")
+			di_name = frappe.db.get_value(
+				"Document Instance", {"shipment": shp, "document_type": "Certificate of Analysis"}
+			)
+		_forward_grn_documents(frappe.get_doc("Export Shipment", shp))  # idempotent re-sync
+		di = frappe.get_doc("Document Instance", di_name)
+		self.assertEqual(di.file, f.file_url, "the GRN's CoA file forwards to the shipment")
+		self.assertEqual(di.status, "Received")
 
 	def test_one_receiving_warehouse_per_po(self):
 		po, item = self._po(qty=100)

@@ -113,6 +113,9 @@ export function DocumentChecklist({
 			failed: number;
 		};
 	}>(API.generateAllDocuments);
+	const { call: syncGrnDocs } = useFrappePostCall<{ message: { attached: number } }>(
+		API.syncGrnDocuments,
+	);
 	const [genName, setGenName] = useState<string | null>(null);
 	const [genErr, setGenErr] = useState<{ name: string; msg: string } | null>(null);
 	const [bulkBusy, setBulkBusy] = useState(false);
@@ -168,6 +171,23 @@ export function DocumentChecklist({
 		}
 	}
 
+	async function onSyncGrn() {
+		setBulkMsg(null);
+		try {
+			const res = await syncGrnDocs({ shipment });
+			await mutate();
+			onGenerated?.();
+			setBulkMsg({
+				tone: 'ok',
+				text: res.message.attached
+					? `Pulled ${res.message.attached} document${res.message.attached === 1 ? '' : 's'} from goods receipts`
+					: 'No new supplier documents to pull',
+			});
+		} catch (e) {
+			setBulkMsg({ tone: 'err', text: parseServerError(e) });
+		}
+	}
+
 	function openDoc(d: DocInstanceRow) {
 		setGenErr(null);
 		setOpen(d);
@@ -207,6 +227,15 @@ export function DocumentChecklist({
 								{bulkBusy ? 'Generating…' : 'Generate all'}
 							</a>
 						)}
+						<a
+							href="#"
+							onClick={(e) => {
+								e.preventDefault();
+								void onSyncGrn();
+							}}
+						>
+							Sync from goods receipt
+						</a>
 						<a
 							href="#"
 							onClick={(e) => {

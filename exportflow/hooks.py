@@ -53,6 +53,9 @@ doc_events = {
 	"Export Shipment": {
 		"on_update": [
 			"exportflow.checklist.on_shipment_update",
+			# supplier documents uploaded on the GRN auto-fill the matching checklist
+			# rows (runs right after the checklist is built, so the rows exist)
+			"exportflow.checklist.forward_grn_documents",
 			# document facts (shipping bill / LEO / bl-awb date) fast-forward the
 			# milestone chain — runs after the checklist rebuild so the blocking
 			# state it respects is current
