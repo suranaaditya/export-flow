@@ -51,6 +51,38 @@ class TestReports(IntegrationTestCase):
 		self.assertTrue(frappe.local.response.filename.endswith(".xlsx"))
 		self.assertTrue(frappe.local.response.filecontent, "xlsx bytes produced")
 
+	def test_export_xlsx_professional_formatting(self):
+		"""Feedback #25: the xlsx is professionally formatted — a bold+frozen header,
+		auto-filter, real numbers with Indian grouping, and a bold totals row."""
+		import io
+		import json
+
+		import openpyxl
+
+		cols = REPORTS["realization"][0]["columns"]
+		inr_idx = next((i for i, c in enumerate(cols, start=1) if c["type"] == "inr"), None)
+		self.assertIsNotNone(inr_idx, "realization has a money column to total")
+
+		def val(c):
+			return 12345.67 if c["type"] == "inr" else (3 if c["type"] == "num" else "x")
+
+		rows = [{c["key"]: val(c) for c in cols} for _ in range(2)]
+		report_export("realization", "xlsx", rows=json.dumps(rows))
+		ws = openpyxl.load_workbook(io.BytesIO(frappe.local.response.filecontent)).active
+
+		self.assertTrue(ws.cell(row=1, column=1).font.bold, "styled header")
+		self.assertEqual(ws.freeze_panes, "A2", "header row frozen")
+		self.assertTrue(ws.auto_filter.ref, "auto-filter set")
+
+		money = ws.cell(row=2, column=inr_idx)
+		self.assertIsInstance(money.value, (int, float), "money is a real number, not text")
+		self.assertIn(",", money.number_format)
+
+		total_row = 1 + len(rows) + 1  # header + data + totals
+		total_cell = ws.cell(row=total_row, column=inr_idx)
+		self.assertTrue(total_cell.font.bold, "bold totals row")
+		self.assertEqual(round(total_cell.value or 0, 2), 24691.34, "money column summed")
+
 	def test_export_rows_are_formatted(self):
 		# a single row round-trips into the xlsx without raising
 		report_export(

@@ -734,6 +734,98 @@ def _report_pdf(title, subtitle, cols, data, totals):
 	return html, options
 
 
+# Indian lakh/crore grouping to match the on-screen ₹ figures; the symbol is NOT
+# baked into the value so cells stay summable. Modern Excel + LibreOffice render this.
+# Only the types _xlsx_cell emits as real numbers/dates get a number format (pct/days
+# are pre-formatted strings, so a numeric format would be inert/misleading on them).
+_XLSX_NUMFMT = {"inr": "##,##,##,##0.00", "num": "##,##,##,##0", "date": "DD-MM-YYYY"}
+# right-aligned in the on-screen table / PDF — match it in the workbook
+_XLSX_RIGHT = ("inr", "num", "pct", "days")
+
+
+def _report_xlsx(title, cols, data, totals):
+	"""Professionally formatted workbook (feedback #25): a bold filled header row,
+	sensible column widths with text wrapping, a frozen header, Excel auto-filter,
+	per-type number formats (Indian grouping for money), a bold totals row and light
+	zebra banding. Cell VALUES still flow through _xlsx_cell, so numbers/dates stay
+	real (summable/sortable) and free-text keeps its formula-injection guard."""
+	from io import BytesIO
+
+	from openpyxl import Workbook
+	from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+	from openpyxl.utils import get_column_letter
+
+	wb = Workbook()
+	ws = wb.active
+	# Excel forbids \ / * ? : [ ] in sheet names (a report title like "… (FEMA / EDPMS)" has one)
+	ws.title = (title or "Report").translate({ord(c): " " for c in "\\/*?:[]"}).strip()[:31] or "Report"
+
+	header_fill = PatternFill("solid", fgColor="52607A")
+	band_fill = PatternFill("solid", fgColor="F3F6FA")
+	total_fill = PatternFill("solid", fgColor="E8EDF4")
+	header_font = Font(bold=True, color="FFFFFF", size=10)
+	hairline = Side(style="thin", color="DCE1EA")
+	right = Alignment(horizontal="right")
+
+	# header
+	for ci, c in enumerate(cols, start=1):
+		cell = ws.cell(row=1, column=ci, value=c["label"])
+		cell.fill = header_fill
+		cell.font = header_font
+		cell.alignment = Alignment(wrap_text=True, vertical="center")
+		cell.border = Border(bottom=hairline)
+
+	# data
+	for ri, r in enumerate(data, start=2):
+		band = ri % 2 == 0
+		for ci, c in enumerate(cols, start=1):
+			t = c["type"]
+			cell = ws.cell(row=ri, column=ci, value=_xlsx_cell(r.get(c["key"]), t))
+			if t in _XLSX_NUMFMT:
+				cell.number_format = _XLSX_NUMFMT[t]
+			if t in _XLSX_RIGHT:
+				cell.alignment = right
+			elif t == "text":
+				cell.alignment = Alignment(wrap_text=True, vertical="top")
+			cell.border = Border(bottom=hairline)
+			if band:
+				cell.fill = band_fill
+
+	last_data_row = len(data) + 1
+
+	# totals row (bold, top rule), keeping the on-screen "Total" label placement
+	if totals:
+		trow = last_data_row + 1
+		# label lands on the first non-total column; None when every column is money
+		lbl_idx = next((i for i, c in enumerate(cols) if c["key"] not in totals), None)
+		for ci, c in enumerate(cols, start=1):
+			if c["key"] in totals:
+				cell = ws.cell(row=trow, column=ci, value=flt(totals[c["key"]]))
+				cell.number_format = _XLSX_NUMFMT["inr"]
+				cell.alignment = right
+			elif (ci - 1) == lbl_idx:
+				cell = ws.cell(row=trow, column=ci, value="Total")
+			else:
+				cell = ws.cell(row=trow, column=ci)
+			cell.font = Font(bold=True)
+			cell.fill = total_fill
+			cell.border = Border(top=hairline)
+
+	# column widths (Excel char units): the screen weight model, widened to fit the
+	# header label, clamped so nothing is a sliver or absurdly wide; text wraps
+	for ci, c in enumerate(cols, start=1):
+		w = max(_col_weight(c) * 1.1, min(len(c["label"]) + 3, 38))
+		ws.column_dimensions[get_column_letter(ci)].width = max(9, min(w, 48))
+
+	ws.freeze_panes = "A2"
+	if data:
+		ws.auto_filter.ref = f"A1:{get_column_letter(len(cols))}{last_data_row}"
+
+	buf = BytesIO()
+	wb.save(buf)
+	return buf
+
+
 @frappe.whitelist()
 def report_export(report: str, fmt: str = "xlsx", rows=None, columns=None, subtitle: str = ""):
 	"""Format the on-screen (already filtered) rows into a downloadable file. The
@@ -790,16 +882,6 @@ def report_export(report: str, fmt: str = "xlsx", rows=None, columns=None, subti
 		frappe.local.response.type = "binary"
 		return
 
-	from frappe.utils.xlsxutils import make_xlsx
-
-	matrix = [[c["label"] for c in cols]]
-	matrix += [[_xlsx_cell(r.get(c["key"]), c["type"]) for c in cols] for r in data]
-	if totals:
-		lbl_idx = next((i for i, c in enumerate(cols) if c["key"] not in totals), None)
-		matrix.append([
-			flt(totals[c["key"]]) if c["key"] in totals else ("Total" if i == lbl_idx else None)
-			for i, c in enumerate(cols)
-		])
 	frappe.local.response.filename = f"{slug}-{stamp}.xlsx"
-	frappe.local.response.filecontent = make_xlsx(matrix, title[:31]).getvalue()
+	frappe.local.response.filecontent = _report_xlsx(title, cols, data, totals).getvalue()
 	frappe.local.response.type = "binary"
