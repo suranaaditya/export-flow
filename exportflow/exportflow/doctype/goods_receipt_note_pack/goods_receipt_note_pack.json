@@ -1,0 +1,102 @@
+{
+ "actions": [],
+ "creation": "2026-06-21 10:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "item_code",
+  "batch_no",
+  "marks",
+  "num_packages",
+  "pack_type",
+  "col_pack",
+  "net_per",
+  "tare_per",
+  "mfg_date",
+  "exp_date"
+ ],
+ "fields": [
+  {
+   "columns": 2,
+   "description": "Which received line this batch/package group belongs to",
+   "fieldname": "item_code",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Item",
+   "options": "Item",
+   "reqd": 1
+  },
+  {
+   "columns": 2,
+   "fieldname": "batch_no",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Batch / Lot No"
+  },
+  {
+   "columns": 1,
+   "description": "Package number range, e.g. 1-10",
+   "fieldname": "marks",
+   "fieldtype": "Data",
+   "label": "Pkg Nos"
+  },
+  {
+   "columns": 1,
+   "fieldname": "num_packages",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Packages",
+   "non_negative": 1
+  },
+  {
+   "columns": 2,
+   "description": "e.g. HDPE Drums each 25 Kgs",
+   "fieldname": "pack_type",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Pack Type"
+  },
+  {
+   "fieldname": "col_pack",
+   "fieldtype": "Column Break"
+  },
+  {
+   "columns": 1,
+   "description": "Net weight per package",
+   "fieldname": "net_per",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Net / Pkg (Kg)"
+  },
+  {
+   "columns": 1,
+   "description": "Tare (empty package) weight per package",
+   "fieldname": "tare_per",
+   "fieldtype": "Float",
+   "label": "Tare / Pkg (Kg)"
+  },
+  {
+   "fieldname": "mfg_date",
+   "fieldtype": "Date",
+   "label": "Mfg Date"
+  },
+  {
+   "fieldname": "exp_date",
+   "fieldtype": "Date",
+   "label": "Exp Date"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-06-21 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ExportFlow",
+ "name": "Goods Receipt Note Pack",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

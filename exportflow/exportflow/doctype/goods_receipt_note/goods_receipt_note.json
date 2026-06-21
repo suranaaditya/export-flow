@@ -1,0 +1,239 @@
+{
+ "actions": [],
+ "autoname": "naming_series:",
+ "creation": "2026-06-21 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "purchase_order",
+  "supplier",
+  "supplier_name",
+  "cb_grn_head",
+  "status",
+  "posting_date",
+  "company",
+  "section_grn_wh",
+  "warehouse",
+  "section_grn_invoice",
+  "supplier_invoice_no",
+  "supplier_invoice_date",
+  "cb_grn_inv",
+  "supplier_invoice_file",
+  "section_grn_items",
+  "items",
+  "section_grn_packs",
+  "packs",
+  "section_grn_notes",
+  "remarks"
+ ],
+ "fields": [
+  {
+   "default": "GRN-.YY.-.####",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "hidden": 1,
+   "label": "Series",
+   "no_copy": 1,
+   "options": "GRN-.YY.-.####",
+   "print_hide": 1
+  },
+  {
+   "description": "The submitted purchase order these goods were received against.",
+   "fieldname": "purchase_order",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Purchase Order",
+   "options": "Purchase Order",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fetch_from": "purchase_order.supplier",
+   "fieldname": "supplier",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Supplier",
+   "options": "Supplier",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "purchase_order.supplier_name",
+   "fieldname": "supplier_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Supplier Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "cb_grn_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Draft",
+   "description": "Draft → Received (stock posted in) → Cancelled (stock reversed).",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Draft\nReceived\nCancelled",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "default": "Today",
+   "fieldname": "posting_date",
+   "fieldtype": "Date",
+   "label": "Receipt Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company"
+  },
+  {
+   "description": "Where the goods are received — usually a virtual port-in-India warehouse, occasionally a real one.",
+   "fieldname": "section_grn_wh",
+   "fieldtype": "Section Break",
+   "label": "Receiving Warehouse"
+  },
+  {
+   "fieldname": "warehouse",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Warehouse",
+   "options": "Warehouse",
+   "reqd": 1
+  },
+  {
+   "fieldname": "section_grn_invoice",
+   "fieldtype": "Section Break",
+   "label": "Supplier Invoice"
+  },
+  {
+   "description": "Supplier's tax invoice number — copied back to the PO (drives the 90-day GST export clock).",
+   "fieldname": "supplier_invoice_no",
+   "fieldtype": "Data",
+   "label": "Supplier Invoice No"
+  },
+  {
+   "fieldname": "supplier_invoice_date",
+   "fieldtype": "Date",
+   "label": "Supplier Invoice Date"
+  },
+  {
+   "fieldname": "cb_grn_inv",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Upload the supplier's invoice document.",
+   "fieldname": "supplier_invoice_file",
+   "fieldtype": "Attach",
+   "label": "Invoice File"
+  },
+  {
+   "fieldname": "section_grn_items",
+   "fieldtype": "Section Break",
+   "label": "Received Quantity"
+  },
+  {
+   "fieldname": "items",
+   "fieldtype": "Table",
+   "label": "Items",
+   "options": "Goods Receipt Note Item",
+   "reqd": 1
+  },
+  {
+   "collapsible": 1,
+   "description": "Batch / package detail — forwards to the shipment's packing list.",
+   "fieldname": "section_grn_packs",
+   "fieldtype": "Section Break",
+   "label": "Pack & Batch Detail"
+  },
+  {
+   "fieldname": "packs",
+   "fieldtype": "Table",
+   "label": "Packs",
+   "options": "Goods Receipt Note Pack"
+  },
+  {
+   "fieldname": "section_grn_notes",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "remarks",
+   "fieldtype": "Small Text",
+   "label": "Remarks"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-06-21 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ExportFlow",
+ "name": "Goods Receipt Note",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Export Admin",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Export Operations",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Export Accounts"
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Export Viewer"
+  }
+ ],
+ "search_fields": "purchase_order,supplier_name,status,warehouse",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

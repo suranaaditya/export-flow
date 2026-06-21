@@ -183,6 +183,15 @@ export const API = {
 	emailAccountTest: 'exportflow.ai_email.test_email_account',
 	forwardContracts: 'exportflow.api.get_forward_contracts',
 	openForwards: 'exportflow.api.get_open_forwards',
+	grns: 'exportflow.api.get_grns',
+	grnContext: 'exportflow.api.get_grn_context',
+	grnDetail: 'exportflow.api.get_grn_detail',
+	createGrn: 'exportflow.api.create_grn',
+	updateGrn: 'exportflow.api.update_grn',
+	submitGrn: 'exportflow.api.submit_grn',
+	cancelGrn: 'exportflow.api.cancel_grn',
+	attachGrnInvoice: 'exportflow.api.attach_grn_invoice',
+	grnPacks: 'exportflow.api.get_grn_packs',
 } as const;
 
 export interface ForwardContract {
@@ -684,6 +693,15 @@ export interface POListRow {
 	supplier_invoice_date: string | null;
 	gst_export_deadline: string | null;
 	sales_orders: string[];
+	has_grn: boolean;
+}
+
+export interface GRNRef {
+	name: string;
+	warehouse: string;
+	status: 'Draft' | 'Received' | 'Cancelled';
+	posting_date: string;
+	supplier_invoice_no: string | null;
 }
 
 export interface PODetailData {
@@ -710,7 +728,69 @@ export interface PODetailData {
 	}[];
 	extra_charges: { description: string; account_head: string; amount: number }[];
 	shipments: { shipment: string; current_milestone: string; mode: string; etd: string | null }[];
+	grns: GRNRef[];
+	received: boolean;
 	can: DocCan;
+}
+
+export interface GRNListRow {
+	name: string;
+	purchase_order: string;
+	supplier_name: string | null;
+	warehouse: string;
+	status: 'Draft' | 'Received' | 'Cancelled';
+	posting_date: string;
+	supplier_invoice_no: string | null;
+}
+
+export interface GRNContextLine {
+	po_detail: string;
+	item_code: string;
+	item_name: string;
+	ordered_qty: number;
+	already_received: number;
+	received_qty: number;
+	uom: string | null;
+	stock_uom: string | null;
+	conversion_factor: number;
+}
+
+export interface GRNContext {
+	purchase_order: string;
+	supplier: string;
+	supplier_name: string | null;
+	company: string | null;
+	warehouses: { name: string; warehouse_name: string; warehouse_type: string | null }[];
+	lines: GRNContextLine[];
+	fully_received: boolean;
+}
+
+export interface GRNDetailData {
+	grn: {
+		name: string;
+		purchase_order: string;
+		supplier: string | null;
+		supplier_name: string | null;
+		company: string | null;
+		posting_date: string;
+		warehouse: string;
+		status: 'Draft' | 'Received' | 'Cancelled';
+		supplier_invoice_no: string | null;
+		supplier_invoice_date: string | null;
+		supplier_invoice_file: string | null;
+		remarks: string | null;
+	};
+	items: {
+		name: string;
+		item_code: string;
+		item_name: string | null;
+		po_detail: string | null;
+		ordered_qty: number;
+		received_qty: number;
+		uom: string | null;
+	}[];
+	packs: ShipmentPack[];
+	can: { edit: boolean; receive: boolean; cancel: boolean };
 }
 
 export interface ShippableLine {

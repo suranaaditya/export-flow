@@ -250,9 +250,12 @@ def _apply_item_tax_fields(doc, values) -> None:
 
 @frappe.whitelist()
 def create_item(values) -> dict:
-	"""Pharma trading item: never stocked (goods go supplier → port), always
-	buyable and sellable. Carries the GST HSN code + Item Tax Template that drive
-	PO tax autofill."""
+	"""Pharma trading item: always buyable and sellable, carrying the GST HSN code
+	+ Item Tax Template that drive PO tax autofill. Stocked only when the stock
+	regime is on (goods are received at a port warehouse via a GRN); otherwise it
+	stays a non-stock drop-ship item."""
+	from exportflow.stock import maintain_stock_enabled
+
 	frappe.has_permission("Item", "create", throw=True)
 	if isinstance(values, str):
 		values = json.loads(values)
@@ -265,7 +268,7 @@ def create_item(values) -> dict:
 			"item_name": values["item_name"].strip(),
 			"item_group": frappe.db.get_value("Item Group", {"is_group": 0}, "name"),
 			"stock_uom": values.get("stock_uom") or "Kg",
-			"is_stock_item": 0,
+			"is_stock_item": 1 if maintain_stock_enabled() else 0,
 			"is_sales_item": 1,
 			"is_purchase_item": 1,
 			"pharmacopoeia_grade": values.get("pharmacopoeia_grade") or None,
@@ -1228,6 +1231,11 @@ def get_purchase_orders() -> list[dict]:
 		order_by="transaction_date desc, creation desc",
 		limit_page_length=100,
 	)
+	received_pos = set(
+		frappe.get_all(
+			"Goods Receipt Note", filters={"status": "Received"}, pluck="purchase_order", distinct=True
+		)
+	)
 	for po in pos:
 		po["sales_orders"] = frappe.get_all(
 			"Purchase Order Item",
@@ -1235,6 +1243,7 @@ def get_purchase_orders() -> list[dict]:
 			pluck="sales_order",
 			distinct=True,
 		)
+		po["has_grn"] = po.name in received_pos
 	return pos
 
 
@@ -1305,8 +1314,425 @@ def get_po_detail(name: str) -> dict:
 		"items": items,
 		"extra_charges": extra_charges,
 		"shipments": shipments,
+		"grns": frappe.get_all(
+			"Goods Receipt Note",
+			filters={"purchase_order": name},
+			fields=["name", "warehouse", "status", "posting_date", "supplier_invoice_no"],
+			order_by="creation asc",
+		),
+		"received": _po_grn_summary(name)["fully_received"],
 		"can": _doc_can("Purchase Order", name, status=po.status),
 	}
+
+
+# --- Goods Receipt Note (receive PO goods into a warehouse; quantity stock-in) --
+
+
+def _po_grn_summary(po_name: str) -> dict:
+	"""Received quantity per PO line from RECEIVED Goods Receipt Notes, and whether
+	the PO is fully received."""
+	rows = frappe.db.sql(
+		"""SELECT gi.po_detail AS po_detail, SUM(gi.received_qty) AS qty
+		   FROM `tabGoods Receipt Note Item` gi
+		   JOIN `tabGoods Receipt Note` g ON g.name = gi.parent
+		   WHERE g.purchase_order = %s AND g.status = 'Received'
+		   GROUP BY gi.po_detail""",
+		(po_name,),
+		as_dict=True,
+	)
+	received = {r.po_detail: flt(r.qty) for r in rows if r.po_detail}
+	po_lines = frappe.get_all("Purchase Order Item", filters={"parent": po_name}, fields=["name", "qty"])
+	fully = bool(po_lines) and all(received.get(l.name, 0) + 1e-6 >= flt(l.qty) for l in po_lines)
+	return {"received_by_line": received, "fully_received": fully, "has_grn": bool(rows)}
+
+
+def _grn_warehouses(company: str | None) -> list[dict]:
+	"""MN Globex warehouses for the GRN picklist — port-type warehouses first."""
+	filters = {"is_group": 0, "disabled": 0}
+	if company:
+		filters["company"] = company
+	whs = frappe.get_all(
+		"Warehouse", filters=filters, fields=["name", "warehouse_name", "warehouse_type"]
+	)
+	whs.sort(key=lambda w: (w.get("warehouse_type") != "Port", w["name"]))
+	return whs
+
+
+@frappe.whitelist()
+def get_grn_context(purchase_order: str) -> dict:
+	"""Everything the GRN create form needs: PO lines with ordered vs already-
+	received quantity, and the warehouse picklist."""
+	frappe.has_permission("Purchase Order", "read", doc=purchase_order, throw=True)
+	frappe.has_permission("Goods Receipt Note", "create", throw=True)
+	po = frappe.db.get_value(
+		"Purchase Order",
+		purchase_order,
+		["name", "supplier", "supplier_name", "docstatus", "merchanting_trade", "company"],
+		as_dict=True,
+	)
+	if not po:
+		frappe.throw(_("Purchase Order {0} not found").format(purchase_order))
+	if po.docstatus != 1:
+		frappe.throw(_("Purchase Order {0} is not submitted").format(purchase_order))
+	if po.merchanting_trade:
+		frappe.throw(
+			_("{0} is a merchanting purchase — its goods never enter India, so no Goods Receipt Note applies.").format(
+				purchase_order
+			)
+		)
+	summary = _po_grn_summary(purchase_order)
+	lines = []
+	for r in frappe.get_all(
+		"Purchase Order Item",
+		filters={"parent": purchase_order},
+		fields=["name", "item_code", "item_name", "qty", "uom", "stock_uom", "conversion_factor"],
+		order_by="idx asc",
+	):
+		already = flt(summary["received_by_line"].get(r.name, 0))
+		lines.append(
+			{
+				"po_detail": r.name,
+				"item_code": r.item_code,
+				"item_name": r.item_name,
+				"ordered_qty": flt(r.qty),
+				"already_received": already,
+				"received_qty": flt(flt(r.qty) - already, 3),  # default to the remaining qty
+				"uom": r.uom,
+				"stock_uom": r.stock_uom,
+				"conversion_factor": flt(r.conversion_factor) or 1,
+			}
+		)
+	return {
+		"purchase_order": po.name,
+		"supplier": po.supplier,
+		"supplier_name": po.supplier_name,
+		"company": po.company,
+		"warehouses": _grn_warehouses(po.company),
+		"lines": lines,
+		"fully_received": summary["fully_received"],
+	}
+
+
+def _grn_item_rows(items) -> list[dict]:
+	out = []
+	for r in items or []:
+		if not r.get("item_code") or flt(r.get("received_qty")) <= 0:
+			continue
+		out.append(
+			{
+				"item_code": r.get("item_code"),
+				"item_name": r.get("item_name"),
+				"po_detail": r.get("po_detail") or None,
+				"ordered_qty": flt(r.get("ordered_qty")),
+				"received_qty": flt(r.get("received_qty")),
+				"uom": r.get("uom"),
+				"stock_uom": r.get("stock_uom"),
+				"conversion_factor": flt(r.get("conversion_factor")) or 1,
+			}
+		)
+	return out
+
+
+@frappe.whitelist()
+def create_grn(payload) -> dict:
+	frappe.has_permission("Goods Receipt Note", "create", throw=True)
+	if isinstance(payload, str):
+		payload = json.loads(payload)
+	if not payload.get("purchase_order"):
+		frappe.throw(_("Pick a Purchase Order"))
+	if not payload.get("warehouse"):
+		frappe.throw(_("Pick a receiving warehouse"))
+	items = _grn_item_rows(payload.get("items"))
+	if not items:
+		frappe.throw(_("Enter a received quantity for at least one line"))
+	doc = frappe.get_doc(
+		{
+			"doctype": "Goods Receipt Note",
+			"purchase_order": payload.get("purchase_order"),
+			"warehouse": payload.get("warehouse"),
+			"posting_date": payload.get("posting_date") or nowdate(),
+			"supplier_invoice_no": payload.get("supplier_invoice_no"),
+			"supplier_invoice_date": payload.get("supplier_invoice_date") or None,
+			"remarks": payload.get("remarks"),
+			"status": "Draft",
+			"items": items,
+			"packs": _pack_rows(payload.get("packs")),
+		}
+	)
+	doc.insert()
+	return {"name": doc.name}
+
+
+@frappe.whitelist()
+def update_grn(name: str, payload) -> dict:
+	doc = frappe.get_doc("Goods Receipt Note", name)
+	doc.check_permission("write")
+	if doc.status != "Draft":
+		frappe.throw(_("Only a draft Goods Receipt Note can be edited"))
+	if isinstance(payload, str):
+		payload = json.loads(payload)
+	if payload.get("warehouse"):
+		doc.warehouse = payload.get("warehouse")
+	if payload.get("posting_date"):
+		doc.posting_date = payload.get("posting_date")
+	doc.supplier_invoice_no = payload.get("supplier_invoice_no")
+	doc.supplier_invoice_date = payload.get("supplier_invoice_date") or None
+	doc.remarks = payload.get("remarks")
+	if payload.get("items") is not None:
+		doc.set("items", _grn_item_rows(payload.get("items")))
+	if payload.get("packs") is not None:
+		doc.set("packs", _pack_rows(payload.get("packs")))
+	doc.save()
+	return {"name": doc.name}
+
+
+def _grn_writeback_invoice(grn) -> None:
+	"""Copy the supplier invoice no/date onto the PO — the PO stays the system of
+	record for the 90-day GST export clock (its on_update_after_submit recomputes
+	gst_export_deadline and rebuilds the shipment checklist). Best-effort; never
+	blocks the receipt."""
+	if not (grn.supplier_invoice_no or grn.supplier_invoice_date):
+		return
+	try:
+		po = frappe.get_doc("Purchase Order", grn.purchase_order)
+		changed = False
+		if grn.supplier_invoice_no and po.supplier_invoice_no != grn.supplier_invoice_no:
+			po.supplier_invoice_no = grn.supplier_invoice_no
+			changed = True
+		if grn.supplier_invoice_date and str(po.supplier_invoice_date or "") != str(
+			grn.supplier_invoice_date
+		):
+			po.supplier_invoice_date = grn.supplier_invoice_date
+			changed = True
+		if changed:
+			po.save()  # fires on_update_after_submit → GST deadline + checklist rebuild
+	except Exception:
+		frappe.log_error(
+			title=f"GRN invoice write-back failed: {grn.name}", message=frappe.get_traceback()
+		)
+
+
+def _grn_assert_single_warehouse(doc) -> None:
+	"""One purchase order is received into ONE warehouse — keeps the shipment's
+	per-line warehouse resolution unambiguous (it picks the PO's Received GRN). A
+	second receipt for the same PO into a different warehouse is refused; use the
+	same warehouse, or a separate PO."""
+	other = frappe.db.get_value(
+		"Goods Receipt Note",
+		{
+			"purchase_order": doc.purchase_order,
+			"status": "Received",
+			"warehouse": ["!=", doc.warehouse],
+			"name": ["!=", doc.name],
+		},
+		["name", "warehouse"],
+		as_dict=True,
+	)
+	if other:
+		frappe.throw(
+			_(
+				"{0} already received goods for {1} into {2}. Receive into the same warehouse, or raise a separate purchase order."
+			).format(other.name, doc.purchase_order, other.warehouse)
+		)
+
+
+def _grn_assert_within_ordered(doc) -> None:
+	"""Cumulative received quantity (this GRN + other Received GRNs) may not exceed
+	each PO line's ordered quantity."""
+	ordered = {
+		r.name: flt(r.qty)
+		for r in frappe.get_all(
+			"Purchase Order Item", filters={"parent": doc.purchase_order}, fields=["name", "qty"]
+		)
+	}
+	already = _po_grn_summary(doc.purchase_order)["received_by_line"]  # other Received GRNs
+	by_line: dict = {}
+	for r in doc.items:
+		if r.po_detail:
+			by_line[r.po_detail] = by_line.get(r.po_detail, 0.0) + flt(r.received_qty)
+	for po_detail, qty in by_line.items():
+		if flt(already.get(po_detail, 0)) + qty > flt(ordered.get(po_detail, 0)) + 1e-6:
+			item = next((r.item_code for r in doc.items if r.po_detail == po_detail), po_detail)
+			frappe.throw(
+				_("Receiving {0} of {1} would exceed the ordered quantity ({2}).").format(
+					qty, item, flt(ordered.get(po_detail, 0))
+				)
+			)
+
+
+@frappe.whitelist()
+def submit_grn(name: str) -> dict:
+	"""Receive the goods: post quantity stock-IN at the warehouse (only when the
+	stock regime is on), copy the supplier invoice to the PO, and mark the GRN
+	Received. Idempotent."""
+	from exportflow import stock
+
+	doc = frappe.get_doc("Goods Receipt Note", name)
+	doc.check_permission("write")
+	if doc.status == "Received":
+		return {"name": name, "status": "Received"}
+	if doc.status != "Draft":
+		frappe.throw(_("Only a draft Goods Receipt Note can be received"))
+	if not doc.items:
+		frappe.throw(_("Nothing to receive"))
+	_grn_assert_single_warehouse(doc)
+	_grn_assert_within_ordered(doc)
+	if stock.maintain_stock_enabled():
+		# stock-IN in the line's transaction UOM — the shipment posts OUT in the
+		# same unit (Export Shipment Item.qty), so the ledger nets to zero once the
+		# received goods ship. conversion_factor is captured for reference only.
+		rows = [(r.item_code, doc.warehouse, flt(r.received_qty)) for r in doc.items]
+		stock.post_in(rows, stock.GRN_VOUCHER, doc.name, company=doc.company)
+	doc.db_set("status", "Received")
+	_grn_writeback_invoice(doc)
+	return {"name": name, "status": "Received"}
+
+
+@frappe.whitelist()
+def cancel_grn(name: str) -> dict:
+	"""Reverse the receipt: undo the stock-IN and mark the GRN Cancelled. Refuses
+	when a shipment has already shipped these goods out (reversing the stock-IN
+	would leave a dangling negative balance)."""
+	from exportflow import stock
+
+	doc = frappe.get_doc("Goods Receipt Note", name)
+	doc.check_permission("write")
+	if doc.status == "Cancelled":
+		return {"name": name, "status": "Cancelled"}
+	doc.assert_not_consumed()
+	stock.reverse(stock.GRN_VOUCHER, doc.name)
+	doc.db_set("status", "Cancelled")
+	return {"name": name, "status": "Cancelled"}
+
+
+@frappe.whitelist()
+def attach_grn_invoice(name: str, file_url: str) -> dict:
+	"""Stamp an uploaded supplier-invoice file onto the GRN (mirrors
+	attach_document_file for Document Instance)."""
+	doc = frappe.get_doc("Goods Receipt Note", name)
+	doc.check_permission("write")
+	if not frappe.db.exists(
+		"File",
+		{"file_url": file_url, "attached_to_doctype": "Goods Receipt Note", "attached_to_name": name},
+	):
+		frappe.throw(_("That file is not attached to {0}").format(name))
+	doc.db_set({"supplier_invoice_file": file_url})
+	return {"supplier_invoice_file": file_url}
+
+
+@frappe.whitelist()
+def get_grns() -> list[dict]:
+	frappe.has_permission("Goods Receipt Note", "read", throw=True)
+	company = exportflow_company()
+	filters = {"company": company} if company else {}
+	return frappe.get_list(
+		"Goods Receipt Note",
+		filters=filters,
+		fields=[
+			"name",
+			"purchase_order",
+			"supplier_name",
+			"warehouse",
+			"status",
+			"posting_date",
+			"supplier_invoice_no",
+		],
+		order_by="posting_date desc, creation desc",
+		limit_page_length=100,
+	)
+
+
+@frappe.whitelist()
+def get_grn_detail(name: str) -> dict:
+	frappe.has_permission("Goods Receipt Note", "read", doc=name, throw=True)
+	doc = frappe.get_doc("Goods Receipt Note", name)
+	can_write = bool(frappe.has_permission("Goods Receipt Note", "write", doc=name))
+	return {
+		"grn": {
+			"name": doc.name,
+			"purchase_order": doc.purchase_order,
+			"supplier": doc.supplier,
+			"supplier_name": doc.supplier_name,
+			"company": doc.company,
+			"posting_date": doc.posting_date,
+			"warehouse": doc.warehouse,
+			"status": doc.status,
+			"supplier_invoice_no": doc.supplier_invoice_no,
+			"supplier_invoice_date": doc.supplier_invoice_date,
+			"supplier_invoice_file": doc.supplier_invoice_file,
+			"remarks": doc.remarks,
+		},
+		"items": [
+			{
+				"name": r.name,
+				"item_code": r.item_code,
+				"item_name": r.item_name,
+				"po_detail": r.po_detail,
+				"ordered_qty": r.ordered_qty,
+				"received_qty": r.received_qty,
+				"uom": r.uom,
+			}
+			for r in doc.items
+		],
+		"packs": [
+			{
+				"name": p.name,
+				"item_code": p.item_code,
+				"batch_no": p.batch_no,
+				"marks": p.marks,
+				"num_packages": p.num_packages,
+				"pack_type": p.pack_type,
+				"net_per": p.net_per,
+				"tare_per": p.tare_per,
+				"mfg_date": p.mfg_date,
+				"exp_date": p.exp_date,
+			}
+			for p in doc.packs
+		],
+		"can": {
+			"edit": can_write and doc.status == "Draft",
+			"receive": can_write and doc.status == "Draft",
+			"cancel": can_write and doc.status == "Received",
+		},
+	}
+
+
+@frappe.whitelist()
+def get_grn_packs(purchase_orders) -> list[dict]:
+	"""Pack / batch rows captured on the Received GRNs of these purchase orders, so
+	the New Shipment form can pull them forward into its packing list."""
+	frappe.has_permission("Goods Receipt Note", "read", throw=True)
+	if isinstance(purchase_orders, str):
+		try:
+			purchase_orders = json.loads(purchase_orders)
+		except ValueError:
+			purchase_orders = [purchase_orders]
+	pos = [p for p in (purchase_orders or []) if p]
+	if not pos:
+		return []
+	grns = frappe.get_all(
+		"Goods Receipt Note",
+		filters={"purchase_order": ["in", pos], "status": "Received"},
+		pluck="name",
+	)
+	if not grns:
+		return []
+	return frappe.get_all(
+		"Goods Receipt Note Pack",
+		filters={"parent": ["in", grns]},
+		fields=[
+			"item_code",
+			"batch_no",
+			"marks",
+			"num_packages",
+			"pack_type",
+			"net_per",
+			"tare_per",
+			"mfg_date",
+			"exp_date",
+		],
+		order_by="parent asc, idx asc",
+	)
 
 
 @frappe.whitelist()

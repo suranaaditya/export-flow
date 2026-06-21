@@ -63,8 +63,15 @@ doc_events = {
 			"exportflow.exportflow.doctype.export_realization.export_realization.fill_export_dates_for_shipment",
 			# a fully-shipped drop-ship PO is delivered — flip its status so the SO advances
 			"exportflow.overrides.purchase_order.mark_covered_pos_delivered",
+			# reconcile the quantity stock-OUT (departure flipped via a full save, or
+			# a line-qty edit after departure); set_milestone syncs the db_set path
+			"exportflow.exportflow.doctype.export_shipment.export_shipment.sync_shipment_stock_on_update",
 		],
-		"on_trash": "exportflow.checklist.on_shipment_trash",
+		"on_trash": [
+			"exportflow.checklist.on_shipment_trash",
+			# undo any quantity stock-OUT this shipment posted at departure
+			"exportflow.exportflow.doctype.export_shipment.export_shipment.reverse_shipment_stock_on_trash",
+		],
 	},
 	"Letter of Credit": {
 		"on_update": "exportflow.checklist.rebuild_for_lc",

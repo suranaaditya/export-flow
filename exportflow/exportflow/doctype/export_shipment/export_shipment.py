@@ -420,6 +420,7 @@ class ExportShipment(Document):
 			if any(not m.completed for m in rows[:idx]):
 				frappe.throw(_("Complete earlier milestones first"))
 			self.assert_milestone_not_blocked(rows[idx].milestone)
+			self._assert_goods_received(rows[idx].milestone)
 			rows[idx].completed = 1
 			rows[idx].actual_date = actual_date or frappe.utils.nowdate()
 			rows[idx].db_set(
@@ -436,6 +437,7 @@ class ExportShipment(Document):
 
 		self.set_current_milestone()
 		self.db_set("current_milestone", self.current_milestone, notify=True)
+		self.sync_shipment_stock()
 
 	def assert_milestone_not_blocked(self, milestone: str):
 		"""§4.2/§5: an unresolved blocking Document Instance (default: ADC NOC,
@@ -467,6 +469,96 @@ class ExportShipment(Document):
 			if m.milestone == target and m.completed:
 				return m.actual_date
 		return None
+
+	# --- stock-OUT (quantity-only; gated on ExportFlow Settings.maintain_stock) ---
+
+	def _grn_warehouse_for_line(self, line):
+		"""The warehouse holding this line's received stock — from a Received Goods
+		Receipt Note of the line's purchase order (the line's own PO link, else the
+		SO-line's submitted PO via the same fallback get_shipment_detail uses)."""
+		po = line.purchase_order or self._effective_po(line)[0]
+		if not po:
+			return None
+		return frappe.db.get_value(
+			"Goods Receipt Note",
+			{"purchase_order": po, "status": "Received"},
+			"warehouse",
+			order_by="creation desc",
+		)
+
+	def _assert_goods_received(self, milestone):
+		"""Hard, opt-in gate: when grn_required_for_shipment is on, a non-merchanting
+		shipment cannot complete its departure milestone until every line has enough
+		received (un-shipped) stock. The stock post itself never blocks — this guard
+		is the only thing that does."""
+		from exportflow import stock
+		from exportflow.mtt import is_merchanting
+
+		if is_merchanting(self.trade_type) or not stock.maintain_stock_enabled():
+			return
+		if milestone != self.export_milestone_name():
+			return
+		if not frappe.db.get_single_value("ExportFlow Settings", "grn_required_for_shipment"):
+			return
+		short = []
+		for line in self.items:
+			wh = self._grn_warehouse_for_line(line)
+			if not wh or stock.balance(line.item_code, wh) + QTY_EPSILON < flt(line.qty):
+				short.append(line.item_code)
+		if short:
+			frappe.throw(
+				_(
+					"No goods received for: {0}. Create a Goods Receipt Note that receives them "
+					"before this shipment can depart."
+				).format(", ".join(dict.fromkeys(short)))
+			)
+
+	def sync_shipment_stock(self, force_resync=False):
+		"""Reconcile the shipment's stock-OUT with its current state: once the
+		shipment has departed (export milestone complete) post the shipped quantity
+		OUT of each line's GRN warehouse; otherwise reverse it. Idempotent and never
+		blocks (allow_negative — the optional hard gate is _assert_goods_received).
+		No-op for merchanting and when the stock regime is off."""
+		from exportflow import stock
+		from exportflow.mtt import is_merchanting
+
+		voucher = stock.SHIPMENT_VOUCHER
+		eligible = (
+			stock.maintain_stock_enabled()
+			and not is_merchanting(self.trade_type)
+			and self.export_completed_on() is not None
+		)
+		if not eligible:
+			stock.reverse(voucher, self.name)
+			return
+		rows = []
+		for line in self.items:
+			wh = self._grn_warehouse_for_line(line)
+			if wh:
+				rows.append((line.item_code, wh, flt(line.qty)))
+		if force_resync:
+			stock.reverse(voucher, self.name)
+		if rows:
+			stock.post_out(rows, voucher, self.name, company=self.company, allow_negative=True)
+
+
+def reverse_shipment_stock_on_trash(doc, method=None):
+	"""Export Shipment on_trash: undo any stock-OUT this shipment posted."""
+	from exportflow import stock
+
+	stock.reverse(stock.SHIPMENT_VOUCHER, doc.name)
+
+
+def sync_shipment_stock_on_update(doc, method=None):
+	"""Export Shipment on_update: reconcile the stock-OUT on every full save (a
+	departure flipped via a direct desk/REST save, or a line-qty edit on an
+	already-departed shipment). set_milestone uses db_set and does NOT fire
+	on_update, so it syncs separately — this closes the full-save path. Idempotent
+	and reverses when ineligible; never blocks the save."""
+	try:
+		doc.sync_shipment_stock(force_resync=True)
+	except Exception:
+		frappe.log_error(title=f"Shipment stock sync failed: {doc.name}", message=frappe.get_traceback())
 
 
 def advance_milestones_from_facts(doc, method=None):

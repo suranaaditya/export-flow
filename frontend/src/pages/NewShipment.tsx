@@ -8,7 +8,7 @@ import {
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
 import { MasterModal } from '@/components/MasterModal';
-import { PackEditor, editToPayload, type PackEdit } from '@/components/packEditor';
+import { PackEditor, editToPayload, newPack, type PackEdit } from '@/components/packEditor';
 import { CheckInput, Field, SearchSelect, SelectInput, TextInput } from '@/components/form';
 import { Card, CHead, EmptyMsg } from '@/components/ui';
 import {
@@ -17,6 +17,7 @@ import {
 	TRADE_TYPES,
 	isMerchanting,
 	parseServerError,
+	type ShipmentPack,
 	type ShippableLine,
 } from '@/lib/api';
 import { MASTERS, STATIC_OPTIONS, type OptionSource } from '@/lib/masters';
@@ -213,6 +214,50 @@ export function NewShipment() {
 	const packItemOpts = [...new Map(checkedLines.map((l) => [l.item_code, l.item_name])).entries()].map(
 		([value, label]) => ({ value, label: label || value }),
 	);
+
+	const { call: fetchGrnPacks, loading: pullingPacks } = useFrappePostCall<{
+		message: ShipmentPack[];
+	}>(API.grnPacks);
+	const [pullMsg, setPullMsg] = useState<string | null>(null);
+
+	async function pullPacksFromGrn() {
+		setPullMsg(null);
+		const pos = [...new Set(checkedLines.map((l) => l.purchase_order).filter((p): p is string => !!p))];
+		if (pos.length === 0) {
+			setPullMsg('The ticked lines have no purchase order to pull from.');
+			return;
+		}
+		try {
+			const res = await fetchGrnPacks({ purchase_orders: pos });
+			const items = new Set(checkedLines.map((l) => l.item_code));
+			const sig = (p: ShipmentPack) =>
+				`${p.item_code}|${p.batch_no ?? ''}|${p.pack_type ?? ''}|${p.num_packages ?? ''}`;
+			const seen = new Set(
+				packs.map((p) => `${p.item_code}|${p.batch_no}|${p.pack_type}|${p.num_packages}`),
+			);
+			// fresh uids (never index-derived) and skip rows already in the editor
+			const pulled = (res.message ?? [])
+				.filter((p) => items.has(p.item_code) && !seen.has(sig(p)))
+				.map((p) => ({
+					...newPack(p.item_code),
+					batch_no: p.batch_no ?? '',
+					marks: p.marks ?? '',
+					num_packages: p.num_packages != null ? String(p.num_packages) : '',
+					pack_type: p.pack_type ?? '',
+					net_per: p.net_per != null ? String(p.net_per) : '',
+					tare_per: p.tare_per != null ? String(p.tare_per) : '',
+					mfg_date: p.mfg_date ?? '',
+					exp_date: p.exp_date ?? '',
+				}));
+			if (pulled.length === 0) {
+				setPullMsg('No new pack detail to pull (already added, or none received).');
+				return;
+			}
+			setPacks((prev) => [...prev, ...pulled]);
+		} catch (e) {
+			setPullMsg(parseServerError(e));
+		}
+	}
 	const mttSourced = hasMtt && !hasIndia;
 	const mttMixed = hasMtt && hasIndia;
 	// drive the trade type both ways: lock to merchanting when MTT-sourced, and
@@ -776,6 +821,23 @@ export function NewShipment() {
 									One row per batch — drum ranges, mfg/exp and net/tare weights for the invoice &amp;
 									packing list. The item is one of the lines ticked above.
 								</div>
+								{checkedLines.some((l) => l.purchase_order) && (
+									<div style={{ marginTop: 8 }}>
+										<button
+											type="button"
+											className="btn"
+											disabled={pullingPacks}
+											onClick={() => void pullPacksFromGrn()}
+										>
+											<Icon name="package" size={14} /> {pullingPacks ? 'Pulling…' : 'Pull pack details from GRN'}
+										</button>
+										{pullMsg && (
+											<span className="sub" style={{ marginLeft: 10 }}>
+												{pullMsg}
+											</span>
+										)}
+									</div>
+								)}
 							</div>
 							<PackEditor rows={packs} onChange={setPacks} itemOptions={packItemOpts} />
 						</>

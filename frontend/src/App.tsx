@@ -16,6 +16,9 @@ import { NewPurchaseOrder } from '@/pages/NewPurchaseOrder';
 import { NewShipment } from '@/pages/NewShipment';
 import { PurchaseOrderDetail } from '@/pages/PurchaseOrderDetail';
 import { Purchases } from '@/pages/Purchases';
+import { GoodsReceiptNotes } from '@/pages/GoodsReceiptNotes';
+import { GoodsReceiptNoteDetail } from '@/pages/GoodsReceiptNoteDetail';
+import { NewGoodsReceiptNote } from '@/pages/NewGoodsReceiptNote';
 import { Reports } from '@/pages/Reports';
 import { ShipmentDetail } from '@/pages/ShipmentDetail';
 import { SalesOrderDetail } from '@/pages/SalesOrderDetail';
@@ -64,6 +67,10 @@ export default function App() {
 								<Route path="purchases/new" element={<NewPurchaseOrder />} />
 								<Route path="purchases/:id/edit" element={<NewPurchaseOrder />} />
 								<Route path="purchases/:id" element={<PurchaseOrderDetail />} />
+								<Route path="grns" element={<GoodsReceiptNotes />} />
+								<Route path="grns/new" element={<NewGoodsReceiptNote />} />
+								<Route path="grns/:id/edit" element={<NewGoodsReceiptNote />} />
+								<Route path="grns/:id" element={<GoodsReceiptNoteDetail />} />
 								<Route path="shipments" element={<Shipments />} />
 								<Route path="shipments/new" element={<NewShipment />} />
 								<Route path="shipments/:id" element={<ShipmentDetail />} />

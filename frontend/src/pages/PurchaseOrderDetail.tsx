@@ -200,6 +200,11 @@ export function PurchaseOrderDetail() {
 						<Icon name="unlock" size={15} /> {reopening ? 'Reopening…' : 'Re-open'}
 					</button>
 				)}
+				{po.docstatus === 1 && !po.merchanting_trade && (
+					<button className="btn" onClick={() => navigate(`/grns/new?po=${id}`)}>
+						<Icon name="package" size={15} /> Create GRN
+					</button>
+				)}
 				{po.docstatus === 0 && can.submit && (
 					<button className="btn primary" disabled={submitting} onClick={() => void onSubmitOrder()}>
 						<Icon name="check" size={15} /> {submitting ? 'Submitting…' : 'Submit order'}
@@ -399,6 +404,37 @@ export function PurchaseOrderDetail() {
 							</>
 						)}
 					</Card>
+
+					{po.docstatus === 1 && !po.merchanting_trade && (
+						<Card>
+							<CHead
+								icon="package"
+								title="Goods received"
+								count={detail.received ? <Tag tone="ok">Fully received</Tag> : `${detail.grns.length}`}
+							/>
+							{detail.grns.length === 0 ? (
+								<EmptyMsg
+									title="Not received yet"
+									text="Receive these goods into a warehouse before they ship."
+								/>
+							) : (
+								detail.grns.map((g) => (
+									<LRow
+										key={g.name}
+										icon="package"
+										t1={<span className="data">{g.name}</span>}
+										t2={`${g.warehouse} · ${fmtDate(g.posting_date)}`}
+										right={
+											<Tag tone={g.status === 'Received' ? 'ok' : g.status === 'Cancelled' ? 'err' : 'pend'}>
+												{g.status}
+											</Tag>
+										}
+										onClick={() => navigate('/grns/' + g.name)}
+									/>
+								))
+							)}
+						</Card>
+					)}
 
 					{(po.tc_name || po.terms) && (
 						<Card>

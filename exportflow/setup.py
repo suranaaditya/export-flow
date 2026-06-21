@@ -76,6 +76,8 @@ GRANTS = {
 		"Export Accounts": [],
 		"Export Viewer": [],
 	},
+	# warehouses a Goods Receipt Note receives into — read-only picklist for export roles
+	"Warehouse": {role: [] for role in EXPORT_ROLES},
 }
 
 

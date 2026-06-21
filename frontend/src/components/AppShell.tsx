@@ -10,6 +10,7 @@ const NAV_ITEMS: { to: string; label: string; icon: IconName }[] = [
 	{ to: '/sales', label: 'Sales dashboard', icon: 'sparkle' },
 	{ to: '/sales-orders', label: 'Sales orders', icon: 'file-text' },
 	{ to: '/purchases', label: 'Purchases', icon: 'cube' },
+	{ to: '/grns', label: 'Goods receipts', icon: 'package' },
 	{ to: '/shipments', label: 'Shipments', icon: 'ship' },
 	{ to: '/documents', label: 'Documents', icon: 'copy' },
 	{ to: '/finance', label: 'Finance', icon: 'rupee' },

@@ -1,0 +1,267 @@
+import frappe
+from frappe.utils import flt, nowdate
+
+try:
+	from frappe.tests import IntegrationTestCase
+except ImportError:  # frappe < 16
+	from frappe.tests.utils import FrappeTestCase as IntegrationTestCase
+
+from erpnext.selling.doctype.sales_order.sales_order import make_purchase_order
+
+from exportflow import stock
+from exportflow.api import (
+	cancel_grn,
+	create_grn,
+	create_shipment,
+	get_grn_context,
+	get_po_detail,
+	submit_grn,
+)
+from exportflow.mtt import MERCHANTING
+from exportflow.tests.test_dropship import (
+	_suffix,
+	make_customer,
+	make_dropship_item,
+	make_dropship_so,
+	make_supplier,
+)
+
+
+def _ensure_warehouse(company: str) -> str:
+	wh = frappe.get_all(
+		"Warehouse", filters={"company": company, "is_group": 0, "disabled": 0}, pluck="name"
+	)
+	if wh:
+		return wh[0]
+	return (
+		frappe.get_doc(
+			{"doctype": "Warehouse", "warehouse_name": f"_Test GRN WH {_suffix()}", "company": company}
+		)
+		.insert(ignore_permissions=True)
+		.name
+	)
+
+
+class TestGRN(IntegrationTestCase):
+	"""Goods Receipt Note — quantity stock-in, PO receipt coverage, supplier-invoice
+	write-back, merchanting skip, idempotency and reversal. The stock regime
+	(ExportFlow Settings.maintain_stock) is the behaviour under test, so each test
+	turns it on (one test turns it off to prove the drop-ship fallback)."""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls.company = frappe.db.get_single_value("Global Defaults", "default_company")
+		cls.warehouse = _ensure_warehouse(cls.company)
+
+	def setUp(self):
+		frappe.db.set_single_value("ExportFlow Settings", "maintain_stock", 1)
+
+	def _po(self, qty=100, rate=50):
+		sfx = _suffix()
+		supplier = make_supplier(f"_Test GRN Sup {sfx}")
+		item = make_dropship_item(f"_Test GRN Item {sfx}", supplier, self.company)
+		customer = make_customer(f"_Test GRN Cust {sfx}")
+		so = make_dropship_so(customer, self.company, [{"item_code": item, "qty": qty, "rate": rate}])
+		po = make_purchase_order(so.name, selected_items=[{"item_code": item, "supplier": supplier}])[0]
+		po.items[0].rate = rate
+		po.save(ignore_permissions=True)
+		po.submit()
+		return po, item
+
+	def _receive(self, po, item, qty, **kw):
+		payload = {
+			"purchase_order": po.name,
+			"warehouse": self.warehouse,
+			"items": [
+				{
+					"item_code": item,
+					"po_detail": po.items[0].name,
+					"ordered_qty": po.items[0].qty,
+					"received_qty": qty,
+					"uom": po.items[0].uom,
+				}
+			],
+			**kw,
+		}
+		return create_grn(payload)["name"]
+
+	def test_grn_posts_stock_and_marks_received(self):
+		po, item = self._po(qty=100)
+		ctx = get_grn_context(po.name)
+		self.assertEqual(len(ctx["lines"]), 1)
+		self.assertEqual(flt(ctx["lines"][0]["received_qty"]), 100)  # defaults to the remaining qty
+
+		grn = self._receive(
+			po, item, 100, supplier_invoice_no="SI-GRN-1", supplier_invoice_date="2026-06-10"
+		)
+		self.assertEqual(frappe.db.get_value("Goods Receipt Note", grn, "status"), "Draft")
+		self.assertEqual(stock.balance(item, self.warehouse), 0)
+
+		submit_grn(grn)
+		self.assertEqual(frappe.db.get_value("Goods Receipt Note", grn, "status"), "Received")
+		self.assertEqual(stock.balance(item, self.warehouse), 100)
+
+		po.reload()
+		self.assertEqual(po.supplier_invoice_no, "SI-GRN-1", "invoice no must write back to the PO")
+		self.assertTrue(get_po_detail(po.name)["received"], "a fully-received PO must read received")
+
+	def test_partial_receipt_leaves_po_unreceived(self):
+		po, item = self._po(qty=100)
+		grn = self._receive(po, item, 40)
+		submit_grn(grn)
+		self.assertEqual(stock.balance(item, self.warehouse), 40)
+		self.assertFalse(get_po_detail(po.name)["received"], "a partly-received PO must stay unreceived")
+
+	def test_submit_is_idempotent(self):
+		po, item = self._po(qty=10)
+		grn = self._receive(po, item, 10)
+		submit_grn(grn)
+		submit_grn(grn)
+		self.assertEqual(stock.balance(item, self.warehouse), 10, "double submit must not double-post")
+
+	def test_cancel_reverses_stock(self):
+		po, item = self._po(qty=10)
+		grn = self._receive(po, item, 10)
+		submit_grn(grn)
+		self.assertEqual(stock.balance(item, self.warehouse), 10)
+		cancel_grn(grn)
+		self.assertEqual(frappe.db.get_value("Goods Receipt Note", grn, "status"), "Cancelled")
+		self.assertEqual(stock.balance(item, self.warehouse), 0, "cancel must reverse the stock-in")
+
+	def test_merchanting_po_rejects_grn(self):
+		po, item = self._po(qty=10)
+		frappe.db.set_value("Purchase Order", po.name, "merchanting_trade", 1)
+		self.assertRaises(frappe.ValidationError, get_grn_context, po.name)
+		self.assertRaises(
+			frappe.ValidationError,
+			create_grn,
+			{
+				"purchase_order": po.name,
+				"warehouse": self.warehouse,
+				"items": [{"item_code": item, "po_detail": po.items[0].name, "received_qty": 10}],
+			},
+		)
+
+	def test_no_stock_when_regime_off(self):
+		frappe.db.set_single_value("ExportFlow Settings", "maintain_stock", 0)
+		po, item = self._po(qty=10)
+		grn = self._receive(po, item, 10, supplier_invoice_no="SI-OFF-1")
+		submit_grn(grn)
+		# the GRN still records the receipt + invoice, but posts no stock in light mode
+		self.assertEqual(frappe.db.get_value("Goods Receipt Note", grn, "status"), "Received")
+		self.assertEqual(stock.balance(item, self.warehouse), 0)
+		po.reload()
+		self.assertEqual(po.supplier_invoice_no, "SI-OFF-1")
+
+	# ---- shipment stock-OUT ----------------------------------------------------
+
+	def _ship(self, po, item, qty):
+		row = po.items[0]
+		return create_shipment(
+			{
+				"customer": frappe.db.get_value("Sales Order", row.sales_order, "customer"),
+				"mode": "Sea",
+				"items": [
+					{
+						"item_code": item,
+						"qty": qty,
+						"uom": row.uom,
+						"sales_order": row.sales_order,
+						"so_detail": row.sales_order_item,
+						"purchase_order": po.name,
+						"po_detail": row.name,
+					}
+				],
+			}
+		)["name"]
+
+	def _mark_departed(self, shp_name, completed=True):
+		"""Flip the departure milestone directly (bypassing the sequential engine /
+		document blockers) and re-sync stock, to unit-test the stock effect."""
+		doc = frappe.get_doc("Export Shipment", shp_name)
+		target = doc.export_milestone_name()
+		for m in doc.milestones:
+			if m.milestone == target:
+				m.db_set(
+					{"completed": 1 if completed else 0, "actual_date": nowdate() if completed else None},
+					update_modified=False,
+				)
+		doc.reload()
+		doc.sync_shipment_stock(force_resync=True)
+		return doc
+
+	def test_shipment_posts_stock_out_on_departure(self):
+		po, item = self._po(qty=100)
+		submit_grn(self._receive(po, item, 100))
+		self.assertEqual(stock.balance(item, self.warehouse), 100)
+		shp = self._ship(po, item, 100)
+		self._mark_departed(shp)
+		self.assertEqual(stock.balance(item, self.warehouse), 0, "departure must ship the received stock out")
+		# un-departing reverses the stock-out
+		self._mark_departed(shp, completed=False)
+		self.assertEqual(stock.balance(item, self.warehouse), 100, "un-departing must restore the stock")
+
+	def test_merchanting_shipment_posts_no_stock_out(self):
+		po, item = self._po(qty=10)
+		submit_grn(self._receive(po, item, 10))
+		shp = self._ship(po, item, 10)
+		frappe.db.set_value("Export Shipment", shp, "trade_type", MERCHANTING)
+		self._mark_departed(shp)
+		self.assertFalse(stock.has_entries(stock.SHIPMENT_VOUCHER, shp), "merchanting never ships stock out")
+		self.assertEqual(stock.balance(item, self.warehouse), 10)
+
+	def test_grn_required_blocks_departure_without_goods(self):
+		frappe.db.set_single_value("ExportFlow Settings", "grn_required_for_shipment", 1)
+		po, item = self._po(qty=10)
+		shp = self._ship(po, item, 10)
+		doc = frappe.get_doc("Export Shipment", shp)
+		target = doc.export_milestone_name()
+		self.assertRaises(frappe.ValidationError, doc._assert_goods_received, target)
+		# once the goods are received, the guard passes
+		submit_grn(self._receive(po, item, 10))
+		frappe.get_doc("Export Shipment", shp)._assert_goods_received(target)
+
+	# ---- review fixes ----------------------------------------------------------
+
+	def test_cannot_cancel_grn_after_goods_shipped(self):
+		po, item = self._po(qty=100)
+		grn = self._receive(po, item, 100)
+		submit_grn(grn)
+		shp = self._ship(po, item, 100)
+		self._mark_departed(shp)  # ships the 100 out — balance now 0
+		self.assertRaises(frappe.ValidationError, cancel_grn, grn)
+
+	def test_trashing_grn_reverses_its_stock(self):
+		po, item = self._po(qty=10)
+		grn = self._receive(po, item, 10)
+		submit_grn(grn)
+		self.assertEqual(stock.balance(item, self.warehouse), 10)
+		frappe.delete_doc("Goods Receipt Note", grn, ignore_permissions=True)
+		self.assertEqual(stock.balance(item, self.warehouse), 0, "trash must reverse the stock-IN")
+
+	def test_over_receipt_blocked_at_submit(self):
+		po, item = self._po(qty=10)
+		grn = self._receive(po, item, 15)  # more than ordered
+		self.assertRaises(frappe.ValidationError, submit_grn, grn)
+
+	def test_one_receiving_warehouse_per_po(self):
+		po, item = self._po(qty=100)
+		submit_grn(self._receive(po, item, 40))  # into self.warehouse
+		wh2 = (
+			frappe.get_doc(
+				{"doctype": "Warehouse", "warehouse_name": f"_Test GRN WH2 {_suffix()}", "company": self.company}
+			)
+			.insert(ignore_permissions=True)
+			.name
+		)
+		grn2 = create_grn(
+			{
+				"purchase_order": po.name,
+				"warehouse": wh2,
+				"items": [
+					{"item_code": item, "po_detail": po.items[0].name, "received_qty": 30, "uom": po.items[0].uom}
+				],
+			}
+		)["name"]
+		self.assertRaises(frappe.ValidationError, submit_grn, grn2)
