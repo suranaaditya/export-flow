@@ -193,6 +193,8 @@ export const API = {
 	attachGrnInvoice: 'exportflow.api.attach_grn_invoice',
 	grnPacks: 'exportflow.api.get_grn_packs',
 	receivablePos: 'exportflow.api.get_receivable_pos',
+	addGrnDocument: 'exportflow.api.add_grn_document',
+	removeGrnDocument: 'exportflow.api.remove_grn_document',
 } as const;
 
 export interface ForwardContract {
@@ -801,6 +803,7 @@ export interface GRNDetailData {
 		uom: string | null;
 	}[];
 	packs: ShipmentPack[];
+	documents: { name: string; label: string; file: string; remarks: string | null }[];
 	can: { edit: boolean; receive: boolean; cancel: boolean };
 }
 

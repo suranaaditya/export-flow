@@ -1729,12 +1729,45 @@ def get_grn_detail(name: str) -> dict:
 			}
 			for p in doc.packs
 		],
+		"documents": [
+			{"name": d.name, "label": d.label, "file": d.file, "remarks": d.remarks}
+			for d in doc.documents
+		],
 		"can": {
 			"edit": can_write and doc.status == "Draft",
 			"receive": can_write and doc.status == "Draft",
 			"cancel": can_write and doc.status == "Received",
 		},
 	}
+
+
+@frappe.whitelist()
+def add_grn_document(name: str, label: str, file_url: str, remarks: str | None = None) -> dict:
+	"""Attach a supplier-provided document (already uploaded to this GRN) as a
+	labelled row — captures the invoice copy, CoA, packing list, test certs, etc.
+	at the receipt, for the export documentation."""
+	doc = frappe.get_doc("Goods Receipt Note", name)
+	doc.check_permission("write")
+	if not (label or "").strip():
+		frappe.throw(_("Give the document a name (e.g. Certificate of Analysis)"))
+	if not frappe.db.exists(
+		"File",
+		{"file_url": file_url, "attached_to_doctype": "Goods Receipt Note", "attached_to_name": name},
+	):
+		frappe.throw(_("That file is not attached to {0}").format(name))
+	doc.append("documents", {"label": label.strip(), "file": file_url, "remarks": remarks})
+	doc.save()
+	return {"name": name}
+
+
+@frappe.whitelist()
+def remove_grn_document(name: str, row: str) -> dict:
+	"""Remove a supplier-document row from a GRN."""
+	doc = frappe.get_doc("Goods Receipt Note", name)
+	doc.check_permission("write")
+	doc.set("documents", [d for d in doc.documents if d.name != row])
+	doc.save()
+	return {"name": name}
 
 
 @frappe.whitelist()

@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { useFrappeFileUpload, useFrappeGetCall, useFrappePostCall } from 'frappe-react-sdk';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
+import { TextInput } from '@/components/form';
 import { Card, CHead, EmptyMsg, Facts, Tag } from '@/components/ui';
 import { API, parseServerError, type GRNDetailData } from '@/lib/api';
 import { fmtDateLong } from '@/lib/format';
@@ -22,9 +23,13 @@ export function GoodsReceiptNoteDetail() {
 	const { call: submitGrn, loading: receiving } = useFrappePostCall(API.submitGrn);
 	const { call: cancelGrn, loading: cancelling } = useFrappePostCall(API.cancelGrn);
 	const { call: attachInvoice } = useFrappePostCall(API.attachGrnInvoice);
+	const { call: addDocument, loading: addingDoc } = useFrappePostCall(API.addGrnDocument);
+	const { call: removeDocument } = useFrappePostCall(API.removeGrnDocument);
 	const { upload, loading: uploading } = useFrappeFileUpload();
 	const [actionErr, setActionErr] = useState<string | null>(null);
+	const [docLabel, setDocLabel] = useState('');
 	const fileRef = useRef<HTMLInputElement | null>(null);
+	const docFileRef = useRef<HTMLInputElement | null>(null);
 
 	async function onReceive() {
 		setActionErr(null);
@@ -62,6 +67,33 @@ export function GoodsReceiptNoteDetail() {
 		}
 	}
 
+	async function onAddDocument(file: File) {
+		setActionErr(null);
+		try {
+			const res = await upload(file, {
+				doctype: 'Goods Receipt Note',
+				docname: id,
+				fieldname: 'documents',
+				isPrivate: true,
+			});
+			await addDocument({ name: id, label: docLabel.trim(), file_url: res.file_url });
+			setDocLabel('');
+			await mutate();
+		} catch (e) {
+			setActionErr(parseServerError(e));
+		}
+	}
+
+	async function onRemoveDocument(row: string) {
+		setActionErr(null);
+		try {
+			await removeDocument({ name: id, row });
+			await mutate();
+		} catch (e) {
+			setActionErr(parseServerError(e));
+		}
+	}
+
 	if (isLoading) {
 		return (
 			<main className="tight">
@@ -89,7 +121,7 @@ export function GoodsReceiptNoteDetail() {
 		);
 	}
 
-	const { grn, items, packs, can } = d;
+	const { grn, items, packs, documents, can } = d;
 
 	return (
 		<main className="tight">
@@ -236,6 +268,67 @@ export function GoodsReceiptNoteDetail() {
 							<button className="btn" disabled={uploading} onClick={() => fileRef.current?.click()}>
 								<Icon name="upload" size={15} /> {uploading ? 'Uploading…' : 'Upload invoice'}
 							</button>
+						</div>
+					</Card>
+
+					<Card>
+						<CHead icon="copy" title="Supplier documents" count={documents.length || undefined} />
+						<div style={{ padding: '6px 18px 16px' }}>
+							<div className="sub" style={{ marginBottom: documents.length ? 10 : 6 }}>
+								Invoice copy, certificate of analysis, packing list, test certificates… attach what the
+								supplier provides — it stays with the goods, ready for the export documentation.
+							</div>
+							{documents.map((doc) => (
+								<div
+									key={doc.name}
+									style={{
+										display: 'flex',
+										alignItems: 'center',
+										gap: 8,
+										padding: '8px 0',
+										borderTop: '1px solid var(--hairline)',
+									}}
+								>
+									<Icon name="file-text" size={15} />
+									<span style={{ flex: 1 }}>
+										<span className="c1">{doc.label}</span>
+										<a className="data" href={doc.file} target="_blank" rel="noreferrer" style={{ display: 'block', fontSize: 12 }}>
+											View file
+										</a>
+									</span>
+									<button
+										className="xbtn"
+										aria-label="Remove document"
+										onClick={() => void onRemoveDocument(doc.name)}
+									>
+										<Icon name="close" size={13} />
+									</button>
+								</div>
+							))}
+							<input
+								ref={docFileRef}
+								type="file"
+								style={{ display: 'none' }}
+								onChange={(e) => {
+									const f = e.target.files?.[0];
+									if (f) void onAddDocument(f);
+									e.target.value = '';
+								}}
+							/>
+							<div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+								<TextInput
+									value={docLabel}
+									onChange={setDocLabel}
+									placeholder="Document name, e.g. Certificate of Analysis"
+								/>
+								<button
+									className="btn"
+									disabled={!docLabel.trim() || addingDoc || uploading}
+									onClick={() => docFileRef.current?.click()}
+								>
+									<Icon name="upload" size={15} /> {addingDoc ? 'Adding…' : 'Add file'}
+								</button>
+							</div>
 						</div>
 					</Card>
 

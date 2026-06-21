@@ -10,11 +10,13 @@ from erpnext.selling.doctype.sales_order.sales_order import make_purchase_order
 
 from exportflow import stock
 from exportflow.api import (
+	add_grn_document,
 	cancel_grn,
 	create_grn,
 	create_shipment,
 	get_grn_context,
 	get_po_detail,
+	remove_grn_document,
 	submit_grn,
 )
 from exportflow.mtt import MERCHANTING
@@ -244,6 +246,29 @@ class TestGRN(IntegrationTestCase):
 		po, item = self._po(qty=10)
 		grn = self._receive(po, item, 15)  # more than ordered
 		self.assertRaises(frappe.ValidationError, submit_grn, grn)
+
+	def test_supplier_documents_add_and_remove(self):
+		po, item = self._po(qty=10)
+		grn = self._receive(po, item, 10)
+		submit_grn(grn)
+		f = frappe.get_doc(
+			{
+				"doctype": "File",
+				"file_name": f"coa-{_suffix()}.txt",
+				"attached_to_doctype": "Goods Receipt Note",
+				"attached_to_name": grn,
+				"is_private": 1,
+				"content": "test",
+			}
+		).insert(ignore_permissions=True)
+		add_grn_document(grn, "Certificate of Analysis", f.file_url)
+		docs = frappe.get_doc("Goods Receipt Note", grn).documents
+		self.assertEqual(len(docs), 1)
+		self.assertEqual(docs[0].label, "Certificate of Analysis")
+		# a file not attached to the GRN is refused
+		self.assertRaises(frappe.ValidationError, add_grn_document, grn, "Bogus", "/private/files/nope.pdf")
+		remove_grn_document(grn, docs[0].name)
+		self.assertEqual(len(frappe.get_doc("Goods Receipt Note", grn).documents), 0)
 
 	def test_one_receiving_warehouse_per_po(self):
 		po, item = self._po(qty=100)
