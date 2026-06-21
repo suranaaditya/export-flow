@@ -3,7 +3,7 @@ import { useFrappeFileUpload, useFrappeGetCall, useFrappePostCall } from 'frappe
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
 import { SearchSelect } from '@/components/form';
-import { Card, CHead, EmptyMsg, Facts, Tag } from '@/components/ui';
+import { Card, CHead, EmptyMsg, Facts, LRow, Tag } from '@/components/ui';
 import { API, parseServerError, type GRNDetailData } from '@/lib/api';
 import { fmtDateLong } from '@/lib/format';
 
@@ -130,7 +130,7 @@ export function GoodsReceiptNoteDetail() {
 		);
 	}
 
-	const { grn, items, packs, documents, can } = d;
+	const { grn, items, packs, documents, returns, can } = d;
 
 	return (
 		<main className="tight">
@@ -149,6 +149,11 @@ export function GoodsReceiptNoteDetail() {
 				{can.edit && (
 					<button className="btn" onClick={() => navigate('/grns/' + id + '/edit')}>
 						<Icon name="file-text" size={15} /> Edit
+					</button>
+				)}
+				{can.return_material && (
+					<button className="btn" onClick={() => navigate('/returns/new?grn=' + id)}>
+						<Icon name="refresh" size={15} /> Return material
 					</button>
 				)}
 				{can.cancel && (
@@ -343,6 +348,26 @@ export function GoodsReceiptNoteDetail() {
 							</div>
 						</div>
 					</Card>
+
+					{returns.length > 0 && (
+						<Card>
+							<CHead icon="refresh" title="Material returns" count={returns.length} />
+							{returns.map((r) => (
+								<LRow
+									key={r.name}
+									icon="refresh"
+									t1={<span className="data">{r.name}</span>}
+									t2={fmtDateLong(r.posting_date)}
+									right={
+										<Tag tone={r.status === 'Returned' ? 'ok' : r.status === 'Cancelled' ? 'err' : 'pend'}>
+											{r.status}
+										</Tag>
+									}
+									onClick={() => navigate('/returns/' + r.name)}
+								/>
+							))}
+						</Card>
+					)}
 
 					{grn.remarks && (
 						<Card>

@@ -42,6 +42,7 @@
   "auto_create_incentive",
   "section_stock",
   "maintain_stock",
+  "grn_over_receipt_tolerance_pct",
   "cb_stock",
   "grn_required_for_shipment",
   "section_alerts",
@@ -327,6 +328,13 @@
    "fieldname": "maintain_stock",
    "fieldtype": "Check",
    "label": "Maintain stock through Goods Receipt Notes"
+  },
+  {
+   "default": "5",
+   "description": "How much a Goods Receipt Note may receive over the ordered quantity, as a percent (for weighing variance). 0 blocks any over-receipt; e.g. 5 allows up to 105% of the ordered qty.",
+   "fieldname": "grn_over_receipt_tolerance_pct",
+   "fieldtype": "Percent",
+   "label": "Over-receipt tolerance %"
   },
   {
    "fieldname": "cb_stock",

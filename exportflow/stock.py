@@ -15,6 +15,7 @@ from frappe.utils import flt, now_datetime
 
 GRN_VOUCHER = "Goods Receipt Note"
 SHIPMENT_VOUCHER = "Export Shipment"
+RETURN_VOUCHER = "Material Return"
 
 
 def maintain_stock_enabled() -> bool:

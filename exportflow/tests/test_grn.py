@@ -12,12 +12,16 @@ from exportflow import stock
 from exportflow.api import (
 	add_grn_document,
 	cancel_grn,
+	cancel_return,
 	create_grn,
+	create_return,
 	create_shipment,
 	get_grn_context,
 	get_po_detail,
+	get_return_context,
 	remove_grn_document,
 	submit_grn,
+	submit_return,
 )
 from exportflow.mtt import MERCHANTING
 from exportflow.tests.test_dropship import (
@@ -247,8 +251,70 @@ class TestGRN(IntegrationTestCase):
 
 	def test_over_receipt_blocked_at_submit(self):
 		po, item = self._po(qty=10)
-		grn = self._receive(po, item, 15)  # more than ordered
+		grn = self._receive(po, item, 15)  # 150% of ordered — well beyond tolerance
 		self.assertRaises(frappe.ValidationError, submit_grn, grn)
+
+	def test_over_receipt_within_tolerance_allowed(self):
+		frappe.db.set_single_value("ExportFlow Settings", "grn_over_receipt_tolerance_pct", 5)
+		po, item = self._po(qty=100)
+		submit_grn(self._receive(po, item, 105))  # 105% — within 5% tolerance, OK
+		self.assertEqual(stock.balance(item, self.warehouse), 105)
+		# anything past the cap is still blocked
+		self.assertRaises(frappe.ValidationError, submit_grn, self._receive(po, item, 1))
+
+	# ---- material returns ------------------------------------------------------
+
+	def _return(self, grn, item, qty, **kw):
+		ctx = get_return_context(grn)
+		line = next(l for l in ctx["lines"] if l["item_code"] == item)
+		return create_return(
+			{
+				"goods_receipt_note": grn,
+				"items": [
+					{
+						"item_code": item,
+						"grn_detail": line["grn_detail"],
+						"po_detail": line["po_detail"],
+						"received_qty": line["received_qty"],
+						"returned_qty": qty,
+					}
+				],
+				**kw,
+			}
+		)["name"]
+
+	def test_material_return_reduces_stock_and_reopens_po(self):
+		po, item = self._po(qty=100)
+		grn = self._receive(po, item, 100)
+		submit_grn(grn)
+		self.assertEqual(stock.balance(item, self.warehouse), 100)
+		self.assertTrue(get_po_detail(po.name)["received"])
+		ret = self._return(grn, item, 30, reason="off-spec")
+		submit_return(ret)
+		self.assertEqual(stock.balance(item, self.warehouse), 70, "return ships 30 back out")
+		self.assertFalse(get_po_detail(po.name)["received"], "net received 70 < 100 reopens the PO")
+		self.assertEqual(
+			get_grn_context(po.name)["lines"][0]["received_qty"], 30, "the returned 30 is re-receivable"
+		)
+		cancel_return(ret)
+		self.assertEqual(stock.balance(item, self.warehouse), 100, "cancel restores the stock")
+		self.assertTrue(get_po_detail(po.name)["received"])
+
+	def test_cannot_return_more_than_received(self):
+		po, item = self._po(qty=10)
+		grn = self._receive(po, item, 10)
+		submit_grn(grn)
+		ret = self._return(grn, item, 15)
+		self.assertRaises(frappe.ValidationError, submit_return, ret)
+
+	def test_cannot_return_goods_already_shipped(self):
+		po, item = self._po(qty=10)
+		grn = self._receive(po, item, 10)
+		submit_grn(grn)
+		shp = self._ship(po, item, 10)
+		self._mark_departed(shp)  # stock now 0 — the goods have left
+		ret = self._return(grn, item, 10)
+		self.assertRaises(frappe.ValidationError, submit_return, ret)
 
 	def test_supplier_documents_add_and_remove(self):
 		po, item = self._po(qty=10)

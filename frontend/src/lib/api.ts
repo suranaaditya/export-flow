@@ -197,6 +197,13 @@ export const API = {
 	removeGrnDocument: 'exportflow.api.remove_grn_document',
 	supplierDocTypes: 'exportflow.api.get_supplier_document_types',
 	syncGrnDocuments: 'exportflow.api.sync_grn_documents',
+	returnContext: 'exportflow.api.get_return_context',
+	createReturn: 'exportflow.api.create_return',
+	updateReturn: 'exportflow.api.update_return',
+	submitReturn: 'exportflow.api.submit_return',
+	cancelReturn: 'exportflow.api.cancel_return',
+	returnDetail: 'exportflow.api.get_return_detail',
+	returns: 'exportflow.api.get_returns',
 } as const;
 
 export interface ForwardContract {
@@ -806,7 +813,61 @@ export interface GRNDetailData {
 	}[];
 	packs: ShipmentPack[];
 	documents: { name: string; document_type: string; file: string; description: string | null }[];
-	can: { edit: boolean; receive: boolean; cancel: boolean };
+	returns: { name: string; status: 'Draft' | 'Returned' | 'Cancelled'; posting_date: string }[];
+	can: { edit: boolean; receive: boolean; cancel: boolean; return_material: boolean };
+}
+
+export interface ReturnContextLine {
+	item_code: string;
+	item_name: string;
+	po_detail: string | null;
+	grn_detail: string;
+	received_qty: number;
+	already_returned: number;
+	returnable: number;
+	returned_qty: number;
+	uom: string | null;
+}
+
+export interface ReturnContext {
+	goods_receipt_note: string;
+	purchase_order: string;
+	supplier_name: string | null;
+	warehouse: string;
+	lines: ReturnContextLine[];
+}
+
+export interface ReturnDetailData {
+	mr: {
+		name: string;
+		goods_receipt_note: string;
+		purchase_order: string;
+		supplier: string | null;
+		supplier_name: string | null;
+		company: string | null;
+		posting_date: string;
+		warehouse: string;
+		status: 'Draft' | 'Returned' | 'Cancelled';
+		reason: string | null;
+	};
+	items: {
+		name: string;
+		item_code: string;
+		item_name: string | null;
+		received_qty: number;
+		returned_qty: number;
+		uom: string | null;
+	}[];
+	can: { edit: boolean; confirm: boolean; cancel: boolean };
+}
+
+export interface MaterialReturnListRow {
+	name: string;
+	goods_receipt_note: string;
+	purchase_order: string;
+	supplier_name: string | null;
+	status: 'Draft' | 'Returned' | 'Cancelled';
+	posting_date: string;
 }
 
 export interface ShippableLine {

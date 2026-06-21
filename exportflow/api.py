@@ -1329,8 +1329,9 @@ def get_po_detail(name: str) -> dict:
 
 
 def _po_grn_summary(po_name: str) -> dict:
-	"""Received quantity per PO line from RECEIVED Goods Receipt Notes, and whether
-	the PO is fully received."""
+	"""NET received quantity per PO line — RECEIVED Goods Receipt Notes minus
+	RETURNED Material Returns — and whether the PO is fully received. A return
+	reopens the returned quantity as remaining, so it can be re-received."""
 	rows = frappe.db.sql(
 		"""SELECT gi.po_detail AS po_detail, SUM(gi.received_qty) AS qty
 		   FROM `tabGoods Receipt Note Item` gi
@@ -1341,6 +1342,18 @@ def _po_grn_summary(po_name: str) -> dict:
 		as_dict=True,
 	)
 	received = {r.po_detail: flt(r.qty) for r in rows if r.po_detail}
+	returns = frappe.db.sql(
+		"""SELECT ri.po_detail AS po_detail, SUM(ri.returned_qty) AS qty
+		   FROM `tabMaterial Return Item` ri
+		   JOIN `tabMaterial Return` r ON r.name = ri.parent
+		   WHERE r.purchase_order = %s AND r.status = 'Returned'
+		   GROUP BY ri.po_detail""",
+		(po_name,),
+		as_dict=True,
+	)
+	for r in returns:
+		if r.po_detail and r.po_detail in received:
+			received[r.po_detail] = flt(received[r.po_detail]) - flt(r.qty)
 	po_lines = frappe.get_all("Purchase Order Item", filters={"parent": po_name}, fields=["name", "qty"])
 	fully = bool(po_lines) and all(received.get(l.name, 0) + 1e-6 >= flt(l.qty) for l in po_lines)
 	return {"received_by_line": received, "fully_received": fully, "has_grn": bool(rows)}
@@ -1610,25 +1623,28 @@ def _grn_assert_single_warehouse(doc) -> None:
 
 
 def _grn_assert_within_ordered(doc) -> None:
-	"""Cumulative received quantity (this GRN + other Received GRNs) may not exceed
-	each PO line's ordered quantity."""
+	"""Cumulative NET received quantity (this GRN + other Received GRNs − returns)
+	may not exceed each PO line's ordered quantity beyond the configured tolerance
+	(ExportFlow Settings.grn_over_receipt_tolerance_pct, for weighing variance)."""
+	tol = flt(frappe.db.get_single_value("ExportFlow Settings", "grn_over_receipt_tolerance_pct"))
 	ordered = {
 		r.name: flt(r.qty)
 		for r in frappe.get_all(
 			"Purchase Order Item", filters={"parent": doc.purchase_order}, fields=["name", "qty"]
 		)
 	}
-	already = _po_grn_summary(doc.purchase_order)["received_by_line"]  # other Received GRNs
+	already = _po_grn_summary(doc.purchase_order)["received_by_line"]  # net of other GRNs/returns
 	by_line: dict = {}
 	for r in doc.items:
 		if r.po_detail:
 			by_line[r.po_detail] = by_line.get(r.po_detail, 0.0) + flt(r.received_qty)
 	for po_detail, qty in by_line.items():
-		if flt(already.get(po_detail, 0)) + qty > flt(ordered.get(po_detail, 0)) + 1e-6:
+		cap = flt(ordered.get(po_detail, 0)) * (1 + tol / 100.0)
+		if flt(already.get(po_detail, 0)) + qty > cap + 1e-6:
 			item = next((r.item_code for r in doc.items if r.po_detail == po_detail), po_detail)
 			frappe.throw(
-				_("Receiving {0} of {1} would exceed the ordered quantity ({2}).").format(
-					qty, item, flt(ordered.get(po_detail, 0))
+				_("Receiving {0} of {1} would exceed the ordered quantity ({2}) by more than {3}%.").format(
+					qty, item, flt(ordered.get(po_detail, 0)), tol
 				)
 			)
 
@@ -1771,10 +1787,17 @@ def get_grn_detail(name: str) -> dict:
 			}
 			for d in doc.documents
 		],
+		"returns": frappe.get_all(
+			"Material Return",
+			filters={"goods_receipt_note": name},
+			fields=["name", "status", "posting_date"],
+			order_by="creation asc",
+		),
 		"can": {
 			"edit": can_write and doc.status == "Draft",
 			"receive": can_write and doc.status == "Draft",
 			"cancel": can_write and doc.status == "Received",
+			"return_material": can_write and doc.status == "Received",
 		},
 	}
 
@@ -1820,6 +1843,240 @@ def sync_grn_documents(shipment: str) -> dict:
 
 	count = _forward_grn_documents(frappe.get_doc("Export Shipment", shipment))
 	return {"attached": count}
+
+
+# --- Material Return (send received goods back to the supplier) -----------------
+
+
+def _returned_for_grn_item(grn_detail: str, exclude: str | None = None) -> float:
+	"""Quantity already returned against a GRN line (across Returned Material
+	Returns), optionally excluding one return."""
+	if not grn_detail:
+		return 0.0
+	cond = "AND r.name != %(ex)s" if exclude else ""
+	res = frappe.db.sql(
+		f"""SELECT SUM(ri.returned_qty)
+		    FROM `tabMaterial Return Item` ri
+		    JOIN `tabMaterial Return` r ON r.name = ri.parent
+		    WHERE ri.grn_detail = %(g)s AND r.status = 'Returned' {cond}""",
+		{"g": grn_detail, "ex": exclude},
+	)
+	return flt(res[0][0]) if res and res[0][0] else 0.0
+
+
+@frappe.whitelist()
+def get_return_context(goods_receipt_note: str) -> dict:
+	"""Lines of a Received GRN that can still be returned (received − already
+	returned), for raising a Material Return."""
+	frappe.has_permission("Goods Receipt Note", "read", doc=goods_receipt_note, throw=True)
+	frappe.has_permission("Material Return", "create", throw=True)
+	grn = frappe.db.get_value(
+		"Goods Receipt Note",
+		goods_receipt_note,
+		["name", "purchase_order", "supplier_name", "warehouse", "status"],
+		as_dict=True,
+	)
+	if not grn:
+		frappe.throw(_("Goods Receipt Note {0} not found").format(goods_receipt_note))
+	if grn.status != "Received":
+		frappe.throw(_("Only a received Goods Receipt Note can be returned"))
+	lines = []
+	for it in frappe.get_all(
+		"Goods Receipt Note Item",
+		filters={"parent": goods_receipt_note},
+		fields=["name", "item_code", "item_name", "po_detail", "received_qty", "uom"],
+		order_by="idx asc",
+	):
+		already = _returned_for_grn_item(it.name)
+		returnable = flt(flt(it.received_qty) - already, 3)
+		if returnable <= 1e-6:
+			continue
+		lines.append(
+			{
+				"item_code": it.item_code,
+				"item_name": it.item_name,
+				"po_detail": it.po_detail,
+				"grn_detail": it.name,
+				"received_qty": flt(it.received_qty),
+				"already_returned": already,
+				"returnable": returnable,
+				"returned_qty": returnable,  # default to all that's returnable
+				"uom": it.uom,
+			}
+		)
+	return {
+		"goods_receipt_note": grn.name,
+		"purchase_order": grn.purchase_order,
+		"supplier_name": grn.supplier_name,
+		"warehouse": grn.warehouse,
+		"lines": lines,
+	}
+
+
+def _return_item_rows(items) -> list[dict]:
+	out = []
+	for r in items or []:
+		if not r.get("item_code") or flt(r.get("returned_qty")) <= 0:
+			continue
+		out.append(
+			{
+				"item_code": r.get("item_code"),
+				"item_name": r.get("item_name"),
+				"po_detail": r.get("po_detail") or None,
+				"grn_detail": r.get("grn_detail") or None,
+				"received_qty": flt(r.get("received_qty")),
+				"returned_qty": flt(r.get("returned_qty")),
+				"uom": r.get("uom"),
+			}
+		)
+	return out
+
+
+@frappe.whitelist()
+def create_return(payload) -> dict:
+	frappe.has_permission("Material Return", "create", throw=True)
+	if isinstance(payload, str):
+		payload = json.loads(payload)
+	if not payload.get("goods_receipt_note"):
+		frappe.throw(_("Pick the goods receipt to return against"))
+	items = _return_item_rows(payload.get("items"))
+	if not items:
+		frappe.throw(_("Enter a quantity to return for at least one line"))
+	doc = frappe.get_doc(
+		{
+			"doctype": "Material Return",
+			"goods_receipt_note": payload.get("goods_receipt_note"),
+			"posting_date": payload.get("posting_date") or nowdate(),
+			"reason": payload.get("reason"),
+			"status": "Draft",
+			"items": items,
+		}
+	)
+	doc.insert()
+	return {"name": doc.name}
+
+
+@frappe.whitelist()
+def update_return(name: str, payload) -> dict:
+	doc = frappe.get_doc("Material Return", name)
+	doc.check_permission("write")
+	if doc.status != "Draft":
+		frappe.throw(_("Only a draft Material Return can be edited"))
+	if isinstance(payload, str):
+		payload = json.loads(payload)
+	if payload.get("posting_date"):
+		doc.posting_date = payload.get("posting_date")
+	doc.reason = payload.get("reason")
+	if payload.get("items") is not None:
+		doc.set("items", _return_item_rows(payload.get("items")))
+	doc.save()
+	return {"name": doc.name}
+
+
+def _return_assert_returnable(doc) -> None:
+	"""A line may not return more than was received on its GRN line (net of other
+	returns)."""
+	for r in doc.items:
+		if not r.grn_detail:
+			continue
+		recv = flt(frappe.db.get_value("Goods Receipt Note Item", r.grn_detail, "received_qty"))
+		already = _returned_for_grn_item(r.grn_detail, exclude=doc.name)
+		if flt(r.returned_qty) - (recv - already) > 1e-6:
+			frappe.throw(
+				_("Cannot return {0} of {1} — only {2} was received and not yet returned.").format(
+					flt(r.returned_qty), r.item_code, flt(recv - already)
+				)
+			)
+
+
+@frappe.whitelist()
+def submit_return(name: str) -> dict:
+	"""Confirm the return: post the goods OUT of the warehouse (only when the stock
+	regime is on) and mark it Returned — the PO's net received drops, reopening the
+	returned quantity as remaining. The stock-out refuses to go negative, so goods
+	already shipped cannot be returned. Idempotent."""
+	from exportflow import stock
+
+	doc = frappe.get_doc("Material Return", name)
+	doc.check_permission("write")
+	if doc.status == "Returned":
+		return {"name": name, "status": "Returned"}
+	if doc.status != "Draft":
+		frappe.throw(_("Only a draft Material Return can be confirmed"))
+	if not doc.items:
+		frappe.throw(_("Nothing to return"))
+	_return_assert_returnable(doc)
+	if stock.maintain_stock_enabled():
+		rows = [(r.item_code, doc.warehouse, flt(r.returned_qty)) for r in doc.items]
+		stock.post_out(rows, stock.RETURN_VOUCHER, doc.name, company=doc.company)
+	doc.db_set("status", "Returned")
+	return {"name": name, "status": "Returned"}
+
+
+@frappe.whitelist()
+def cancel_return(name: str) -> dict:
+	"""Reverse the return: restore the stock and mark it Cancelled (the PO's net
+	received goes back up)."""
+	from exportflow import stock
+
+	doc = frappe.get_doc("Material Return", name)
+	doc.check_permission("write")
+	if doc.status == "Cancelled":
+		return {"name": name, "status": "Cancelled"}
+	stock.reverse(stock.RETURN_VOUCHER, doc.name)
+	doc.db_set("status", "Cancelled")
+	return {"name": name, "status": "Cancelled"}
+
+
+@frappe.whitelist()
+def get_returns() -> list[dict]:
+	frappe.has_permission("Material Return", "read", throw=True)
+	company = exportflow_company()
+	filters = {"company": company} if company else {}
+	return frappe.get_list(
+		"Material Return",
+		filters=filters,
+		fields=["name", "goods_receipt_note", "purchase_order", "supplier_name", "status", "posting_date"],
+		order_by="posting_date desc, creation desc",
+		limit_page_length=100,
+	)
+
+
+@frappe.whitelist()
+def get_return_detail(name: str) -> dict:
+	frappe.has_permission("Material Return", "read", doc=name, throw=True)
+	doc = frappe.get_doc("Material Return", name)
+	can_write = bool(frappe.has_permission("Material Return", "write", doc=name))
+	return {
+		"mr": {
+			"name": doc.name,
+			"goods_receipt_note": doc.goods_receipt_note,
+			"purchase_order": doc.purchase_order,
+			"supplier": doc.supplier,
+			"supplier_name": doc.supplier_name,
+			"company": doc.company,
+			"posting_date": doc.posting_date,
+			"warehouse": doc.warehouse,
+			"status": doc.status,
+			"reason": doc.reason,
+		},
+		"items": [
+			{
+				"name": r.name,
+				"item_code": r.item_code,
+				"item_name": r.item_name,
+				"received_qty": r.received_qty,
+				"returned_qty": r.returned_qty,
+				"uom": r.uom,
+			}
+			for r in doc.items
+		],
+		"can": {
+			"edit": can_write and doc.status == "Draft",
+			"confirm": can_write and doc.status == "Draft",
+			"cancel": can_write and doc.status == "Returned",
+		},
+	}
 
 
 @frappe.whitelist()
