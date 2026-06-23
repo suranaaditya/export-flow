@@ -197,7 +197,17 @@ def create_customer(values) -> dict:
 			"default_incoterm": values.get("default_incoterm") or None,
 			"destination_country": values.get("destination_country") or None,
 		}
-	).insert()
+	)
+	# An exporter's buyers are overseas. The Customer doctype has no `country` field, so
+	# india_compliance otherwise guesses gst_category="Unregistered" and treats the
+	# export Sales Order / invoice as a DOMESTIC supply (wrong place of supply, no LUT /
+	# zero-rating). Stamp "Overseas" for a foreign destination so the export GST
+	# treatment is right even when the customer has no Address yet. (Meta-guarded — the
+	# field exists only when india_compliance is installed, e.g. not on erptest.)
+	dest = (values.get("destination_country") or "").strip()
+	if dest.lower() != "india" and frappe.get_meta("Customer").has_field("gst_category"):
+		doc.gst_category = "Overseas"
+	doc.insert()
 	return {"name": doc.name, "customer_name": doc.customer_name}
 
 
@@ -212,11 +222,17 @@ def create_supplier(values) -> dict:
 		{
 			"doctype": "Supplier",
 			"supplier_name": values["supplier_name"].strip(),
-			"supplier_group": frappe.db.get_value("Supplier Group", {}, "name"),
-			"country": values.get("country") or "India",
+			"supplier_group": frappe.db.get_value("Supplier Group", {"is_group": 0}, "name"),
+			"country": values.get("country") or None,
 			"default_merchant_export_scheme": 1 if values.get("default_merchant_export_scheme") else 0,
 		}
-	).insert()
+	)
+	# Don't silently default an overseas supplier to India (that blocks the merchanting
+	# PO, which requires a foreign supplier). The form makes country required; a foreign
+	# country also drives india_compliance's gst_category="Overseas" — set it explicitly.
+	if doc.country and doc.country != "India" and frappe.get_meta("Supplier").has_field("gst_category"):
+		doc.gst_category = "Overseas"
+	doc.insert()
 	return {"name": doc.name, "supplier_name": doc.supplier_name}
 
 

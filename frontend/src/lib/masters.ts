@@ -104,7 +104,7 @@ export const MASTERS: MasterDef[] = [
 		],
 		fields: [
 			{ key: 'supplier_name', label: 'Supplier name', type: 'text', required: true, createOnly: true },
-			{ key: 'country', label: 'Country', type: 'select', options: 'countries' },
+			{ key: 'country', label: 'Country', type: 'select', options: 'countries', required: true },
 			{
 				key: 'default_merchant_export_scheme',
 				label: 'Usually supplies under the 0.1% GST scheme',
