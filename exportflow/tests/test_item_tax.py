@@ -31,6 +31,14 @@ class TestItemTax(IntegrationTestCase):
 			limit_page_length=1,
 		)[0]
 
+	def test_item_uses_app_item_group(self):
+		# app-created items land in the stable app-owned group, not an arbitrary first leaf
+		from exportflow.setup import seed_item_group
+
+		seed_item_group()
+		name = create_item({"item_name": f"_Test EF Grp {_suffix()}"})["name"]
+		self.assertEqual(frappe.db.get_value("Item", name, "item_group"), "Pharma Trading")
+
 	def _item_tax_template(self, rate):
 		return frappe.get_doc(
 			{

@@ -106,6 +106,15 @@ export const MASTERS: MasterDef[] = [
 			{ key: 'supplier_name', label: 'Supplier name', type: 'text', required: true, createOnly: true },
 			{ key: 'country', label: 'Country', type: 'select', options: 'countries', required: true },
 			{
+				key: 'gstin',
+				label: 'GSTIN',
+				type: 'text',
+				mono: true,
+				createOnly: true,
+				hint: 'For a domestic supplier — enables the 0.1% GST on its purchase orders',
+			},
+			{ key: 'city', label: 'City', type: 'text', createOnly: true, hint: 'For the GST address of a domestic supplier' },
+			{
 				key: 'default_merchant_export_scheme',
 				label: 'Usually supplies under the 0.1% GST scheme',
 				type: 'check',

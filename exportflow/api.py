@@ -227,13 +227,63 @@ def create_supplier(values) -> dict:
 			"default_merchant_export_scheme": 1 if values.get("default_merchant_export_scheme") else 0,
 		}
 	)
+	gstin = (values.get("gstin") or "").strip().upper()
+	has_gst = frappe.get_meta("Supplier").has_field("gst_category")
 	# Don't silently default an overseas supplier to India (that blocks the merchanting
 	# PO, which requires a foreign supplier). The form makes country required; a foreign
 	# country also drives india_compliance's gst_category="Overseas" — set it explicitly.
-	if doc.country and doc.country != "India" and frappe.get_meta("Supplier").has_field("gst_category"):
+	if doc.country and doc.country != "India" and has_gst:
 		doc.gst_category = "Overseas"
+	# A domestic GSTIN makes the supplier Registered so the 0.1% merchant-export PO can
+	# charge GST (the PO reads supplier_gstin from the supplier's GST address, created
+	# below). Meta-guarded: india_compliance only.
+	if gstin and has_gst:
+		doc.gstin = gstin
+		doc.gst_category = "Registered Regular"
 	doc.insert()
+	if gstin and has_gst:
+		_ensure_supplier_gst_address(doc.name, doc.supplier_name, gstin, values.get("city"))
 	return {"name": doc.name, "supplier_name": doc.supplier_name}
+
+
+def _supplier_gst_state(gstin: str) -> str | None:
+	"""State name from a GSTIN's leading 2-digit state code (india_compliance map)."""
+	try:
+		from india_compliance.gst_india.constants import STATE_NUMBERS
+
+		return {code: name for name, code in STATE_NUMBERS.items()}.get((gstin or "")[:2])
+	except Exception:
+		return None
+
+
+def _ensure_supplier_gst_address(supplier: str, title: str, gstin: str, city: str | None) -> None:
+	"""Create a primary GST billing address for a domestic supplier so the Purchase
+	Order resolves supplier_gstin (PO fetch_from = supplier_address.gstin) and the 0.1%
+	merchant-export GST computes. Best-effort; idempotent on the unique GSTIN."""
+	if frappe.db.exists("Address", {"gstin": gstin}):
+		return
+	state = _supplier_gst_state(gstin)
+	place = (city or "").strip() or state or title
+	try:
+		frappe.get_doc(
+			{
+				"doctype": "Address",
+				"address_title": title,
+				"address_type": "Billing",
+				"address_line1": place,
+				"city": place,
+				"state": state,
+				"country": "India",
+				"gstin": gstin,
+				"gst_category": "Registered Regular",
+				"is_primary_address": 1,
+				"links": [{"link_doctype": "Supplier", "link_name": supplier}],
+			}
+		).insert(ignore_permissions=True)
+	except Exception:
+		frappe.log_error(
+			title=f"Supplier GST address failed: {supplier}", message=frappe.get_traceback()
+		)
 
 
 # scalar item-master fields the create/edit forms own
@@ -282,6 +332,15 @@ def _apply_item_tax_fields(doc, values) -> None:
 			doc.append("taxes", {"item_tax_template": template})
 
 
+def _exportflow_item_group() -> str:
+	"""A stable app-owned leaf Item Group for pharma trading items (seeded at install),
+	falling back to the first leaf group if absent — so a new item isn't filed under an
+	arbitrary first-alphabetical group on a shared bench."""
+	return frappe.db.get_value(
+		"Item Group", {"name": "Pharma Trading", "is_group": 0}, "name"
+	) or frappe.db.get_value("Item Group", {"is_group": 0}, "name")
+
+
 @frappe.whitelist()
 def create_item(values) -> dict:
 	"""Pharma trading item: always buyable and sellable, carrying the GST HSN code
@@ -295,12 +354,21 @@ def create_item(values) -> dict:
 		values = json.loads(values)
 	if not (values.get("item_name") or "").strip():
 		frappe.throw(_("Item name is required"))
+	# A clear, early error if HSN validation is on (india_compliance) but no HSN was
+	# given — the item is is_sales_item=1, so the generic GST "HSN/SAC required" would
+	# otherwise fire deep in validate.
+	if (
+		not (values.get("gst_hsn_code") or "").strip()
+		and frappe.db.exists("DocType", "GST Settings")
+		and frappe.db.get_single_value("GST Settings", "validate_hsn_code")
+	):
+		frappe.throw(_("Enter the GST HSN code — HSN validation is enabled, so every item needs one."))
 	doc = frappe.get_doc(
 		{
 			"doctype": "Item",
 			"item_code": values["item_name"].strip(),
 			"item_name": values["item_name"].strip(),
-			"item_group": frappe.db.get_value("Item Group", {"is_group": 0}, "name"),
+			"item_group": _exportflow_item_group(),
 			"stock_uom": values.get("stock_uom") or "Kg",
 			"is_stock_item": 0,
 			"is_sales_item": 1,

@@ -325,6 +325,25 @@ def seed_payment_terms():
 		).insert(ignore_permissions=True)
 
 
+def seed_item_group():
+	"""A stable app-owned leaf Item Group so app-created pharma items aren't filed under
+	whatever happens to be the first Item Group on the bench (a hazard on a shared
+	multi-app site). Idempotent."""
+	if frappe.db.exists("Item Group", "Pharma Trading"):
+		return
+	parent = frappe.db.get_value("Item Group", "All Item Groups", "name") or frappe.db.get_value(
+		"Item Group", {"is_group": 1}, "name"
+	)
+	frappe.get_doc(
+		{
+			"doctype": "Item Group",
+			"item_group_name": "Pharma Trading",
+			"is_group": 0,
+			"parent_item_group": parent,
+		}
+	).insert(ignore_permissions=True)
+
+
 def after_install():
 	setup_export_role_permissions()
 	seed_ports()
@@ -332,3 +351,4 @@ def after_install():
 	seed_checklist_rules()
 	seed_terms_templates()
 	seed_payment_terms()
+	seed_item_group()
