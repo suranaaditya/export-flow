@@ -386,6 +386,41 @@ def _exportflow_item_group() -> str:
 	) or frappe.db.get_value("Item Group", {"is_group": 0}, "name")
 
 
+def _ensure_customs_tariff(code: str | None) -> str | None:
+	"""The item's HS code drives the commercial-invoice 'HS code' column and is an
+	ERPNext Link to the Customs Tariff Number master. That master ships nearly empty
+	(57 rows here vs the 18k-row GST HSN master), so a genuine HS code typed in-app
+	fails the link validation ('Could not find Customs Tariff Number…') and the user
+	is forced to clear it — leaving the export invoice's HS code blank. Auto-register
+	the code (best-effort, mirroring the MIS import's ensure_tariff) so it never blocks
+	item creation and always prints."""
+	code = (code or "").strip()
+	if not code or not frappe.db.exists("DocType", "Customs Tariff Number"):
+		return code or None
+	if frappe.db.exists("Customs Tariff Number", code):
+		return code
+	frappe.db.savepoint("ef_tariff")
+	try:
+		frappe.get_doc(
+			{"doctype": "Customs Tariff Number", "tariff_number": code}
+		).insert(ignore_permissions=True)
+		return code
+	except Exception:
+		frappe.db.rollback(save_point="ef_tariff")
+		return None
+
+
+def _item_hs_code(explicit_hs: str | None, gst_hsn: str | None) -> str | None:
+	"""HS code for the invoice = the explicit HS code, else the GST HSN code — they
+	are the same 8-digit HSN for an Indian pharma exporter, so a user who fills only
+	the GST HSN still gets a populated invoice HS code. Whatever results is registered
+	in the tariff master so the Link resolves and it prints (single-tenant default per
+	the install model)."""
+	return _ensure_customs_tariff(
+		(explicit_hs or "").strip() or (gst_hsn or "").strip() or None
+	)
+
+
 @frappe.whitelist()
 def create_item(values) -> dict:
 	"""Pharma trading item: always buyable and sellable, carrying the GST HSN code
@@ -419,7 +454,9 @@ def create_item(values) -> dict:
 			"is_sales_item": 1,
 			"is_purchase_item": 1,
 			"pharmacopoeia_grade": values.get("pharmacopoeia_grade") or None,
-			"customs_tariff_number": values.get("customs_tariff_number") or None,
+			"customs_tariff_number": _item_hs_code(
+				values.get("customs_tariff_number"), values.get("gst_hsn_code")
+			),
 			"cas_number": values.get("cas_number") or None,
 			"default_pack_size": values.get("default_pack_size") or None,
 		}
@@ -439,9 +476,15 @@ def update_item(name: str, values) -> dict:
 	if isinstance(values, str):
 		values = json.loads(values)
 	for field in ITEM_SCALAR_FIELDS:
-		if field in values:
+		# the HS code is resolved (and tariff-master-registered) below, not set raw
+		if field in values and field != "customs_tariff_number":
 			doc.set(field, values.get(field) or None)
 	_apply_item_tax_fields(doc, values)
+	# keep the invoice HS code in step: honor an explicit edit, else follow the GST HSN
+	if "customs_tariff_number" in values or "gst_hsn_code" in values:
+		hs = values["customs_tariff_number"] if "customs_tariff_number" in values else doc.customs_tariff_number
+		hsn = values["gst_hsn_code"] if "gst_hsn_code" in values else doc.get("gst_hsn_code")
+		doc.customs_tariff_number = _item_hs_code(hs, hsn)
 	doc.save()
 	return {"name": doc.name, "item_name": doc.item_name, "stock_uom": doc.stock_uom}
 

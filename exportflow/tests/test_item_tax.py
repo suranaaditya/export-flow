@@ -161,6 +161,48 @@ class TestItemTax(IntegrationTestCase):
 		item = create_item({"item_name": f"_Test EF HSN {_suffix()}", "gst_hsn_code": "29420090"})
 		self.assertTrue(frappe.db.exists("Item", item["name"]))
 
+	def test_item_hs_code_auto_registers_tariff(self):
+		# a genuine HS code not yet in the sparse Customs Tariff Number master must
+		# auto-register instead of failing the Link validation (the invoice HS column)
+		code = f"9{_suffix()}"
+		self.assertFalse(frappe.db.exists("Customs Tariff Number", code))
+		name = create_item(
+			{"item_name": f"_Test EF HS {_suffix()}", "customs_tariff_number": code}
+		)["name"]
+		self.assertEqual(frappe.db.get_value("Item", name, "customs_tariff_number"), code)
+		self.assertTrue(
+			frappe.db.exists("Customs Tariff Number", code), "tariff master row auto-created"
+		)
+
+	def test_item_hs_code_defaults_from_gst_hsn(self):
+		# with no explicit HS code, the GST HSN seeds the invoice HS code (same HSN),
+		# so the user types the code once and it still prints on the commercial invoice
+		code = f"8{_suffix()}"
+		name = create_item(
+			{"item_name": f"_Test EF HSN2 {_suffix()}", "gst_hsn_code": code}
+		)["name"]
+		self.assertEqual(frappe.db.get_value("Item", name, "customs_tariff_number"), code)
+
+	def test_item_explicit_hs_code_wins_over_gst_hsn(self):
+		# an explicit HS code is honored even when a different GST HSN is given
+		hs, hsn = f"7{_suffix()}", f"6{_suffix()}"
+		name = create_item(
+			{
+				"item_name": f"_Test EF HS3 {_suffix()}",
+				"customs_tariff_number": hs,
+				"gst_hsn_code": hsn,
+			}
+		)["name"]
+		self.assertEqual(frappe.db.get_value("Item", name, "customs_tariff_number"), hs)
+
+	def test_update_item_hs_code_follows_gst_hsn(self):
+		# editing the GST HSN on an existing item brings its invoice HS code in step
+		name = create_item({"item_name": f"_Test EF HS4 {_suffix()}"})["name"]
+		self.assertFalse(frappe.db.get_value("Item", name, "customs_tariff_number"))
+		code = f"5{_suffix()}"
+		update_item(name, {"gst_hsn_code": code})
+		self.assertEqual(frappe.db.get_value("Item", name, "customs_tariff_number"), code)
+
 	def test_preview_per_item_tax_breakup_with_override(self):
 		ptc = self._ptc_template(6)
 		itt = self._item_tax_template(2)  # overrides the same tax head to 2%

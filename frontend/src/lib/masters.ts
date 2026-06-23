@@ -171,8 +171,8 @@ export const MASTERS: MasterDef[] = [
 			{ key: 'item_name', label: 'Item name', type: 'text', required: true, createOnly: true },
 			{ key: 'stock_uom', label: 'Unit of measure', type: 'select', options: 'uoms' },
 			{ key: 'pharmacopoeia_grade', label: 'Pharmacopoeia grade', type: 'select', options: 'grades' },
-			{ key: 'customs_tariff_number', label: 'HS code', type: 'text', mono: true },
-			{ key: 'gst_hsn_code', label: 'GST HSN code', type: 'text', mono: true, hint: 'Drives GST autofill on purchase orders' },
+			{ key: 'customs_tariff_number', label: 'HS code', type: 'text', mono: true, hint: 'Prints on the commercial invoice — leave blank to use the GST HSN code' },
+			{ key: 'gst_hsn_code', label: 'GST HSN code', type: 'text', mono: true, hint: 'Drives GST autofill on purchase orders; also fills the HS code above' },
 			{
 				key: 'item_tax_template',
 				label: 'Item tax template',
