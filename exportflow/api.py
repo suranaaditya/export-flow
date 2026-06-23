@@ -269,11 +269,11 @@ def _apply_item_tax_fields(doc, values) -> None:
 @frappe.whitelist()
 def create_item(values) -> dict:
 	"""Pharma trading item: always buyable and sellable, carrying the GST HSN code
-	+ Item Tax Template that drive PO tax autofill. Stocked only when the stock
-	regime is on (goods are received at a port warehouse via a GRN); otherwise it
-	stays a non-stock drop-ship item."""
-	from exportflow.stock import maintain_stock_enabled
-
+	+ Item Tax Template that drive PO tax autofill. Always a NON-stock item — the GRN
+	regime tracks quantities in ExportFlow's OWN ledger (ExportFlow Stock Ledger, keyed
+	by item + warehouse), so items need not be ERPNext stock items. Keeping them
+	non-stock avoids ERPNext's delivery-warehouse requirement on the drop-ship sales
+	order (a stock item with no warehouse and no drop-ship flag is rejected at submit)."""
 	frappe.has_permission("Item", "create", throw=True)
 	if isinstance(values, str):
 		values = json.loads(values)
@@ -286,7 +286,7 @@ def create_item(values) -> dict:
 			"item_name": values["item_name"].strip(),
 			"item_group": frappe.db.get_value("Item Group", {"is_group": 0}, "name"),
 			"stock_uom": values.get("stock_uom") or "Kg",
-			"is_stock_item": 1 if maintain_stock_enabled() else 0,
+			"is_stock_item": 0,
 			"is_sales_item": 1,
 			"is_purchase_item": 1,
 			"pharmacopoeia_grade": values.get("pharmacopoeia_grade") or None,

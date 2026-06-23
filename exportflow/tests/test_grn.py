@@ -140,6 +140,15 @@ class TestGRN(IntegrationTestCase):
 		self.assertEqual(frappe.db.get_value("Goods Receipt Note", grn, "status"), "Cancelled")
 		self.assertEqual(stock.balance(item, self.warehouse), 0, "cancel must reverse the stock-in")
 
+	def test_app_items_are_non_stock_even_with_maintain_stock_on(self):
+		# maintain_stock is ON (setUp), yet app-created items must stay NON-stock so
+		# ERPNext doesn't demand a delivery warehouse on the drop-ship sales order
+		# (the GRN regime tracks quantity in ExportFlow's own ledger, not ERPNext stock).
+		from exportflow.api import create_item
+
+		name = create_item({"item_name": f"_Test NonStock {_suffix()}"})["name"]
+		self.assertEqual(frappe.db.get_value("Item", name, "is_stock_item"), 0)
+
 	def test_merchanting_po_rejects_grn(self):
 		po, item = self._po(qty=10)
 		frappe.db.set_value("Purchase Order", po.name, "merchanting_trade", 1)
