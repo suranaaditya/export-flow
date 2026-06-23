@@ -208,7 +208,52 @@ def create_customer(values) -> dict:
 	if dest.lower() != "india" and frappe.get_meta("Customer").has_field("gst_category"):
 		doc.gst_category = "Overseas"
 	doc.insert()
+	_ensure_customer_address(
+		doc.name, doc.customer_name,
+		values.get("address_line1"), values.get("city"), values.get("pincode"), dest or None,
+	)
 	return {"name": doc.name, "customer_name": doc.customer_name}
+
+
+def _ensure_customer_address(customer, title, address_line1, city, pincode, country) -> None:
+	"""Create a primary shipping/billing Address for an app-created customer so the
+	commercial invoice / packing list print a full consignee block (the prints resolve
+	the customer's DEFAULT address via get_default_address). Skipped when nothing useful
+	was entered or the customer already has an address. Mirrors the MIS-import shape."""
+	address_line1 = (address_line1 or "").strip()
+	city = (city or "").strip()
+	if not (address_line1 or city):
+		return
+	if frappe.db.get_value(
+		"Dynamic Link",
+		{"parenttype": "Address", "link_doctype": "Customer", "link_name": customer},
+		"parent",
+	):
+		return
+	try:
+		addr = frappe.get_doc(
+			{
+				"doctype": "Address",
+				"address_title": (title or customer)[:100],
+				"address_type": "Billing",
+				"address_line1": address_line1 or city,
+				"city": city or None,
+				# a foreign address has no Indian-style state line
+				"state": city if not country else None,
+				"country": country or None,
+				"pincode": (pincode or "").strip() or None,
+				"is_primary_address": 1,
+				"is_shipping_address": 1,
+				"links": [{"link_doctype": "Customer", "link_name": customer}],
+			}
+		)
+		if (country or "").lower() != "india" and frappe.get_meta("Address").has_field("gst_category"):
+			addr.gst_category = "Overseas"
+		addr.insert(ignore_permissions=True)
+	except Exception:
+		frappe.log_error(
+			title=f"Customer address failed: {customer}", message=frappe.get_traceback()
+		)
 
 
 @frappe.whitelist()

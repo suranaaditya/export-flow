@@ -88,6 +88,15 @@ export const MASTERS: MasterDef[] = [
 			{ key: 'destination_country', label: 'Destination country', type: 'select', options: 'countries' },
 			{ key: 'default_currency', label: 'Default currency', type: 'select', options: 'currencies' },
 			{ key: 'default_incoterm', label: 'Default incoterm', type: 'select', options: 'incoterms' },
+			{
+				key: 'address_line1',
+				label: 'Address',
+				type: 'textarea',
+				createOnly: true,
+				hint: 'Consignee address — printed on the commercial invoice / packing list',
+			},
+			{ key: 'city', label: 'City', type: 'text', createOnly: true },
+			{ key: 'pincode', label: 'Postal code', type: 'text', createOnly: true },
 		],
 	},
 	{

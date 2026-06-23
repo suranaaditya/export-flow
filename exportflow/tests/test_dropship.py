@@ -185,6 +185,41 @@ class TestDropShipFlow(IntegrationTestCase):
 			)
 			self.assertEqual(po_row.qty, expected_so_row.qty)
 
+	def test_create_customer_builds_consignee_address(self):
+		"""An app-created customer with address fields gets a primary Address so the
+		commercial invoice / packing list can print a consignee block."""
+		from exportflow.api import create_customer
+
+		name = create_customer(
+			{
+				"customer_name": f"_Test EF Consignee {_suffix()}",
+				"destination_country": "Germany",
+				"address_line1": "12 Hafenstrasse",
+				"city": "Hamburg",
+				"pincode": "20457",
+			}
+		)["name"]
+		addr = frappe.db.get_value(
+			"Dynamic Link",
+			{"parenttype": "Address", "link_doctype": "Customer", "link_name": name},
+			"parent",
+		)
+		self.assertTrue(addr, "a primary address must be created")
+		row = frappe.db.get_value("Address", addr, ["city", "country", "is_primary_address"], as_dict=True)
+		self.assertEqual(row.city, "Hamburg")
+		self.assertEqual(row.country, "Germany")
+		self.assertEqual(int(row.is_primary_address), 1)
+		# no address fields → no address created
+		bare = create_customer({"customer_name": f"_Test EF Bare {_suffix()}"})["name"]
+		self.assertFalse(
+			frappe.db.get_value(
+				"Dynamic Link",
+				{"parenttype": "Address", "link_doctype": "Customer", "link_name": bare},
+				"parent",
+			),
+			"no address fields entered → no address",
+		)
+
 	def test_default_charge_account_fills_in(self):
 		"""Feedback #11: a charge with only a name + amount (no account picked) posts
 		to the configured/standard default expense account, resolved server-side."""
