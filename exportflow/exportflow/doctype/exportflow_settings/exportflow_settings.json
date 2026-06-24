@@ -16,6 +16,7 @@
   "cb_efs_exporter",
   "exporter_address",
   "jurisdiction",
+  "statutory_lines",
   "section_lut",
   "lut_number",
   "cb_efs_lut",
@@ -128,6 +129,12 @@
    "fieldtype": "Data",
    "label": "Jurisdiction",
    "description": "Closing jurisdiction footnote on invoices (e.g. Indore, M.P.)"
+  },
+  {
+   "fieldname": "statutory_lines",
+   "fieldtype": "Small Text",
+   "label": "Statutory registrations",
+   "description": "Extra registration lines printed in the PO buyer block \u2014 one per line, e.g. FSSAI: 1142\u2026, Drug Licence: 21B\u2026, Udyam: UDYAM-\u2026"
   },
   {
    "description": "When set, invoices carry the declaration \"Supply meant for export under LUT without payment of IGST\"",

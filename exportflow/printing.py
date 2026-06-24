@@ -154,6 +154,29 @@ def party_address(party_type: str, party: str) -> str | None:
 	return "\n".join(ln for ln in lines if ln) or None
 
 
+def _gst_state_map() -> dict:
+	"""GST state-code → state-name (india_compliance); empty where it isn't installed."""
+	try:
+		from india_compliance.gst_india.constants import STATE_NUMBERS
+
+		return {code: name for name, code in STATE_NUMBERS.items()}
+	except Exception:
+		return {}
+
+
+def _state_from_gstin(gstin: str | None):
+	"""State name + 2-digit code from a GSTIN (the leading two digits)."""
+	if not gstin or len(gstin) < 2:
+		return None, None
+	code = gstin[:2]
+	return _gst_state_map().get(code), code
+
+
+def _pan_from_gstin(gstin: str | None) -> str | None:
+	"""PAN embedded in a GSTIN — characters 3-12 (2-digit state + 10-char PAN + 3)."""
+	return gstin[2:12] if gstin and len(gstin) >= 12 else None
+
+
 def exporter_profile():
 	"""The exporter's identity (ExportFlow Settings + company) for the PO / SO
 	print blocks — the same details the shipment documents show. Registered as a
@@ -161,6 +184,7 @@ def exporter_profile():
 	settings = frappe.get_single("ExportFlow Settings")
 	company = exportflow_company()
 	lh_addr, lh_contact = _letterhead_address(settings.exporter_address)
+	state_name, state_code = _state_from_gstin(settings.gstin)
 	return frappe._dict(
 		company_name=frappe.db.get_value("Company", company, "company_name") or company,
 		address=settings.exporter_address,
@@ -169,11 +193,44 @@ def exporter_profile():
 		gstin=settings.gstin,
 		iec=settings.iec_number,
 		lut=settings.lut_number,
+		pan=_pan_from_gstin(settings.gstin),
+		cin=settings.get("cin"),
+		jurisdiction=settings.get("jurisdiction"),
+		statutory_lines=settings.get("statutory_lines"),
+		state_name=state_name,
+		state_code=state_code,
 		signatory_name=settings.signatory_name,
 		signatory_designation=settings.signatory_designation,
 		logo=_logo_data_uri(),
 		cert_badges=_app_img_uri("mn_certs.png"),
 		gradient_rule=_app_img_uri("mn_rule.png"),
+	)
+
+
+def supplier_profile(supplier: str, supplier_gstin: str | None = None):
+	"""Supplier identity for the PO 'Supplier (Bill from)' block — name, address,
+	GSTIN + derived state/PAN, and the primary contact's name / phone / email.
+	Registered as a jinja method."""
+	meta = frappe.get_meta("Supplier")
+	want = [f for f in ["supplier_name", "gstin", "pan", "mobile_no", "email_id", "supplier_primary_contact"] if meta.has_field(f)]
+	sup = (frappe.db.get_value("Supplier", supplier, want, as_dict=True) if want else None) or frappe._dict()
+	gstin = supplier_gstin or sup.get("gstin")
+	state_name, state_code = _state_from_gstin(gstin)
+	contact_person = None
+	if sup.get("supplier_primary_contact"):
+		cp = frappe.db.get_value("Contact", sup.supplier_primary_contact, ["first_name", "last_name"], as_dict=True)
+		if cp:
+			contact_person = (" ".join(x for x in [cp.first_name, cp.last_name] if x)).strip() or None
+	return frappe._dict(
+		name=sup.get("supplier_name") or supplier,
+		address=party_address("Supplier", supplier),
+		gstin=gstin,
+		pan=sup.get("pan") or _pan_from_gstin(gstin),
+		state_name=state_name,
+		state_code=state_code,
+		mobile=sup.get("mobile_no"),
+		email=sup.get("email_id"),
+		contact_person=contact_person,
 	)
 
 

@@ -385,6 +385,7 @@ interface ExporterProfile {
 	cin: string;
 	exporter_address: string;
 	jurisdiction: string;
+	statutory_lines: string;
 	lut_number: string;
 	lut_valid_upto: string;
 	signatory_name: string;
@@ -406,6 +407,7 @@ const EMPTY_PROFILE: ExporterProfile = {
 	cin: '',
 	exporter_address: '',
 	jurisdiction: '',
+	statutory_lines: '',
 	lut_number: '',
 	lut_valid_upto: '',
 	signatory_name: '',
@@ -593,6 +595,18 @@ function ExporterProfilePanel({ canEdit }: { canEdit: boolean }) {
 						<Field label="Jurisdiction" hint="Closing footnote, e.g. Indore (M.P.) India">
 							<TextInput value={form.jurisdiction} onChange={(v) => set('jurisdiction', v)} />
 						</Field>
+						<div className="span2">
+							<Field
+								label="Statutory registrations"
+								hint="Extra licence lines printed in the PO buyer block — one per line (FSSAI, Drug Licence, Acid Licence, Udyam…)"
+							>
+								<TextArea
+									value={form.statutory_lines}
+									onChange={(v) => set('statutory_lines', v)}
+									rows={3}
+								/>
+							</Field>
+						</div>
 						<div className="span2">
 							<Field
 								label="Exporter address"
