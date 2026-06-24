@@ -1058,6 +1058,7 @@ export interface ShipmentPack {
 	tare_per: number | null;
 	mfg_date: string | null;
 	exp_date: string | null;
+	drum_detail?: string | null;
 }
 
 export const GST_EXPORT_MODES = ['Under LUT (without IGST)', 'On payment of IGST'] as const;

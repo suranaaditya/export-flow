@@ -346,9 +346,9 @@ PACKING_LIST = _efx_head("Export Packing List", "Net, tare &amp; gross weights",
         </td>
         <td style="font-size:9px">{% if row.packs %}<b>{{ row.packs|sum(attribute="num_packages") }} {{ row.packs[0].pack_type or "pkgs" }}</b>{% if row.pack_size %}<div class="muted">each of {{ row.pack_size }}</div>{% endif %}{% elif row.pack_description %}{{ row.pack_description }}{% else %}&mdash;{% endif %}</td>
         <td>{% if ctx.claim_drawback %}<div class="muted" style="font-size:8.4px">Under DBK Scheme</div>{% endif %}<b>{{ row.item_name }}</b>{% if row.grade %} &middot; {{ row.grade }}{% endif %}{% if row.description %}<div style="font-size:9px;margin-top:1px">{{ row.description }}</div>{% endif %}<div class="mono muted" style="font-size:8.6px;margin-top:1px">{% if row.hs_code %}HS {{ row.hs_code }}{% endif %}{% if row.cas_number %} &middot; CAS {{ row.cas_number }}{% endif %}</div>{% if ctx.claim_rodtep %}<div class="muted" style="font-size:8.2px;margin-top:2px">We intend to claim rewards under the Remission of Duties and Taxes on Exported Products (RoDTEP) Scheme.</div>{% endif %}</td>
-        <td class="r mono">{% if row.packs %}{% for g in row.packs %}<div class="muted" style="font-size:8.6px">{{ g.num_packages }} &times; {{ "%g"|format(g.net_per) }}</div>{% endfor %}{% endif %}<b>{{ "%g"|format(row.net_wt) if row.net_wt else "—" }}</b></td>
-        <td class="r mono">{% if row.packs %}{% for g in row.packs %}<div class="muted" style="font-size:8.6px">{{ g.num_packages }} &times; {{ "%g"|format(g.tare_per) }}</div>{% endfor %}{% endif %}<b>{{ "%g"|format(row.tare_wt) if row.tare_wt else "—" }}</b></td>
-        <td class="r mono">{% if row.packs %}{% for g in row.packs %}<div class="muted" style="font-size:8.6px">{{ g.num_packages }} &times; {{ "%g"|format(g.gross_per) }}</div>{% endfor %}{% endif %}<b>{{ "%g"|format(row.gross_wt) if row.gross_wt else "—" }}</b></td>
+        <td class="r mono">{% if row.packs %}{% for g in row.packs %}{% if g.drums and g.net_uniform %}<div class="muted" style="font-size:8.6px">{{ g.num_packages }} &times; {{ "%g"|format(g.drums[0].net) }}</div>{% elif g.drums %}{% for d in g.drums %}<div class="muted" style="font-size:8.6px">1 &times; {{ "%g"|format(d.net) }}</div>{% endfor %}{% else %}<div class="muted" style="font-size:8.6px">{{ g.num_packages }} &times; {{ "%g"|format(g.net_per) }}</div>{% endif %}{% endfor %}{% endif %}<b>{{ "%g"|format(row.net_wt) if row.net_wt else "—" }}</b></td>
+        <td class="r mono">{% if row.packs %}{% for g in row.packs %}{% if g.drums %}{% for d in g.drums %}<div class="muted" style="font-size:8.6px">1 &times; {{ "%g"|format(d.tare) }}</div>{% endfor %}{% else %}<div class="muted" style="font-size:8.6px">{{ g.num_packages }} &times; {{ "%g"|format(g.tare_per) }}</div>{% endif %}{% endfor %}{% endif %}<b>{{ "%g"|format(row.tare_wt) if row.tare_wt else "—" }}</b></td>
+        <td class="r mono">{% if row.packs %}{% for g in row.packs %}{% if g.drums %}{% for d in g.drums %}<div class="muted" style="font-size:8.6px">1 &times; {{ "%g"|format(d.gross) }}</div>{% endfor %}{% else %}<div class="muted" style="font-size:8.6px">{{ g.num_packages }} &times; {{ "%g"|format(g.gross_per) }}</div>{% endif %}{% endfor %}{% endif %}<b>{{ "%g"|format(row.gross_wt) if row.gross_wt else "—" }}</b></td>
       </tr>
     {% endfor %}
     </tbody>
@@ -806,7 +806,7 @@ if __name__ == "__main__":
 	# (marks/pkgs/description columns, DBK + RoDTEP banners, full banker block, MFG
 	# line); the shared _efx_head also moved GST/ARN into the meta strip, so the
 	# shipping instruction (same head) re-syncs too.
-	CLIENT_FORMAT = "2026-06-24 12:00:00.000000"
+	CLIENT_FORMAT = "2026-06-24 18:00:00.000000"
 	write_format(
 		"exportflow_commercial_invoice", "ExportFlow Commercial Invoice", COMMERCIAL_INVOICE, modified=CLIENT_FORMAT
 	)

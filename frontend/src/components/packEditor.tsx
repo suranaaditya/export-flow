@@ -1,4 +1,4 @@
-import { Field, SearchSelect, TextInput } from '@/components/form';
+import { Field, SearchSelect, TextArea, TextInput } from '@/components/form';
 import { Icon } from '@/components/Icon';
 import type { ShipmentPack } from '@/lib/api';
 
@@ -14,6 +14,7 @@ export type PackEdit = {
 	tare_per: string;
 	mfg_date: string;
 	exp_date: string;
+	drum_detail: string;
 };
 
 // monotonic id for stable React keys (a removed row must not reshuffle the rest)
@@ -32,6 +33,7 @@ export function newPack(item_code = ''): PackEdit {
 		tare_per: '',
 		mfg_date: '',
 		exp_date: '',
+		drum_detail: '',
 	};
 }
 
@@ -47,6 +49,7 @@ export function packToEdit(p: ShipmentPack, i: number): PackEdit {
 		tare_per: s(p.tare_per),
 		mfg_date: p.mfg_date ?? '',
 		exp_date: p.exp_date ?? '',
+		drum_detail: p.drum_detail ?? '',
 	};
 }
 
@@ -66,6 +69,7 @@ export function editToPayload(rows: PackEdit[], validItems?: Set<string>) {
 			tare_per: Number(r.tare_per) || 0,
 			mfg_date: r.mfg_date || null,
 			exp_date: r.exp_date || null,
+			drum_detail: r.drum_detail?.trim() || null,
 		}));
 }
 
@@ -123,6 +127,16 @@ export function PackEditor({
 						</Field>
 						<Field label="Exp date">
 							<TextInput type="date" value={r.exp_date} onChange={(v) => setRow(i, { exp_date: v })} />
+						</Field>
+						<Field
+							label="Per-drum weights"
+							hint="Optional — one weight per line = that drum's tare (kg); net stays the uniform Net/pkg. Or enter net,tare. Blank = uniform."
+						>
+							<TextArea
+								value={r.drum_detail}
+								onChange={(v) => setRow(i, { drum_detail: v })}
+								rows={3}
+							/>
 						</Field>
 					</div>
 					<button type="button" className="xrow" onClick={() => onChange(rows.filter((_, idx) => idx !== i))}>

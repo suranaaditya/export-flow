@@ -53,6 +53,31 @@ def _manufacturer_name(mfg: str | None) -> str | None:
 	return frappe.db.get_value("Manufacturer", mfg, "full_name") or mfg
 
 
+def _parse_drums(detail: str | None, net_per: float, tare_per: float) -> list:
+	"""Individually-weighed drums for a batch, so the packing list itemises each
+	drum (net uniform, tare/gross per drum) exactly as the client's document does.
+	Each non-blank line is one drum: a single number is that drum's TARE (net stays
+	the uniform net_per); 'net,tare' (comma or space) varies both. Blank → fall back
+	to the uniform num_packages × per-pkg form."""
+	import re
+
+	drums = []
+	for ln in (detail or "").splitlines():
+		ln = ln.strip()
+		if not ln:
+			continue
+		parts = [x for x in re.split(r"[,\s]+", ln) if x]
+		try:
+			if len(parts) >= 2:
+				net, tare = flt(parts[0]), flt(parts[1])
+			else:
+				net, tare = flt(net_per), flt(parts[0])
+		except (ValueError, TypeError):
+			continue
+		drums.append(frappe._dict(net=flt(net, 2), tare=flt(tare, 2), gross=flt(net + tare, 2)))
+	return drums
+
+
 def _logo_data_uri() -> str | None:
 	"""The company logo as a base64 data URI, read straight from the File content.
 	Embedding it avoids depending on the web server serving /files (which is
@@ -173,19 +198,32 @@ def document_print_context(name: str):
 	# (count × per-package weight), exactly as the packing list itemises it
 	packs_by_item: dict[str, list] = {}
 	for p in shipment.get("packs") or []:
-		net = flt(p.num_packages) * flt(p.net_per)
-		tare = flt(p.num_packages) * flt(p.tare_per)
+		# individually-weighed drums (optional) take precedence over the uniform
+		# num_packages × per-pkg weights, and drive the per-drum packing-list lines
+		drums = _parse_drums(p.get("drum_detail"), p.net_per, p.tare_per)
+		if drums:
+			num = len(drums)
+			net = sum(d.net for d in drums)
+			tare = sum(d.tare for d in drums)
+			net_uniform = len({d.net for d in drums}) <= 1
+		else:
+			num = cint(p.num_packages)
+			net = flt(p.num_packages) * flt(p.net_per)
+			tare = flt(p.num_packages) * flt(p.tare_per)
+			net_uniform = True
 		packs_by_item.setdefault(p.item_code, []).append(
 			frappe._dict(
 				batch_no=p.batch_no,
 				marks=p.marks,
-				num_packages=cint(p.num_packages),
+				num_packages=num,
 				pack_type=p.pack_type,
 				net_per=flt(p.net_per),
 				tare_per=flt(p.tare_per),
 				gross_per=flt(p.net_per) + flt(p.tare_per),
 				mfg_date=p.mfg_date,
 				exp_date=p.exp_date,
+				drums=drums,
+				net_uniform=net_uniform,
 				net=flt(net, 2),
 				tare=flt(tare, 2),
 				gross=flt(net + tare, 2),

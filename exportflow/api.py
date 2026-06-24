@@ -2237,6 +2237,7 @@ def get_grn_detail(name: str) -> dict:
 				"tare_per": p.tare_per,
 				"mfg_date": p.mfg_date,
 				"exp_date": p.exp_date,
+				"drum_detail": p.drum_detail,
 			}
 			for p in doc.packs
 		],
@@ -2779,6 +2780,7 @@ def _pack_rows(packs) -> list[dict]:
 				"tare_per": flt(p.get("tare_per")),
 				"mfg_date": p.get("mfg_date") or None,
 				"exp_date": p.get("exp_date") or None,
+				"drum_detail": (p.get("drum_detail") or "").strip() or None,
 			}
 		)
 	return out
@@ -2977,6 +2979,7 @@ def get_shipment_detail(name: str) -> dict:
 					"tare_per",
 					"mfg_date",
 					"exp_date",
+					"drum_detail",
 				)
 			}
 			for p in doc.packs

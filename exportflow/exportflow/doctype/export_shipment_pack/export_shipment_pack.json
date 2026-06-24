@@ -14,7 +14,8 @@
   "net_per",
   "tare_per",
   "mfg_date",
-  "exp_date"
+  "exp_date",
+  "drum_detail"
  ],
  "fields": [
   {
@@ -85,6 +86,12 @@
    "fieldname": "exp_date",
    "fieldtype": "Date",
    "label": "Exp Date"
+  },
+  {
+   "fieldname": "drum_detail",
+   "fieldtype": "Small Text",
+   "label": "Per-drum weights",
+   "description": "One weight per line = that drum's tare (kg); net stays the uniform Net/pkg. Or enter net,tare to vary both. Leave blank for uniform weights."
   }
  ],
  "index_web_pages_for_search": 0,

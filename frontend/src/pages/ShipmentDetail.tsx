@@ -1255,9 +1255,32 @@ function PackingCard({
 	const [editing, setEditing] = useState(false);
 	const itemName = (code: string) => items.find((i) => i.item_code === code)?.item_name ?? code;
 	const num = (p: ShipmentPack) => Number(p.num_packages) || 0;
-	const net = packs.reduce((s, p) => s + num(p) * (Number(p.net_per) || 0), 0);
-	const tare = packs.reduce((s, p) => s + num(p) * (Number(p.tare_per) || 0), 0);
-	const totalPkgs = packs.reduce((s, p) => s + num(p), 0);
+	// individually-weighed drums (drum_detail) take precedence over the uniform
+	// num_packages × per-pkg weights — mirrors the print context so the glance totals
+	// match the packing list exactly
+	const drumsOf = (p: ShipmentPack) =>
+		(p.drum_detail || '')
+			.split('\n')
+			.map((l) => l.trim())
+			.filter(Boolean)
+			.map((l) => {
+				const parts = l.split(/[,\s]+/).filter(Boolean).map(Number);
+				return parts.length >= 2
+					? { net: parts[0] || 0, tare: parts[1] || 0 }
+					: { net: Number(p.net_per) || 0, tare: parts[0] || 0 };
+			});
+	const packCount = (p: ShipmentPack) => drumsOf(p).length || num(p);
+	const packNet = (p: ShipmentPack) => {
+		const d = drumsOf(p);
+		return d.length ? d.reduce((s, x) => s + x.net, 0) : num(p) * (Number(p.net_per) || 0);
+	};
+	const packTare = (p: ShipmentPack) => {
+		const d = drumsOf(p);
+		return d.length ? d.reduce((s, x) => s + x.tare, 0) : num(p) * (Number(p.tare_per) || 0);
+	};
+	const net = packs.reduce((s, p) => s + packNet(p), 0);
+	const tare = packs.reduce((s, p) => s + packTare(p), 0);
+	const totalPkgs = packs.reduce((s, p) => s + packCount(p), 0);
 
 	return (
 		<Card>
@@ -1288,8 +1311,8 @@ function PackingCard({
 									{p.batch_no ? <span className="data"> · {p.batch_no}</span> : null}
 								</span>
 							}
-							t2={`${p.num_packages ?? '—'} ${p.pack_type || 'pkgs'}${p.marks ? ` (nos ${p.marks})` : ''}${p.mfg_date ? ` · Mfg ${fmtDate(p.mfg_date)}` : ''}${p.exp_date ? ` · Exp ${fmtDate(p.exp_date)}` : ''}`}
-							right={<span className="num">{kg(num(p) * (Number(p.net_per) || 0))} kg</span>}
+							t2={`${packCount(p) || '—'} ${p.pack_type || 'pkgs'}${p.marks ? ` (nos ${p.marks})` : ''}${p.mfg_date ? ` · Mfg ${fmtDate(p.mfg_date)}` : ''}${p.exp_date ? ` · Exp ${fmtDate(p.exp_date)}` : ''}`}
+							right={<span className="num">{kg(packNet(p))} kg</span>}
 						/>
 					))}
 					<div className="ptot">

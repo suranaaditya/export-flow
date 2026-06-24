@@ -187,6 +187,45 @@ class TestDocuments(IntegrationTestCase):
 		self.assertIsNotNone(ctx["fob_value_inr"])
 		self.assertGreater(ctx["fob_value_inr"], 0)
 
+	def test_per_drum_weights(self):
+		"""Individually-weighed drums: drum_detail itemises each drum (a bare line is
+		that drum's tare with the uniform net; 'net,tare' varies both), and the per-drum
+		weights override the uniform num_packages × per-pkg totals + count."""
+		from exportflow.printing import document_print_context
+
+		so, customer, _s = self.make_deal(qty=50)
+		shp = self.make_shipment(so, customer, qty=50, incoterm="CIF")
+		doc = frappe.get_doc("Export Shipment", shp)
+		doc.append(
+			"packs",
+			{
+				"item_code": so.items[0].item_code,
+				"batch_no": "B-1",
+				"num_packages": 99,  # ignored once drum_detail is present
+				"pack_type": "HDPE Drums",
+				"net_per": 25,
+				"tare_per": 9.9,  # ignored once drum_detail is present
+				"drum_detail": "2.43\n2.44\n2.53\n20,3",
+			},
+		)
+		doc.save()
+		ctx = document_print_context(instance_of(shp, "Commercial Invoice"))
+		g = ctx["lines"][0]["packs"][0]
+		self.assertEqual(len(g["drums"]), 4, "one entry per drum line")
+		self.assertEqual(g["num_packages"], 4, "count from the drum lines, not the 99")
+		self.assertFalse(g["net_uniform"], "the 20-net drum breaks net uniformity")
+		self.assertAlmostEqual(g["net"], 95.0, places=2, msg="25+25+25+20")
+		self.assertAlmostEqual(g["tare"], 10.4, places=2, msg="2.43+2.44+2.53+3")
+		self.assertAlmostEqual(g["gross"], 105.4, places=2)
+		self.assertEqual(ctx["total_packages"], 4)
+		# the explicit 'net,tare' drum
+		self.assertEqual(g["drums"][3]["net"], 20.0)
+		self.assertEqual(g["drums"][3]["tare"], 3.0)
+		self.assertEqual(g["drums"][3]["gross"], 23.0)
+		# a bare line uses the uniform net_per
+		self.assertEqual(g["drums"][0]["net"], 25.0)
+		self.assertEqual(g["drums"][0]["gross"], 27.43)
+
 	def test_create_shipment_with_packs(self):
 		"""Packing detail can be entered while booking the shipment, and a pack
 		whose item isn't a shipment line is rejected (the form's picker only ever
