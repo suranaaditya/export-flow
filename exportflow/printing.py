@@ -32,6 +32,27 @@ def _supplier_gstin(supplier: str) -> str | None:
 	return frappe.db.get_value("Supplier", supplier, "gstin")
 
 
+def _plain(html: str | None) -> str | None:
+	"""A Text-Editor field (e.g. Item.description, which carries the full chemical /
+	IUPAC name the invoice prints) flattened to a single clean plain-text run."""
+	if not html:
+		return None
+	import re
+	from html import unescape
+
+	text = re.sub(r"<[^>]+>", " ", html)
+	text = re.sub(r"\s+", " ", unescape(text)).strip()
+	return text or None
+
+
+def _manufacturer_name(mfg: str | None) -> str | None:
+	"""Resolve an Item's default manufacturer link to its display name for the
+	invoice / packing-list 'MFG' line."""
+	if not mfg:
+		return None
+	return frappe.db.get_value("Manufacturer", mfg, "full_name") or mfg
+
+
 def _logo_data_uri() -> str | None:
 	"""The company logo as a base64 data URI, read straight from the File content.
 	Embedding it avoids depending on the web server serving /files (which is
@@ -205,10 +226,13 @@ def document_print_context(name: str):
 			row.item_code,
 			[
 				"item_name",
+				"description",
 				"customs_tariff_number",
 				"pharmacopoeia_grade",
 				"country_of_origin",
 				"cas_number",
+				"default_pack_size",
+				"default_item_manufacturer",
 			],
 			as_dict=True,
 		) or frappe._dict()
@@ -227,14 +251,20 @@ def document_print_context(name: str):
 		tare_total_wt += line_tare
 		gross_total_wt += line_gross
 		pkg_total += sum(g.num_packages for g in line_packs)
+		item_name = row.item_name or item.item_name or row.item_code
+		description = _plain(item.get("description"))
 		items.append(
 			frappe._dict(
 				item_code=row.item_code,
-				item_name=row.item_name or item.item_name or row.item_code,
+				item_name=item_name,
+				# the full chemical / IUPAC name the invoice prints under the item name
+				description=description if description and description != item_name else None,
 				grade=item.pharmacopoeia_grade,
 				hs_code=item.customs_tariff_number,
 				cas_number=item.cas_number,
 				country_of_origin=item.country_of_origin or "India",
+				pack_size=item.get("default_pack_size"),
+				manufacturer=_manufacturer_name(item.get("default_item_manufacturer")),
 				batch_no=row.batch_no,
 				qty=flt(row.qty),
 				uom=row.uom,
@@ -255,8 +285,10 @@ def document_print_context(name: str):
 		else None
 	)
 
-	# §5.2: supplier GSTIN + invoice reference for 0.1%-scheme cargo
+	# §5.2: supplier GSTIN + invoice reference for 0.1%-scheme cargo, and the set of
+	# domestic suppliers feeding this shipment (the invoice's "MFG" / manufacturer line)
 	scheme_suppliers = []
+	po_supplier_names = []
 	for po_name in sorted({r.purchase_order for r in shipment.items if r.purchase_order}):
 		po = frappe.db.get_value(
 			"Purchase Order",
@@ -265,16 +297,29 @@ def document_print_context(name: str):
 			 "supplier_invoice_date", "docstatus"],
 			as_dict=True,
 		)
-		if po and po.merchant_export_scheme and po.docstatus == 1:
+		if not po:
+			continue
+		sup_name = po.supplier_name or po.supplier
+		if sup_name and sup_name not in po_supplier_names:
+			po_supplier_names.append(sup_name)
+		if po.merchant_export_scheme and po.docstatus == 1:
 			scheme_suppliers.append(
 				frappe._dict(
 					purchase_order=po_name,
-					supplier_name=po.supplier_name or po.supplier,
+					supplier_name=sup_name,
 					gstin=_supplier_gstin(po.supplier),
 					invoice_no=po.supplier_invoice_no,
 					invoice_date=po.supplier_invoice_date,
 				)
 			)
+
+	# MFG line: the goods' manufacturer(s) — prefer an item-level manufacturer, else
+	# fall back to the domestic PO supplier(s) the merchant exporter bought from
+	item_manufacturers = []
+	for ln in items:
+		if ln.manufacturer and ln.manufacturer not in item_manufacturers:
+			item_manufacturers.append(ln.manufacturer)
+	manufacturers = item_manufacturers or po_supplier_names
 
 	lc = None
 	lc_requirements = []
@@ -350,7 +395,9 @@ def document_print_context(name: str):
 		taxable_value_inr = flt(grand_total * inr_rate, 2)
 		igst_amount = flt(taxable_value_inr * igst_rate / 100.0, 2)
 
-	# exporter collection bank (for the buyer's remittance)
+	# exporter collection bank (for the buyer's remittance) — the correspondent /
+	# Nostro bank, its own SWIFT and the routing no print as discrete lines, as the
+	# client's banker block carries them
 	bank = frappe._dict(
 		account_no=settings.get("bank_account_no"),
 		name=settings.get("bank_name"),
@@ -358,6 +405,8 @@ def document_print_context(name: str):
 		ifsc=settings.get("bank_ifsc"),
 		swift=settings.get("bank_swift"),
 		correspondent=settings.get("bank_correspondent"),
+		correspondent_swift=settings.get("bank_correspondent_swift"),
+		routing_no=settings.get("bank_routing_no"),
 	)
 	has_bank = any(bank.values())
 
@@ -382,6 +431,8 @@ def document_print_context(name: str):
 		letterhead_contact=lh_contact,
 		iec_number=settings.iec_number,
 		gstin=settings.gstin,
+		cin=settings.get("cin"),
+		jurisdiction=settings.get("jurisdiction"),
 		ad_code=ad_code,
 		lut_number=settings.lut_number,
 		lut_valid_upto=settings.lut_valid_upto,
@@ -402,6 +453,11 @@ def document_print_context(name: str):
 		buyer_order_no=shipment.get("buyer_order_no"),
 		buyer_order_date=shipment.get("buyer_order_date"),
 		payment_terms=payment_terms,
+		manufacturers=manufacturers,
+		claim_rodtep=cint(shipment.get("claim_rodtep")),
+		rodtep_rate_pct=flt(shipment.get("rodtep_rate_pct")),
+		claim_drawback=cint(shipment.get("claim_drawback")),
+		drawback_rate_pct=flt(shipment.get("drawback_rate_pct")),
 		# "lines", not "items" — on a _dict, jinja's ctx.items resolves to the
 		# dict method, not the key
 		lines=items,

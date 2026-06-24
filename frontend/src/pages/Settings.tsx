@@ -382,7 +382,9 @@ function RuleModal({
 interface ExporterProfile {
 	iec_number: string;
 	gstin: string;
+	cin: string;
 	exporter_address: string;
+	jurisdiction: string;
 	lut_number: string;
 	lut_valid_upto: string;
 	signatory_name: string;
@@ -394,12 +396,16 @@ interface ExporterProfile {
 	bank_ifsc: string;
 	bank_swift: string;
 	bank_correspondent: string;
+	bank_correspondent_swift: string;
+	bank_routing_no: string;
 }
 
 const EMPTY_PROFILE: ExporterProfile = {
 	iec_number: '',
 	gstin: '',
+	cin: '',
 	exporter_address: '',
+	jurisdiction: '',
 	lut_number: '',
 	lut_valid_upto: '',
 	signatory_name: '',
@@ -411,6 +417,8 @@ const EMPTY_PROFILE: ExporterProfile = {
 	bank_ifsc: '',
 	bank_swift: '',
 	bank_correspondent: '',
+	bank_correspondent_swift: '',
+	bank_routing_no: '',
 };
 
 /** Exporter identity printed on every §5.2 document (IEC, GSTIN, LUT…). */
@@ -579,6 +587,12 @@ function ExporterProfilePanel({ canEdit }: { canEdit: boolean }) {
 						<Field label="GSTIN">
 							<TextInput mono value={form.gstin} onChange={(v) => set('gstin', v)} />
 						</Field>
+						<Field label="CIN" hint="Corporate Identity Number — printed under IEC on the invoice">
+							<TextInput mono value={form.cin} onChange={(v) => set('cin', v)} />
+						</Field>
+						<Field label="Jurisdiction" hint="Closing footnote, e.g. Indore (M.P.) India">
+							<TextInput value={form.jurisdiction} onChange={(v) => set('jurisdiction', v)} />
+						</Field>
 						<div className="span2">
 							<Field
 								label="Exporter address"
@@ -632,10 +646,16 @@ function ExporterProfilePanel({ canEdit }: { canEdit: boolean }) {
 							</Field>
 						</div>
 						<div className="span2">
-							<Field label="Correspondent bank" hint="Intermediary bank & routing, for inward foreign remittance">
+							<Field label="Correspondent bank" hint="Intermediary / Nostro bank for inward foreign remittance">
 								<TextArea value={form.bank_correspondent} onChange={(v) => set('bank_correspondent', v)} rows={2} />
 							</Field>
 						</div>
+						<Field label="Correspondent SWIFT">
+							<TextInput mono value={form.bank_correspondent_swift} onChange={(v) => set('bank_correspondent_swift', v)} />
+						</Field>
+						<Field label="Routing no">
+							<TextInput mono value={form.bank_routing_no} onChange={(v) => set('bank_routing_no', v)} />
+						</Field>
 						<div className="span2">
 							<Field label="SCOMET declaration override" hint="Leave blank for the standard wording">
 								<TextArea value={form.scomet_text} onChange={(v) => set('scomet_text', v)} rows={2} />

@@ -12,8 +12,10 @@
   "section_exporter",
   "iec_number",
   "gstin",
+  "cin",
   "cb_efs_exporter",
   "exporter_address",
+  "jurisdiction",
   "section_lut",
   "lut_number",
   "cb_efs_lut",
@@ -30,6 +32,8 @@
   "bank_ifsc",
   "bank_swift",
   "bank_correspondent",
+  "bank_correspondent_swift",
+  "bank_routing_no",
   "section_declarations",
   "scomet_text",
   "section_mtt",
@@ -105,6 +109,11 @@
    "label": "GSTIN"
   },
   {
+   "fieldname": "cin",
+   "fieldtype": "Data",
+   "label": "CIN"
+  },
+  {
    "fieldname": "cb_efs_exporter",
    "fieldtype": "Column Break"
   },
@@ -113,6 +122,12 @@
    "fieldname": "exporter_address",
    "fieldtype": "Small Text",
    "label": "Exporter Address"
+  },
+  {
+   "fieldname": "jurisdiction",
+   "fieldtype": "Data",
+   "label": "Jurisdiction",
+   "description": "Closing jurisdiction footnote on invoices (e.g. Indore, M.P.)"
   },
   {
    "description": "When set, invoices carry the declaration \"Supply meant for export under LUT without payment of IGST\"",
@@ -195,6 +210,16 @@
    "fieldname": "bank_correspondent",
    "fieldtype": "Small Text",
    "label": "Correspondent Bank"
+  },
+  {
+   "fieldname": "bank_correspondent_swift",
+   "fieldtype": "Data",
+   "label": "Correspondent SWIFT"
+  },
+  {
+   "fieldname": "bank_routing_no",
+   "fieldtype": "Data",
+   "label": "Routing No."
   },
   {
    "collapsible": 1,
@@ -332,7 +357,7 @@
   },
   {
    "default": "0",
-   "description": "Receive purchased goods into a warehouse via a Goods Receipt Note (stock in), and post stock out when the shipment departs. Merchanting trades never carry stock. Off by default — when off, the app stays in pure drop-ship mode.",
+   "description": "Receive purchased goods into a warehouse via a Goods Receipt Note (stock in), and post stock out when the shipment departs. Merchanting trades never carry stock. Off by default \u2014 when off, the app stays in pure drop-ship mode.",
    "fieldname": "maintain_stock",
    "fieldtype": "Check",
    "label": "Maintain stock through Goods Receipt Notes"
