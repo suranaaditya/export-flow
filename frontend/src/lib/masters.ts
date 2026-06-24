@@ -198,6 +198,21 @@ export const MASTERS: MasterDef[] = [
 		fields: [{ key: 'uom_name', label: 'Unit name', type: 'text', required: true, createOnly: true }],
 	},
 	{
+		doctype: 'Export Pack Type',
+		title: 'Pack types',
+		singular: 'pack type',
+		icon: 'package',
+		listFields: ['name', 'pack_type_name', 'disabled'],
+		columns: [
+			{ key: 'pack_type_name', label: 'Pack type' },
+			{ key: 'disabled', label: 'Disabled', dim: true },
+		],
+		fields: [
+			{ key: 'pack_type_name', label: 'Pack type name', type: 'text', required: true, createOnly: true },
+			{ key: 'disabled', label: 'Disabled', type: 'check' },
+		],
+	},
+	{
 		doctype: 'Terms and Conditions',
 		title: 'Terms & conditions',
 		singular: 'terms template',

@@ -1,3 +1,5 @@
+import { useFrappeGetDocList } from 'frappe-react-sdk';
+
 import { Field, SearchSelect, TextArea, TextInput } from '@/components/form';
 import { Icon } from '@/components/Icon';
 import type { ShipmentPack } from '@/lib/api';
@@ -88,6 +90,18 @@ export function PackEditor({
 	const setRow = (i: number, patch: Partial<PackEdit>) =>
 		onChange(rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
 
+	// the managed pack-type list (Settings → Master data → Pack types); an existing
+	// free-text value is appended so it stays visible/selectable on an old row
+	const { data: packTypes } = useFrappeGetDocList<{ name: string }>('Export Pack Type', {
+		filters: [['disabled', '=', 0]],
+		fields: ['name'],
+		limit: 0,
+		orderBy: { field: 'pack_type_name', order: 'asc' },
+	});
+	const baseTypeOpts = (packTypes ?? []).map((p) => ({ value: p.name }));
+	const typeOptionsFor = (v: string) =>
+		v && !baseTypeOpts.some((o) => o.value === v) ? [...baseTypeOpts, { value: v }] : baseTypeOpts;
+
 	return (
 		<div className="packlist">
 			{itemOptions.length === 0 && (
@@ -110,8 +124,13 @@ export function PackEditor({
 						<Field label="Packages">
 							<TextInput type="number" mono value={r.num_packages} onChange={(v) => setRow(i, { num_packages: v })} />
 						</Field>
-						<Field label="Pack type" hint="e.g. HDPE Drums">
-							<TextInput value={r.pack_type} onChange={(v) => setRow(i, { pack_type: v })} />
+						<Field label="Pack type" hint="Manage the list in Settings → Master data → Pack types">
+							<SearchSelect
+								value={r.pack_type}
+								onChange={(v) => setRow(i, { pack_type: v })}
+								options={typeOptionsFor(r.pack_type)}
+								placeholder="Pick a pack type…"
+							/>
 						</Field>
 						<Field label="Pkg nos" hint="e.g. 1-10">
 							<TextInput value={r.marks} onChange={(v) => setRow(i, { marks: v })} />

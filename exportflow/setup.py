@@ -344,6 +344,22 @@ def seed_item_group():
 	).insert(ignore_permissions=True)
 
 
+# the client's standard pack types — the dropdown on the shipment packing detail.
+# Users add more in Settings → Master data → Pack types.
+PACK_TYPES = ["HDPE Drum", "Fiber Drum", "UN Approved Drum", "Bags", "Carton Box"]
+
+
+def seed_pack_types():
+	"""Seed the standard package types offered on the shipment packing detail.
+	Idempotent (existing records by name are left untouched)."""
+	for name in PACK_TYPES:
+		if frappe.db.exists("Export Pack Type", name):
+			continue
+		frappe.get_doc({"doctype": "Export Pack Type", "pack_type_name": name}).insert(
+			ignore_permissions=True
+		)
+
+
 def after_install():
 	setup_export_role_permissions()
 	seed_ports()
@@ -352,3 +368,4 @@ def after_install():
 	seed_terms_templates()
 	seed_payment_terms()
 	seed_item_group()
+	seed_pack_types()
