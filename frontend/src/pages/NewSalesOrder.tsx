@@ -3,6 +3,7 @@ import { useFrappeGetCall, useFrappePostCall } from 'frappe-react-sdk';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
 import { MasterModal } from '@/components/MasterModal';
+import { PartyAddressPicker } from '@/components/PartyAddressPicker';
 import { Field, SearchSelect, TextArea, TextInput } from '@/components/form';
 import { Card, CHead, Facts } from '@/components/ui';
 import { API, parseServerError, type ItemInfo, type NewSOContext, type SalesOrderForEdit } from '@/lib/api';
@@ -54,6 +55,7 @@ export function NewSalesOrder() {
 	const busy = saving || updating;
 
 	const [customer, setCustomer] = useState('');
+	const [customerAddress, setCustomerAddress] = useState('');
 	const [orderDate, setOrderDate] = useState(todayISO());
 	const [deliveryDate, setDeliveryDate] = useState('');
 	const [currency, setCurrency] = useState('');
@@ -81,6 +83,7 @@ export function NewSalesOrder() {
 		const d = editResult.data?.message;
 		if (!d) return;
 		setCustomer(d.customer ?? '');
+		setCustomerAddress(d.customer_address ?? '');
 		setOrderDate(d.transaction_date ?? todayISO());
 		setDeliveryDate(d.delivery_date ?? '');
 		seededCurrency.current = d.currency ?? '';
@@ -202,6 +205,7 @@ export function NewSalesOrder() {
 		setErr(null);
 		const deal = {
 			customer,
+			customer_address: customerAddress || null,
 			transaction_date: orderDate,
 			delivery_date: deliveryDate,
 			currency,
@@ -286,13 +290,23 @@ export function NewSalesOrder() {
 						<Field label="Customer" required>
 							<SearchSelect
 								value={customer}
-								onChange={setCustomer}
+								onChange={(v) => { setCustomer(v); setCustomerAddress(''); }}
 								options={customers}
 								placeholder="Search customers…"
 								onCreate={() => setQuickCreate('customer')}
 								createLabel="New customer"
 							/>
 						</Field>
+						{customer && (
+							<PartyAddressPicker
+								partyType="Customer"
+								party={customer}
+								value={customerAddress}
+								onChange={(name) => setCustomerAddress(name)}
+								label="Buyer address"
+								hint="Prints on the order; defaults to the customer's primary"
+							/>
+						)}
 						<Field label="Order date">
 							<TextInput type="date" value={orderDate} onChange={setOrderDate} />
 						</Field>

@@ -9,6 +9,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
 import { MasterModal } from '@/components/MasterModal';
 import { PackEditor, editToPayload, newPack, type PackEdit } from '@/components/packEditor';
+import { PartyAddressPicker, addressBlock, type PickerAddress } from '@/components/PartyAddressPicker';
 import { CheckInput, Field, SearchSelect, SelectInput, TextInput } from '@/components/form';
 import { Card, CHead, EmptyMsg } from '@/components/ui';
 import {
@@ -71,6 +72,10 @@ export function NewShipment() {
 	const [pol, setPol] = useState('');
 	const [pod, setPod] = useState('');
 	const [finalDestination, setFinalDestination] = useState('');
+	// consignee address: the picker tracks the chosen Address by name; on submit we store
+	// its rendered block in the shipment's free-text consignee_address (a snapshot)
+	const [consigneeAddrName, setConsigneeAddrName] = useState('');
+	const [consigneeAddrText, setConsigneeAddrText] = useState('');
 	const [etd, setEtd] = useState('');
 	const [eta, setEta] = useState('');
 	const [lc, setLc] = useState('');
@@ -351,6 +356,8 @@ export function NewShipment() {
 		setLc('');
 		setIncoterm('');
 		setFinalDestination('');
+		setConsigneeAddrName('');
+		setConsigneeAddrText('');
 		setPrefillSo(null);
 		prefillClaimed.current = false;
 		prefilled.current = { incoterm: '', finalDestination: '', lc: '' };
@@ -456,6 +463,7 @@ export function NewShipment() {
 					port_of_loading: pol || null,
 					port_of_discharge: pod || null,
 					final_destination: finalDestination,
+					consignee_address: consigneeAddrText || null,
 					etd: etd || null,
 					eta: eta || null,
 					letter_of_credit: lc || null,
@@ -674,6 +682,21 @@ export function NewShipment() {
 								/>
 							</Field>
 						</div>
+						{customer && (
+							<div className="span2">
+								<PartyAddressPicker
+									partyType="Customer"
+									party={customer}
+									value={consigneeAddrName}
+									onChange={(name, addr: PickerAddress | null) => {
+										setConsigneeAddrName(name);
+										setConsigneeAddrText(addr ? addressBlock(addr) : '');
+									}}
+									label="Consignee address"
+									hint="Prints on the commercial invoice / packing list; defaults to the customer's primary"
+								/>
+							</div>
+						)}
 						<Field label="ETD">
 							<TextInput type="date" value={etd} onChange={setEtd} />
 						</Field>

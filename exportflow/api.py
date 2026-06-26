@@ -509,8 +509,15 @@ def add_party_address(party_type: str, party: str, values, make_primary=0) -> di
 		frappe.throw(_("Enter at least an address line or a city"))
 	country = (values.get("country") or "").strip() or None
 	gstin = (values.get("gstin") or "").strip().upper()
-	is_india = (country or "").lower() == "india" or bool(gstin)
+	# `state` must be a real GST state (derived from GSTIN or entered explicitly) — never
+	# the city, or india_compliance's address validation rejects it ("valid State").
 	state = _supplier_gst_state(gstin) if gstin else ((values.get("state") or "").strip() or None)
+	# Frappe backfills a blank country with the site default (India here); resolve it up
+	# front so our check matches what india_compliance will enforce on insert.
+	eff_country = country or frappe.db.get_default("country") or "India"
+	is_foreign = eff_country.lower() != "india"
+	if not is_foreign and not state:
+		frappe.throw(_("State is required for an Indian address — enter the State, or a GSTIN to derive it."))
 	make_primary = cint(make_primary)
 	addr = frappe.get_doc(
 		{
@@ -520,8 +527,8 @@ def add_party_address(party_type: str, party: str, values, make_primary=0) -> di
 			"address_line1": line1 or city,
 			"address_line2": (values.get("address_line2") or "").strip() or None,
 			"city": city or None,
-			"state": state if is_india else (city or None),
-			"country": country or ("India" if is_india else None),
+			"state": state,
+			"country": eff_country,
 			"pincode": (values.get("pincode") or "").strip() or None,
 			"is_primary_address": 1 if make_primary else 0,
 			"is_shipping_address": 1 if values.get("is_shipping_address") else 0,
@@ -531,7 +538,7 @@ def add_party_address(party_type: str, party: str, values, make_primary=0) -> di
 	if gstin and frappe.get_meta("Address").has_field("gst_category"):
 		addr.gstin = gstin
 		addr.gst_category = "Registered Regular"
-	elif not is_india and frappe.get_meta("Address").has_field("gst_category"):
+	elif is_foreign and frappe.get_meta("Address").has_field("gst_category"):
 		addr.gst_category = "Overseas"
 	addr.insert(ignore_permissions=True)
 	if make_primary:
@@ -889,6 +896,8 @@ def create_export_sales_order(deal) -> dict:
 			"conversion_rate": conversion_rate,
 			"incoterm": deal.get("incoterm") or None,
 			"named_place": deal.get("named_place"),
+			# chosen buyer address (defaults to the customer's primary); the SO print uses it
+			"customer_address": deal.get("customer_address") or None,
 			"payment_terms_narrative": deal.get("payment_terms_narrative"),
 			"tc_name": deal.get("tc_name") or None,
 			"terms": deal.get("terms"),
@@ -1657,6 +1666,9 @@ def _build_po_doc(
 		"schedule_date": schedule_date,
 		"currency": currency,
 		"conversion_rate": conversion_rate,
+		# the chosen Bill-from address (defaults to the supplier's primary); supplier_gstin
+		# fetches from it, and the PO print's "Supplier (Bill from)" block uses it
+		"supplier_address": podata.get("supplier_address") or None,
 		"merchant_export_scheme": 0 if merchanting else (1 if podata.get("merchant_export_scheme") else 0),
 		"merchanting_trade": 1 if merchanting else 0,
 		"taxes_and_charges": taxes_template or None,

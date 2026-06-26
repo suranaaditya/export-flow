@@ -3,6 +3,7 @@ import { useFrappeGetCall, useFrappePostCall } from 'frappe-react-sdk';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Icon } from '@/components/Icon';
 import { MasterModal } from '@/components/MasterModal';
+import { PartyAddressPicker } from '@/components/PartyAddressPicker';
 import { CheckInput, Field, SearchSelect, TextArea, TextInput } from '@/components/form';
 import { Card, CHead, EmptyMsg, Facts } from '@/components/ui';
 import {
@@ -67,6 +68,7 @@ export function NewPurchaseOrder() {
 	);
 
 	const [supplier, setSupplier] = useState('');
+	const [supplierAddress, setSupplierAddress] = useState('');
 	const [mes, setMes] = useState(false);
 	const [orderDate, setOrderDate] = useState(todayISO());
 	const [requiredBy, setRequiredBy] = useState('');
@@ -109,6 +111,7 @@ export function NewPurchaseOrder() {
 		const d = editResult.data?.message;
 		if (!d) return;
 		setSupplier(d.po.supplier ?? '');
+		setSupplierAddress(d.po.supplier_address ?? '');
 		setMes(d.po.merchant_export_scheme === 1);
 		setMerchanting(!!d.po.merchanting_trade);
 		seededCurrency.current = d.po.currency ?? '';
@@ -204,6 +207,7 @@ export function NewPurchaseOrder() {
 	function buildPayload(submit: boolean) {
 		return {
 			supplier,
+			supplier_address: supplierAddress || null,
 			transaction_date: orderDate,
 			schedule_date: requiredBy || null,
 			currency: currency || null,
@@ -271,6 +275,7 @@ export function NewPurchaseOrder() {
 
 	function onSupplier(v: string) {
 		setSupplier(v);
+		setSupplierAddress(''); // the picker re-defaults to the new supplier's primary
 		const s = ctx?.suppliers.find((x) => x.name === v);
 		const foreign = !!s && !!s.country && s.country !== 'India';
 		setMes(!foreign && !!s?.default_merchant_export_scheme);
@@ -509,6 +514,16 @@ export function NewPurchaseOrder() {
 								createLabel="New supplier"
 							/>
 						</Field>
+						{supplier && (
+							<PartyAddressPicker
+								partyType="Supplier"
+								party={supplier}
+								value={supplierAddress}
+								onChange={(name) => setSupplierAddress(name)}
+								label="Bill-from address"
+								hint="Prints on the PO; defaults to the supplier's primary"
+							/>
+						)}
 						{/* both schemes are always shown; only the one applicable to the
 						    selected supplier is enabled — more intuitive than swapping (#9) */}
 						<div style={{ paddingTop: 22, display: 'grid', gap: 8 }}>

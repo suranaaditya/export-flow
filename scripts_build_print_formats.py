@@ -652,7 +652,7 @@ _PO_FOOT = '<span class="lbl">Registration</span>{% if ex.pan %}PAN <span class=
 
 SALES_ORDER = (
 	'{%- set ex = exporter_profile() -%}\n'
-	'{%- set cust_addr = party_address("Customer", doc.customer) -%}\n'
+	'{%- set cust_addr = address_text(doc.customer_address) or party_address("Customer", doc.customer) -%}\n'
 	'{%- set dest = frappe.db.get_value("Customer", doc.customer, "destination_country") -%}\n'
 	+ EFX_CSS + """
 <div class="efx">""" + LH_EX + """<div class="doc">
@@ -687,7 +687,7 @@ SALES_ORDER = (
 
 PURCHASE_ORDER = (
 	'{%- set ex = exporter_profile() -%}\n'
-	'{%- set sup = supplier_profile(doc.supplier, doc.get("supplier_gstin")) -%}\n'
+	'{%- set sup = supplier_profile(doc.supplier, doc.get("supplier_gstin"), doc.get("supplier_address")) -%}\n'
 	'{%- set sos = doc.items | map(attribute="sales_order") | select | unique | list -%}\n'
 	+ EFX_CSS + """
 <div class="efx">""" + LH_EX + """<div class="doc">
@@ -854,7 +854,7 @@ if __name__ == "__main__":
 	CLIENT_FORMAT = "2026-06-24 20:00:00.000000"
 	# PO reshaped to MN Globex's Tally-style layout (Buyer/Invoice-to + Supplier
 	# Bill-from blocks, packing column, spec sub-line, GST-treatment banner, footer)
-	PO_CLIENT_FORMAT = "2026-06-25 09:00:00.000000"
+	PO_CLIENT_FORMAT = "2026-06-25 12:00:00.000000"
 	write_format(
 		"exportflow_commercial_invoice", "ExportFlow Commercial Invoice", COMMERCIAL_INVOICE, modified=CLIENT_FORMAT
 	)
@@ -871,7 +871,7 @@ if __name__ == "__main__":
 	write_format("exportflow_export_value_declaration", "ExportFlow Export Value Declaration", EXPORT_VALUE_DECL, modified=REDESIGN)
 	write_format(
 		"exportflow_sales_order", "ExportFlow Sales Order", SALES_ORDER,
-		doc_type="Sales Order", modified=PAYMENT_TERMS_REDESIGN,
+		doc_type="Sales Order", modified=PO_CLIENT_FORMAT,
 	)
 	write_format(
 		"exportflow_purchase_order", "ExportFlow Purchase Order", PURCHASE_ORDER,

@@ -207,9 +207,37 @@ def exporter_profile():
 	)
 
 
-def supplier_profile(supplier: str, supplier_gstin: str | None = None):
+def address_text(address_name: str | None) -> str | None:
+	"""A specific Address (by name) as clean multi-line plain text — for documents that
+	carry a CHOSEN address (PO supplier_address, SO customer_address) rather than the
+	party's default. Registered as a jinja method."""
+	if not address_name:
+		return None
+	html = _address_display_by_name(address_name)
+	if not html:
+		return None
+	import re
+	from html import unescape
+
+	text = re.sub(r"<br\s*/?>", "\n", html, flags=re.IGNORECASE)
+	text = re.sub(r"<[^>]+>", "", text)
+	lines = [ln.strip().rstrip(",").strip() for ln in unescape(text).splitlines()]
+	return "\n".join(ln for ln in lines if ln) or None
+
+
+def _address_display_by_name(address_name: str) -> str | None:
+	try:
+		from frappe.contacts.doctype.address.address import get_address_display
+
+		return get_address_display(address_name)
+	except Exception:
+		return None
+
+
+def supplier_profile(supplier: str, supplier_gstin: str | None = None, address_name: str | None = None):
 	"""Supplier identity for the PO 'Supplier (Bill from)' block — name, address,
-	GSTIN + derived state/PAN, and the primary contact's name / phone / email.
+	GSTIN + derived state/PAN, and the primary contact's name / phone / email. When the
+	PO carries a chosen supplier_address, that address prints (not the default).
 	Registered as a jinja method."""
 	meta = frappe.get_meta("Supplier")
 	want = [f for f in ["supplier_name", "gstin", "pan", "mobile_no", "email_id", "supplier_primary_contact"] if meta.has_field(f)]
@@ -223,7 +251,7 @@ def supplier_profile(supplier: str, supplier_gstin: str | None = None):
 			contact_person = (" ".join(x for x in [cp.first_name, cp.last_name] if x)).strip() or None
 	return frappe._dict(
 		name=sup.get("supplier_name") or supplier,
-		address=party_address("Supplier", supplier),
+		address=address_text(address_name) or party_address("Supplier", supplier),
 		gstin=gstin,
 		pan=sup.get("pan") or _pan_from_gstin(gstin),
 		state_name=state_name,

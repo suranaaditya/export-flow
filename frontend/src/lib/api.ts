@@ -107,6 +107,7 @@ export interface SOMoneySummary {
 export interface SalesOrderForEdit {
 	name: string;
 	customer: string;
+	customer_address: string | null;
 	currency: string;
 	conversion_rate: number;
 	transaction_date: string;
@@ -749,6 +750,7 @@ export interface PODetailData {
 	po: Omit<POListRow, 'sales_orders'> & {
 		schedule_date: string | null;
 		conversion_rate: number | null;
+		supplier_address: string | null;
 		merchanting_trade: 0 | 1 | null;
 		taxes_and_charges: string | null;
 		tc_name: string | null;

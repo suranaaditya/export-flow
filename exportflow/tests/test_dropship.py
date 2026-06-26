@@ -342,6 +342,45 @@ class TestDropShipFlow(IntegrationTestCase):
 		add_party_contact("Customer", cust, {"contact_person": "Jane Doe", "email": "jane@buyer.de"})
 		self.assertEqual(len(get_party_contacts("Customer", cust)["contacts"]), 1)
 
+	def test_phase3_picked_address_resolves_in_print(self):
+		"""Phase 3: a chosen Address (not just the party default) resolves through the print
+		helpers, so the SO/PO/shipment print the address selected on the order — not only
+		the party's primary."""
+		from exportflow.api import add_party_address, create_supplier
+		from exportflow.printing import address_text, supplier_profile
+
+		sup = create_supplier(
+			{"supplier_name": f"_Test EF Pick {_suffix()}", "country": "India"}
+		)["name"]
+		# a distinct second address on the same supplier
+		a2 = add_party_address(
+			"Supplier",
+			sup,
+			{
+				"address_line1": "Unit 7B, Worli Naka",
+				"city": "Mumbai",
+				"state": "Maharashtra",
+				"pincode": "400018",
+			},
+		)["name"]
+		# address_text renders the *chosen* address verbatim...
+		txt = address_text(a2)
+		self.assertIn("Worli Naka", txt)
+		self.assertIn("Mumbai", txt)
+		# ...and supplier_profile honours address_name over the party default
+		prof = supplier_profile(sup, None, a2)
+		self.assertIn("Worli Naka", prof["address"])
+
+	def test_indian_address_requires_state(self):
+		"""Phase 3: an Indian address with no GSTIN and no state is rejected with a clean
+		message — the city is never silently used as the GST state (which india_compliance
+		would otherwise reject deep in a traceback)."""
+		from exportflow.api import add_party_address, create_supplier
+
+		sup = create_supplier({"supplier_name": f"_Test EF NoState {_suffix()}", "country": "India"})["name"]
+		with self.assertRaises(frappe.ValidationError):
+			add_party_address("Supplier", sup, {"address_line1": "Y", "city": "Mumbai", "country": "India"})
+
 	def test_default_charge_account_fills_in(self):
 		"""Feedback #11: a charge with only a name + amount (no account picked) posts
 		to the configured/standard default expense account, resolved server-side."""

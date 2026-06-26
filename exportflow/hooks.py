@@ -99,6 +99,7 @@ jinja = {
 	"methods": [
 		"exportflow.printing.document_print_context",
 		"exportflow.printing.party_address",
+		"exportflow.printing.address_text",
 		"exportflow.printing.exporter_profile",
 		"exportflow.printing.supplier_profile",
 	],
