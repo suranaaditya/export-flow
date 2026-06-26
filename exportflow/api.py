@@ -519,15 +519,26 @@ def _make_party_address(party_type, party, title, values, make_primary=False) ->
 		return None
 	country = (values.get("country") or "").strip() or None
 	gstin = (values.get("gstin") or "").strip().upper()
-	# `state` must be a real GST state (derived from GSTIN or entered) — never the city, or
-	# india_compliance's address validation rejects it ("valid State").
-	state = _supplier_gst_state(gstin) if gstin else ((values.get("state") or "").strip() or None)
 	# Frappe backfills a blank country with the site default (India here); resolve it up
-	# front so our check matches what india_compliance will enforce on insert.
+	# front so our checks match what india_compliance will enforce on insert.
 	eff_country = country or frappe.db.get_default("country") or "India"
 	is_foreign = eff_country.lower() != "india"
+	# a GSTIN only belongs on a domestic (Indian) address — ignore it on a foreign one, else
+	# we'd stamp a non-India address Registered Regular with an Indian state, which
+	# india_compliance rejects.
+	domestic_gstin = gstin if (gstin and not is_foreign) else ""
+	# `state` must be a real GST state: prefer the GSTIN-derived state, else the entered one
+	# (never the city, or india_compliance's address validation rejects it). When a GSTIN is
+	# present but its state code isn't recognised, fall through to the entered state.
+	state = (_supplier_gst_state(domestic_gstin) if domestic_gstin else None) or (
+		(values.get("state") or "").strip() or None
+	)
 	if not is_foreign and not state:
-		frappe.throw(_("State is required for an Indian address — enter the State, or a GSTIN to derive it."))
+		frappe.throw(
+			_("That GSTIN's state code wasn't recognised — check the GSTIN, or enter the State.")
+			if gstin
+			else _("State is required for an Indian address — enter the State, or a GSTIN to derive it.")
+		)
 	addr = frappe.get_doc(
 		{
 			"doctype": "Address",
@@ -544,8 +555,8 @@ def _make_party_address(party_type, party, title, values, make_primary=False) ->
 			"links": [{"link_doctype": party_type, "link_name": party}],
 		}
 	)
-	if gstin and frappe.get_meta("Address").has_field("gst_category"):
-		addr.gstin = gstin
+	if domestic_gstin and frappe.get_meta("Address").has_field("gst_category"):
+		addr.gstin = domestic_gstin
 		addr.gst_category = "Registered Regular"
 	elif is_foreign and frappe.get_meta("Address").has_field("gst_category"):
 		addr.gst_category = "Overseas"
@@ -554,26 +565,27 @@ def _make_party_address(party_type, party, title, values, make_primary=False) ->
 
 
 def _create_party_addresses(party_type, party, title, addresses, default_country) -> str | None:
-	"""Create the addresses captured on the create-party form's repeater. Row 0 becomes the
-	primary billing address; any row typed 'Shipping' is flagged as the shipping address,
-	and if NO row is shipping the primary doubles as the shipping default (so the Sales
-	Order shipping picker always has something to default to). Returns the primary Address
-	name (None when nothing valid was entered)."""
+	"""Create the addresses captured on the create-party form's repeater. The FIRST row that
+	actually yields an Address becomes the primary billing address (an empty leading row is
+	skipped, not left primary-less); any row typed 'Shipping' is flagged as the shipping
+	address, and if NO row is shipping the primary doubles as the shipping default (so the
+	Sales Order shipping picker always has something to default to). Returns the primary
+	Address name (None when nothing valid was entered)."""
 	primary = None
 	has_shipping = any(
 		(a.get("address_type") == "Shipping" or a.get("is_shipping_address")) for a in addresses
 	)
-	for i, raw in enumerate(addresses):
+	for raw in addresses:
 		a = dict(raw)
 		if not (a.get("country") or "").strip():
 			a["country"] = default_country
-		is_primary = i == 0
+		want_primary = primary is None  # the first row that produces an Address is the primary
 		if a.get("address_type") == "Shipping":
 			a["is_shipping_address"] = 1
-		elif is_primary and not has_shipping:
+		elif want_primary and not has_shipping:
 			a["is_shipping_address"] = 1
-		name = _make_party_address(party_type, party, title, a, make_primary=is_primary)
-		if is_primary:
+		name = _make_party_address(party_type, party, title, a, make_primary=want_primary)
+		if name and primary is None:
 			primary = name
 	return primary
 

@@ -431,6 +431,68 @@ class TestDropShipFlow(IntegrationTestCase):
 		self.assertEqual(addrs[0]["state"], "Maharashtra")
 		self.assertTrue(frappe.db.get_value("Supplier", sup, "supplier_primary_address"))
 
+	def test_supplier_address_gstin_falls_back_to_entered_state(self):
+		"""A supplier address whose GSTIN state code can't be derived (unrecognised code, or
+		india_compliance absent) keeps the explicitly-entered State instead of discarding it
+		and throwing a misleading 'State is required'."""
+		from exportflow.api import create_supplier, get_party_contacts
+
+		sup = create_supplier(
+			{
+				"supplier_name": f"_Test EF GstState {_suffix()}",
+				"country": "India",
+				"addresses": [
+					{"address_type": "Billing", "address_line1": "Plot 1", "city": "Surat",
+					 "state": "Gujarat", "gstin": "24AABCT1234A1Z0"},
+				],
+			}
+		)["name"]
+		addrs = get_party_contacts("Supplier", sup)["addresses"]
+		self.assertEqual(addrs[0]["state"], "Gujarat", "entered state kept when the GSTIN can't derive one")
+
+	def test_foreign_address_ignores_gstin(self):
+		"""A GSTIN entered on a FOREIGN address is ignored — not stamped Registered Regular
+		with an Indian state, which india_compliance would reject."""
+		from exportflow.api import create_supplier, get_party_contacts
+
+		sup = create_supplier(
+			{
+				"supplier_name": f"_Test EF ForGstin {_suffix()}",
+				"country": "Germany",
+				"addresses": [
+					{"address_type": "Billing", "address_line1": "1 Hafen", "city": "Bremen",
+					 "country": "Germany", "gstin": "27AABCT1234A1Z0"},
+				],
+			}
+		)["name"]
+		addrs = get_party_contacts("Supplier", sup)["addresses"]
+		self.assertEqual(addrs[0]["country"], "Germany")
+		self.assertFalse(addrs[0].get("state"), "no Indian state derived for a foreign address")
+
+	def test_create_addresses_skips_empty_leading_row(self):
+		"""A blank leading repeater row doesn't leave the party primary-less — the first row
+		with real content becomes the primary."""
+		from exportflow.api import create_customer, get_party_contacts
+
+		cust = create_customer(
+			{
+				"customer_name": f"_Test EF EmptyLead {_suffix()}",
+				"destination_country": "Germany",
+				"addresses": [
+					{"address_type": "Billing"},  # empty leading row
+					{"address_type": "Billing", "address_line1": "5 Real St", "city": "Hamburg"},
+				],
+			}
+		)["name"]
+		addrs = get_party_contacts("Customer", cust)["addresses"]
+		self.assertEqual(len(addrs), 1, "the empty leading row was skipped")
+		self.assertEqual(int(addrs[0]["is_primary"]), 1)
+		self.assertEqual(
+			frappe.db.get_value("Customer", cust, "customer_primary_address"),
+			addrs[0]["name"],
+			"the first non-empty row became the primary",
+		)
+
 	def test_default_charge_account_fills_in(self):
 		"""Feedback #11: a charge with only a name + amount (no account picked) posts
 		to the configured/standard default expense account, resolved server-side."""
