@@ -442,6 +442,191 @@ def _ensure_supplier_address(
 		)
 
 
+# ---- Phase 2: manage MULTIPLE addresses + contacts on a customer / supplier ----
+
+def _party_title(party_type: str, party: str) -> str:
+	field = "customer_name" if party_type == "Customer" else "supplier_name"
+	return frappe.db.get_value(party_type, party, field) or party
+
+
+def _party_prefix(party_type: str) -> str:
+	if party_type not in ("Customer", "Supplier"):
+		frappe.throw(_("Addresses & contacts are managed for customers and suppliers only"))
+	return "customer" if party_type == "Customer" else "supplier"
+
+
+@frappe.whitelist()
+def get_party_contacts(party_type: str, party: str) -> dict:
+	"""All addresses + contacts linked to a customer / supplier (the manage panel)."""
+	frappe.has_permission(party_type, "read", throw=True)
+	prefix = _party_prefix(party_type)
+	primary_addr = frappe.db.get_value(party_type, party, f"{prefix}_primary_address")
+	primary_contact = frappe.db.get_value(party_type, party, f"{prefix}_primary_contact")
+	addresses = []
+	for n in frappe.get_all(
+		"Dynamic Link",
+		filters={"parenttype": "Address", "link_doctype": party_type, "link_name": party},
+		pluck="parent",
+	):
+		a = frappe.db.get_value(
+			"Address", n,
+			["address_line1", "address_line2", "city", "state", "pincode", "country",
+			 "address_type", "is_shipping_address"],
+			as_dict=True,
+		) or frappe._dict()
+		a["name"] = n
+		a["is_primary"] = 1 if n == primary_addr else 0
+		addresses.append(a)
+	contacts = []
+	for n in frappe.get_all(
+		"Dynamic Link",
+		filters={"parenttype": "Contact", "link_doctype": party_type, "link_name": party},
+		pluck="parent",
+	):
+		c = frappe.db.get_value(
+			"Contact", n, ["first_name", "last_name", "email_id", "mobile_no", "designation"], as_dict=True
+		) or frappe._dict()
+		c["name"] = n
+		c["is_primary"] = 1 if n == primary_contact else 0
+		contacts.append(c)
+	# primary first, then the rest
+	addresses.sort(key=lambda x: not x["is_primary"])
+	contacts.sort(key=lambda x: not x["is_primary"])
+	return {"addresses": addresses, "contacts": contacts}
+
+
+@frappe.whitelist()
+def add_party_address(party_type: str, party: str, values, make_primary=0) -> dict:
+	"""Add an Address to a customer / supplier (linked via Dynamic Link). Always creates
+	(unlike the create-form helper, which is one-shot). Optionally make it the primary."""
+	frappe.has_permission(party_type, "write", throw=True)
+	_party_prefix(party_type)
+	if isinstance(values, str):
+		values = json.loads(values)
+	line1 = (values.get("address_line1") or "").strip()
+	city = (values.get("city") or "").strip()
+	if not (line1 or city):
+		frappe.throw(_("Enter at least an address line or a city"))
+	country = (values.get("country") or "").strip() or None
+	gstin = (values.get("gstin") or "").strip().upper()
+	is_india = (country or "").lower() == "india" or bool(gstin)
+	state = _supplier_gst_state(gstin) if gstin else ((values.get("state") or "").strip() or None)
+	make_primary = cint(make_primary)
+	addr = frappe.get_doc(
+		{
+			"doctype": "Address",
+			"address_title": _party_title(party_type, party)[:100],
+			"address_type": values.get("address_type") or "Billing",
+			"address_line1": line1 or city,
+			"address_line2": (values.get("address_line2") or "").strip() or None,
+			"city": city or None,
+			"state": state if is_india else (city or None),
+			"country": country or ("India" if is_india else None),
+			"pincode": (values.get("pincode") or "").strip() or None,
+			"is_primary_address": 1 if make_primary else 0,
+			"is_shipping_address": 1 if values.get("is_shipping_address") else 0,
+			"links": [{"link_doctype": party_type, "link_name": party}],
+		}
+	)
+	if gstin and frappe.get_meta("Address").has_field("gst_category"):
+		addr.gstin = gstin
+		addr.gst_category = "Registered Regular"
+	elif not is_india and frappe.get_meta("Address").has_field("gst_category"):
+		addr.gst_category = "Overseas"
+	addr.insert(ignore_permissions=True)
+	if make_primary:
+		set_party_primary_address(party_type, party, addr.name)
+	return {"name": addr.name}
+
+
+@frappe.whitelist()
+def add_party_contact(party_type: str, party: str, values, make_primary=0) -> dict:
+	"""Add a Contact to a customer / supplier (person + phone + email), linked via a
+	Dynamic Link. Optionally make it the primary contact."""
+	frappe.has_permission(party_type, "write", throw=True)
+	_party_prefix(party_type)
+	if isinstance(values, str):
+		values = json.loads(values)
+	person = (values.get("contact_person") or values.get("first_name") or "").strip()
+	mobile = (values.get("mobile") or "").strip()
+	email = (values.get("email") or "").strip()
+	if not (person or mobile or email):
+		frappe.throw(_("Enter a contact name, phone or email"))
+	parts = (person or _party_title(party_type, party)).split(" ", 1)
+	make_primary = cint(make_primary)
+	c = frappe.get_doc(
+		{
+			"doctype": "Contact",
+			"first_name": parts[0],
+			"last_name": parts[1] if len(parts) > 1 else None,
+			"designation": (values.get("designation") or "").strip() or None,
+			"is_primary_contact": 1 if make_primary else 0,
+			"links": [{"link_doctype": party_type, "link_name": party}],
+		}
+	)
+	if email:
+		c.append("email_ids", {"email_id": email, "is_primary": 1})
+	if mobile:
+		c.append("phone_nos", {"phone": mobile, "is_primary_mobile_no": 1, "is_primary_phone": 1})
+	c.insert(ignore_permissions=True)
+	if make_primary:
+		set_party_primary_contact(party_type, party, c.name)
+	return {"name": c.name}
+
+
+@frappe.whitelist()
+def set_party_primary_address(party_type: str, party: str, address: str) -> dict:
+	"""Make one of the party's addresses the primary (flips the is_primary_address flags
+	and wires the party's primary-address link)."""
+	frappe.has_permission(party_type, "write", throw=True)
+	_party_prefix(party_type)
+	for n in frappe.get_all(
+		"Dynamic Link",
+		filters={"parenttype": "Address", "link_doctype": party_type, "link_name": party},
+		pluck="parent",
+	):
+		frappe.db.set_value("Address", n, "is_primary_address", 1 if n == address else 0, update_modified=False)
+	_set_party_primary(party_type, party, address=address)
+	return {"name": address}
+
+
+@frappe.whitelist()
+def set_party_primary_contact(party_type: str, party: str, contact: str) -> dict:
+	"""Make one of the party's contacts the primary contact."""
+	frappe.has_permission(party_type, "write", throw=True)
+	_party_prefix(party_type)
+	for n in frappe.get_all(
+		"Dynamic Link",
+		filters={"parenttype": "Contact", "link_doctype": party_type, "link_name": party},
+		pluck="parent",
+	):
+		frappe.db.set_value("Contact", n, "is_primary_contact", 1 if n == contact else 0, update_modified=False)
+	_set_party_primary(party_type, party, contact=contact)
+	return {"name": contact}
+
+
+@frappe.whitelist()
+def remove_party_address(party_type: str, party: str, address: str) -> dict:
+	"""Delete a party address (refuses to delete the current primary)."""
+	frappe.has_permission(party_type, "write", throw=True)
+	prefix = _party_prefix(party_type)
+	if frappe.db.get_value(party_type, party, f"{prefix}_primary_address") == address:
+		frappe.throw(_("Set another address as primary before removing this one"))
+	frappe.delete_doc("Address", address, ignore_permissions=True)
+	return {"name": address}
+
+
+@frappe.whitelist()
+def remove_party_contact(party_type: str, party: str, contact: str) -> dict:
+	"""Delete a party contact (refuses to delete the current primary)."""
+	frappe.has_permission(party_type, "write", throw=True)
+	prefix = _party_prefix(party_type)
+	if frappe.db.get_value(party_type, party, f"{prefix}_primary_contact") == contact:
+		frappe.throw(_("Set another contact as primary before removing this one"))
+	frappe.delete_doc("Contact", contact, ignore_permissions=True)
+	return {"name": contact}
+
+
 # scalar item-master fields the create/edit forms own
 ITEM_SCALAR_FIELDS = (
 	"pharmacopoeia_grade",

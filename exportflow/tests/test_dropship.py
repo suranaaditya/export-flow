@@ -308,6 +308,40 @@ class TestDropShipFlow(IntegrationTestCase):
 		self.assertTrue(sc, "supplier primary contact created")
 		self.assertEqual(frappe.db.get_value("Supplier", sup, "supplier_primary_contact"), sc)
 
+	def test_party_multi_address_contact_management(self):
+		"""Phase 2: a party can hold multiple addresses + contacts; set-primary flips the
+		party's primary link; the current primary cannot be removed."""
+		from exportflow.api import (
+			add_party_address,
+			add_party_contact,
+			create_customer,
+			get_party_contacts,
+			remove_party_address,
+			set_party_primary_address,
+		)
+
+		cust = create_customer(
+			{
+				"customer_name": f"_Test EF Multi {_suffix()}",
+				"destination_country": "Germany",
+				"address_line1": "1 First St",
+				"city": "Hamburg",
+			}
+		)["name"]
+		a2 = add_party_address("Customer", cust, {"address_line1": "2 Second St", "city": "Berlin"})["name"]
+		data = get_party_contacts("Customer", cust)
+		self.assertEqual(len(data["addresses"]), 2, "two addresses now")
+		self.assertEqual(len([a for a in data["addresses"] if a["is_primary"]]), 1, "exactly one primary")
+		# promote the added address to primary
+		set_party_primary_address("Customer", cust, a2)
+		self.assertEqual(frappe.db.get_value("Customer", cust, "customer_primary_address"), a2)
+		# the current primary cannot be removed
+		with self.assertRaises(frappe.ValidationError):
+			remove_party_address("Customer", cust, a2)
+		# a second contact can be added
+		add_party_contact("Customer", cust, {"contact_person": "Jane Doe", "email": "jane@buyer.de"})
+		self.assertEqual(len(get_party_contacts("Customer", cust)["contacts"]), 1)
+
 	def test_default_charge_account_fills_in(self):
 		"""Feedback #11: a charge with only a name + amount (no account picked) posts
 		to the configured/standard default expense account, resolved server-side."""

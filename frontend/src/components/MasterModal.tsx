@@ -6,6 +6,7 @@ import {
 	useFrappeUpdateDoc,
 } from 'frappe-react-sdk';
 import { CheckInput, Field, SearchSelect, TextArea, TextInput } from '@/components/form';
+import { PartyAddressContacts } from '@/components/PartyAddressContacts';
 import { Modal } from '@/components/ui';
 import { parseServerError } from '@/lib/api';
 import type { MasterDef, OptionSource } from '@/lib/masters';
@@ -161,6 +162,9 @@ export function MasterModal({
 					);
 				})}
 			</div>
+			{!isNew && recordName && (def.doctype === 'Customer' || def.doctype === 'Supplier') && (
+				<PartyAddressContacts partyType={def.doctype as 'Customer' | 'Supplier'} party={recordName} />
+			)}
 			<div className="formfoot">
 				{err && <span className="ferr">{err}</span>}
 				<span className="spacer" />
