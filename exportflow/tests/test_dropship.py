@@ -258,6 +258,56 @@ class TestDropShipFlow(IntegrationTestCase):
 			"no address fields + no GSTIN → no address",
 		)
 
+	def test_create_party_creates_contact_and_primary_links(self):
+		"""Phase 1: an app-created customer / supplier with contact fields gets a primary
+		Contact (phone + email) linked via Dynamic Link, and the party's primary-address +
+		primary-contact link fields are wired — fully linked in ERPNext, not just via
+		Dynamic Links."""
+		from exportflow.api import create_customer, create_supplier
+
+		cust = create_customer(
+			{
+				"customer_name": f"_Test EF Cust Contact {_suffix()}",
+				"destination_country": "Germany",
+				"address_line1": "12 Hafenstrasse",
+				"city": "Hamburg",
+				"contact_person": "Hans Mueller",
+				"mobile": "+49 40 123456",
+				"email": "hans@buyer.de",
+			}
+		)["name"]
+		contact = frappe.db.get_value(
+			"Dynamic Link",
+			{"parenttype": "Contact", "link_doctype": "Customer", "link_name": cust},
+			"parent",
+		)
+		self.assertTrue(contact, "a primary contact must be created")
+		self.assertEqual(frappe.db.get_value("Customer", cust, "customer_primary_contact"), contact)
+		self.assertTrue(
+			frappe.db.get_value("Customer", cust, "customer_primary_address"), "primary address link wired"
+		)
+		row = frappe.db.get_value("Contact", contact, ["first_name", "email_id", "mobile_no"], as_dict=True)
+		self.assertEqual(row.first_name, "Hans")
+		self.assertEqual(row.email_id, "hans@buyer.de")
+		self.assertEqual(row.mobile_no, "+49 40 123456")
+
+		sup = create_supplier(
+			{
+				"supplier_name": f"_Test EF Sup Contact {_suffix()}",
+				"country": "India",
+				"contact_person": "Sunil G",
+				"mobile": "99799-09072",
+				"email": "sunil@sup.com",
+			}
+		)["name"]
+		sc = frappe.db.get_value(
+			"Dynamic Link",
+			{"parenttype": "Contact", "link_doctype": "Supplier", "link_name": sup},
+			"parent",
+		)
+		self.assertTrue(sc, "supplier primary contact created")
+		self.assertEqual(frappe.db.get_value("Supplier", sup, "supplier_primary_contact"), sc)
+
 	def test_default_charge_account_fills_in(self):
 		"""Feedback #11: a charge with only a name + amount (no account picked) posts
 		to the configured/standard default expense account, resolved server-side."""

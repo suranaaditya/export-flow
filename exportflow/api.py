@@ -208,28 +208,99 @@ def create_customer(values) -> dict:
 	if dest.lower() != "india" and frappe.get_meta("Customer").has_field("gst_category"):
 		doc.gst_category = "Overseas"
 	doc.insert()
-	_ensure_customer_address(
+	addr = _ensure_customer_address(
 		doc.name, doc.customer_name,
 		values.get("address_line1"), values.get("city"), values.get("pincode"), dest or None,
 	)
+	contact = _ensure_party_contact(
+		"Customer", doc.name, doc.customer_name,
+		values.get("contact_person"), values.get("mobile"), values.get("email"),
+	)
+	_set_party_primary("Customer", doc.name, addr, contact)
 	return {"name": doc.name, "customer_name": doc.customer_name}
 
 
-def _ensure_customer_address(customer, title, address_line1, city, pincode, country) -> None:
+def _ensure_party_contact(party_type, party, title, contact_person, mobile, email) -> str | None:
+	"""Create a primary Contact (person name + phone + email) linked to the party via a
+	Dynamic Link — ERPNext's native model (Contact carries email_ids[] / phone_nos[]
+	child tables). Returns the Contact name. Skipped when nothing useful was entered or
+	the party already has a linked contact. Best-effort."""
+	contact_person = (contact_person or "").strip()
+	mobile = (mobile or "").strip()
+	email = (email or "").strip()
+	if not (contact_person or mobile or email):
+		return None
+	if frappe.db.get_value(
+		"Dynamic Link",
+		{"parenttype": "Contact", "link_doctype": party_type, "link_name": party},
+		"parent",
+	):
+		return None
+	parts = (contact_person or title or party).split(" ", 1)
+	try:
+		c = frappe.get_doc(
+			{
+				"doctype": "Contact",
+				"first_name": parts[0],
+				"last_name": parts[1] if len(parts) > 1 else None,
+				"is_primary_contact": 1,
+				"links": [{"link_doctype": party_type, "link_name": party}],
+			}
+		)
+		if email:
+			c.append("email_ids", {"email_id": email, "is_primary": 1})
+		if mobile:
+			c.append("phone_nos", {"phone": mobile, "is_primary_mobile_no": 1, "is_primary_phone": 1})
+		c.insert(ignore_permissions=True)
+		return c.name
+	except Exception:
+		frappe.log_error(title=f"{party_type} contact failed: {party}", message=frappe.get_traceback())
+		return None
+
+
+def _set_party_primary(party_type, party, address=None, contact=None) -> None:
+	"""Wire the party's primary-address / primary-contact link fields (and the read-only
+	address display / mobile / email) so the Customer / Supplier is fully linked in the
+	ERPNext desk — ERPNext does not auto-promote a Dynamic-Linked address/contact to the
+	party's primary fields on create."""
+	prefix = "customer" if party_type == "Customer" else "supplier"
+	updates = {}
+	if address:
+		updates[f"{prefix}_primary_address"] = address
+		try:
+			from frappe.contacts.doctype.address.address import get_address_display
+
+			updates["primary_address"] = get_address_display(address)
+		except Exception:
+			pass
+	if contact:
+		updates[f"{prefix}_primary_contact"] = contact
+		cv = frappe.db.get_value("Contact", contact, ["mobile_no", "email_id"], as_dict=True) or frappe._dict()
+		if cv.get("mobile_no"):
+			updates["mobile_no"] = cv.mobile_no
+		if cv.get("email_id"):
+			updates["email_id"] = cv.email_id
+	meta = frappe.get_meta(party_type)
+	updates = {k: v for k, v in updates.items() if meta.has_field(k)}
+	if updates:
+		frappe.db.set_value(party_type, party, updates, update_modified=False)
+
+
+def _ensure_customer_address(customer, title, address_line1, city, pincode, country) -> str | None:
 	"""Create a primary shipping/billing Address for an app-created customer so the
 	commercial invoice / packing list print a full consignee block (the prints resolve
-	the customer's DEFAULT address via get_default_address). Skipped when nothing useful
-	was entered or the customer already has an address. Mirrors the MIS-import shape."""
+	the customer's DEFAULT address via get_default_address). Returns the Address name.
+	Skipped when nothing useful was entered or the customer already has an address."""
 	address_line1 = (address_line1 or "").strip()
 	city = (city or "").strip()
 	if not (address_line1 or city):
-		return
+		return None
 	if frappe.db.get_value(
 		"Dynamic Link",
 		{"parenttype": "Address", "link_doctype": "Customer", "link_name": customer},
 		"parent",
 	):
-		return
+		return None
 	try:
 		addr = frappe.get_doc(
 			{
@@ -250,10 +321,12 @@ def _ensure_customer_address(customer, title, address_line1, city, pincode, coun
 		if (country or "").lower() != "india" and frappe.get_meta("Address").has_field("gst_category"):
 			addr.gst_category = "Overseas"
 		addr.insert(ignore_permissions=True)
+		return addr.name
 	except Exception:
 		frappe.log_error(
 			title=f"Customer address failed: {customer}", message=frappe.get_traceback()
 		)
+		return None
 
 
 @frappe.whitelist()
@@ -286,11 +359,16 @@ def create_supplier(values) -> dict:
 		doc.gstin = gstin
 		doc.gst_category = "Registered Regular"
 	doc.insert()
-	_ensure_supplier_address(
+	addr = _ensure_supplier_address(
 		doc.name, doc.supplier_name, gstin,
 		values.get("address_line1"), values.get("address_line2"),
 		values.get("city"), values.get("pincode"), doc.country,
 	)
+	contact = _ensure_party_contact(
+		"Supplier", doc.name, doc.supplier_name,
+		values.get("contact_person"), values.get("mobile"), values.get("email"),
+	)
+	_set_party_primary("Supplier", doc.name, addr, contact)
 	return {"name": doc.name, "supplier_name": doc.supplier_name}
 
 
@@ -308,28 +386,28 @@ def _ensure_supplier_address(
 	supplier: str, title: str, gstin: str | None,
 	address_line1: str | None, address_line2: str | None,
 	city: str | None, pincode: str | None, country: str | None,
-) -> None:
+) -> str | None:
 	"""Create a primary billing Address for an app-created supplier so the Purchase
 	Order's 'Supplier (Bill from)' block prints the full address, and — for a domestic
 	GSTIN supplier — the PO resolves supplier_gstin (fetch_from = supplier_address.gstin)
-	and the 0.1% merchant-export GST computes. Created when there is address content OR a
-	GSTIN (so a foreign merchanting supplier gets an address too); idempotent on the
-	supplier's existing address / the unique GSTIN. Best-effort."""
+	and the 0.1% merchant-export GST computes. Returns the Address name. Created when there
+	is address content OR a GSTIN (so a foreign merchanting supplier gets an address too);
+	idempotent on the supplier's existing address / the unique GSTIN. Best-effort."""
 	gstin = (gstin or "").strip().upper()
 	address_line1 = (address_line1 or "").strip()
 	address_line2 = (address_line2 or "").strip()
 	city = (city or "").strip()
 	pincode = str(pincode or "").strip()
 	if not (address_line1 or city or gstin):
-		return
+		return None
 	if gstin and frappe.db.exists("Address", {"gstin": gstin}):
-		return
+		return None
 	if frappe.db.get_value(
 		"Dynamic Link",
 		{"parenttype": "Address", "link_doctype": "Supplier", "link_name": supplier},
 		"parent",
 	):
-		return
+		return None
 	is_india = (country or "").lower() == "india" or bool(gstin)
 	state = _supplier_gst_state(gstin) if gstin else None
 	has_gst = frappe.get_meta("Address").has_field("gst_category")
@@ -357,6 +435,7 @@ def _ensure_supplier_address(
 		elif not is_india and has_gst:
 			addr.gst_category = "Overseas"
 		addr.insert(ignore_permissions=True)
+		return addr.name
 	except Exception:
 		frappe.log_error(
 			title=f"Supplier address failed: {supplier}", message=frappe.get_traceback()

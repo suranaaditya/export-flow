@@ -97,6 +97,9 @@ export const MASTERS: MasterDef[] = [
 			},
 			{ key: 'city', label: 'City', type: 'text', createOnly: true },
 			{ key: 'pincode', label: 'Postal code', type: 'text', createOnly: true },
+			{ key: 'contact_person', label: 'Contact person', type: 'text', createOnly: true, hint: 'Creates a primary contact for this customer' },
+			{ key: 'mobile', label: 'Phone / mobile', type: 'text', mono: true, createOnly: true },
+			{ key: 'email', label: 'Email', type: 'text', createOnly: true },
 		],
 	},
 	{
@@ -126,6 +129,9 @@ export const MASTERS: MasterDef[] = [
 			{ key: 'address_line2', label: 'Address line 2', type: 'text', createOnly: true },
 			{ key: 'city', label: 'City', type: 'text', createOnly: true },
 			{ key: 'pincode', label: 'Pincode', type: 'text', mono: true, createOnly: true },
+			{ key: 'contact_person', label: 'Contact person', type: 'text', createOnly: true, hint: 'Creates a primary contact for this supplier' },
+			{ key: 'mobile', label: 'Phone / mobile', type: 'text', mono: true, createOnly: true },
+			{ key: 'email', label: 'Email', type: 'text', createOnly: true },
 			{
 				key: 'default_merchant_export_scheme',
 				label: 'Usually supplies under the 0.1% GST scheme',

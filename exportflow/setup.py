@@ -360,6 +360,33 @@ def seed_pack_types():
 		)
 
 
+def backfill_party_primary_links():
+	"""One-time wiring: for customers / suppliers that have a Dynamic-Linked address or
+	contact but no primary-link field set (created before the forms set them), promote
+	the linked address/contact to the party's primary fields. Idempotent."""
+	from exportflow.api import _set_party_primary
+
+	for party_type, prefix in (("Customer", "customer"), ("Supplier", "supplier")):
+		if not frappe.get_meta(party_type).has_field(f"{prefix}_primary_address"):
+			continue
+		parties = frappe.get_all(
+			party_type, filters={f"{prefix}_primary_address": ["in", (None, "")]}, pluck="name"
+		)
+		for party in parties:
+			addr = frappe.db.get_value(
+				"Dynamic Link",
+				{"parenttype": "Address", "link_doctype": party_type, "link_name": party},
+				"parent",
+			)
+			contact = frappe.db.get_value(
+				"Dynamic Link",
+				{"parenttype": "Contact", "link_doctype": party_type, "link_name": party},
+				"parent",
+			)
+			if addr or contact:
+				_set_party_primary(party_type, party, addr, contact)
+
+
 def after_install():
 	setup_export_role_permissions()
 	seed_ports()
