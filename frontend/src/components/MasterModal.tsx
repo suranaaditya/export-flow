@@ -6,6 +6,12 @@ import {
 	useFrappeUpdateDoc,
 } from 'frappe-react-sdk';
 import { CheckInput, Field, SearchSelect, TextArea, TextInput } from '@/components/form';
+import {
+	CreateAddressRepeater,
+	type AddressRow,
+	addressRowFilled,
+	emptyAddressRow,
+} from '@/components/CreateAddressRepeater';
 import { PartyAddressContacts } from '@/components/PartyAddressContacts';
 import { Modal } from '@/components/ui';
 import { parseServerError } from '@/lib/api';
@@ -66,6 +72,8 @@ export function MasterModal({
 		recordName ? undefined : null,
 	);
 	const [values, setValues] = useState<Values>(() => seed(def, record, defaults));
+	// create-mode multi-address repeater (Customer / Supplier only)
+	const [addrs, setAddrs] = useState<AddressRow[]>(() => [emptyAddressRow()]);
 	const [err, setErr] = useState<string | null>(null);
 	useEffect(() => {
 		if (fullDoc.data) setValues(seed(def, fullDoc.data));
@@ -96,6 +104,9 @@ export function MasterModal({
 		for (const f of def.fields) {
 			if (!isNew && f.createOnly) continue;
 			payload[f.key] = f.type === 'check' ? (values[f.key] ? 1 : 0) : String(values[f.key] ?? '').trim();
+		}
+		if (isNew && def.partyAddresses) {
+			payload.addresses = addrs.filter(addressRowFilled);
 		}
 		try {
 			if (isNew) {
@@ -162,6 +173,14 @@ export function MasterModal({
 					);
 				})}
 			</div>
+			{isNew && def.partyAddresses && (
+				<CreateAddressRepeater
+					partyType={def.doctype as 'Customer' | 'Supplier'}
+					defaultCountry={String(values.destination_country || values.country || '')}
+					value={addrs}
+					onChange={setAddrs}
+				/>
+			)}
 			{!isNew && recordName && (def.doctype === 'Customer' || def.doctype === 'Supplier') && (
 				<PartyAddressContacts partyType={def.doctype as 'Customer' | 'Supplier'} party={recordName} />
 			)}

@@ -136,22 +136,32 @@ def _letterhead_address(exporter_address: str | None):
 	return addr, contact
 
 
-def party_address(party_type: str, party: str) -> str | None:
-	"""Default address of a party as clean multi-line PLAIN text — for the PO / SO
-	print blocks. get_address_display returns <br>-joined HTML, which | striptags
-	would collapse to one run-on line; we flatten the <br>s to real newlines so the
-	template can render it with `| e` inside white-space:pre-wrap, exactly like the
-	free-text exporter address."""
+def _flatten_address_html(html: str | None) -> str | None:
+	"""get_address_display returns <br>-joined HTML; flatten it to clean multi-line PLAIN
+	text so the template can render it with `| e` inside white-space:pre-wrap, exactly like
+	the free-text exporter address (| striptags would collapse it to one run-on line).
+	Empty Address fields render as the literal 'None' (e.g. a missing pincode → 'None
+	BERLIN') — strip those stray tokens so they never reach a printed document."""
+	if not html:
+		return None
 	import re
 	from html import unescape
 
-	html = _address_display(party_type, party)
-	if not html:
-		return None
 	text = re.sub(r"<br\s*/?>", "\n", html, flags=re.IGNORECASE)
 	text = re.sub(r"<[^>]+>", "", text)
-	lines = [ln.strip().rstrip(",").strip() for ln in unescape(text).splitlines()]
-	return "\n".join(ln for ln in lines if ln) or None
+	lines = []
+	for ln in unescape(text).splitlines():
+		ln = re.sub(r"\bNone\b", "", ln)  # drop stray 'None' rendered from an empty field
+		ln = re.sub(r"\s+", " ", ln).strip().rstrip(",").strip()
+		if ln:
+			lines.append(ln)
+	return "\n".join(lines) or None
+
+
+def party_address(party_type: str, party: str) -> str | None:
+	"""Default address of a party as clean multi-line PLAIN text — for the PO / SO
+	print blocks."""
+	return _flatten_address_html(_address_display(party_type, party))
 
 
 def _gst_state_map() -> dict:
@@ -213,16 +223,7 @@ def address_text(address_name: str | None) -> str | None:
 	party's default. Registered as a jinja method."""
 	if not address_name:
 		return None
-	html = _address_display_by_name(address_name)
-	if not html:
-		return None
-	import re
-	from html import unescape
-
-	text = re.sub(r"<br\s*/?>", "\n", html, flags=re.IGNORECASE)
-	text = re.sub(r"<[^>]+>", "", text)
-	lines = [ln.strip().rstrip(",").strip() for ln in unescape(text).splitlines()]
-	return "\n".join(ln for ln in lines if ln) or None
+	return _flatten_address_html(_address_display_by_name(address_name))
 
 
 def _address_display_by_name(address_name: str) -> str | None:

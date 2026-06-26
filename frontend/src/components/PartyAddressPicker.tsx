@@ -13,6 +13,8 @@ export interface PickerAddress {
 	pincode?: string;
 	country?: string;
 	is_primary?: number;
+	is_shipping_address?: number;
+	address_type?: string;
 }
 
 export const addressLine = (a: PickerAddress) =>
@@ -42,6 +44,7 @@ export function PartyAddressPicker({
 	onChange,
 	label = 'Address',
 	hint,
+	prefer = 'billing',
 }: {
 	partyType: 'Customer' | 'Supplier';
 	party: string;
@@ -49,6 +52,9 @@ export function PartyAddressPicker({
 	onChange: (name: string, addr: PickerAddress | null) => void;
 	label?: string;
 	hint?: string;
+	/** which address to default to when the party changes — the primary billing address,
+	 *  or the one flagged for shipping (falling back to primary). */
+	prefer?: 'billing' | 'shipping';
 }) {
 	const { data, mutate } = useFrappeGetCall<{ message: { addresses: PickerAddress[] } }>(
 		API.partyContacts,
@@ -63,19 +69,25 @@ export function PartyAddressPicker({
 	const [busy, setBusy] = useState(false);
 	const [a, setA] = useState({ ...EMPTY });
 
-	// default to the party's primary when the party changes and nothing valid is chosen
+	// default to the party's primary (or shipping) address when the party changes and
+	// nothing valid is chosen
 	useEffect(() => {
 		if (!party || !addresses.length) return;
 		if (value && addresses.some((x) => x.name === value)) return;
-		const prim = addresses.find((x) => x.is_primary) ?? addresses[0];
-		if (prim) onChange(prim.name, prim);
+		const def =
+			prefer === 'shipping'
+				? addresses.find((x) => x.is_shipping_address) ??
+					addresses.find((x) => x.is_primary) ??
+					addresses[0]
+				: addresses.find((x) => x.is_primary) ?? addresses[0];
+		if (def) onChange(def.name, def);
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [party, addresses.length]);
 
 	const opts = addresses.map((x) => ({
 		value: x.name,
 		label: addressLine(x) || x.name,
-		sub: x.is_primary ? 'Primary' : undefined,
+		sub: x.is_primary ? 'Primary' : x.is_shipping_address ? 'Shipping' : undefined,
 	}));
 
 	return (
@@ -121,7 +133,12 @@ export function PartyAddressPicker({
 								setErr(null);
 								setBusy(true);
 								try {
-									const r = await addAddr.call({ party_type: partyType, party, values: a });
+									// an address added from a shipping picker is tagged for shipping
+									const vals =
+										prefer === 'shipping'
+											? { ...a, address_type: 'Shipping', is_shipping_address: 1 }
+											: a;
+									const r = await addAddr.call({ party_type: partyType, party, values: vals });
 									await mutate();
 									onChange(r.message.name, { name: r.message.name, ...a });
 									setA({ ...EMPTY });

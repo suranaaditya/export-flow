@@ -56,6 +56,7 @@ export function NewSalesOrder() {
 
 	const [customer, setCustomer] = useState('');
 	const [customerAddress, setCustomerAddress] = useState('');
+	const [shippingAddress, setShippingAddress] = useState('');
 	const [orderDate, setOrderDate] = useState(todayISO());
 	const [deliveryDate, setDeliveryDate] = useState('');
 	const [currency, setCurrency] = useState('');
@@ -84,6 +85,7 @@ export function NewSalesOrder() {
 		if (!d) return;
 		setCustomer(d.customer ?? '');
 		setCustomerAddress(d.customer_address ?? '');
+		setShippingAddress(d.shipping_address_name ?? '');
 		setOrderDate(d.transaction_date ?? todayISO());
 		setDeliveryDate(d.delivery_date ?? '');
 		seededCurrency.current = d.currency ?? '';
@@ -206,6 +208,7 @@ export function NewSalesOrder() {
 		const deal = {
 			customer,
 			customer_address: customerAddress || null,
+			shipping_address: shippingAddress || null,
 			transaction_date: orderDate,
 			delivery_date: deliveryDate,
 			currency,
@@ -290,7 +293,7 @@ export function NewSalesOrder() {
 						<Field label="Customer" required>
 							<SearchSelect
 								value={customer}
-								onChange={(v) => { setCustomer(v); setCustomerAddress(''); }}
+								onChange={(v) => { setCustomer(v); setCustomerAddress(''); setShippingAddress(''); }}
 								options={customers}
 								placeholder="Search customers…"
 								onCreate={() => setQuickCreate('customer')}
@@ -303,8 +306,19 @@ export function NewSalesOrder() {
 								party={customer}
 								value={customerAddress}
 								onChange={(name) => setCustomerAddress(name)}
-								label="Buyer address"
-								hint="Prints on the order; defaults to the customer's primary"
+								label="Bill-to / buyer address"
+								hint="Invoice-to address; defaults to the customer's primary"
+							/>
+						)}
+						{customer && (
+							<PartyAddressPicker
+								partyType="Customer"
+								party={customer}
+								value={shippingAddress}
+								onChange={(name) => setShippingAddress(name)}
+								label="Ship-to address"
+								prefer="shipping"
+								hint="Where goods ship; defaults to the customer's shipping address"
 							/>
 						)}
 						<Field label="Order date">

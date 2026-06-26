@@ -208,10 +208,16 @@ def create_customer(values) -> dict:
 	if dest.lower() != "india" and frappe.get_meta("Customer").has_field("gst_category"):
 		doc.gst_category = "Overseas"
 	doc.insert()
-	addr = _ensure_customer_address(
-		doc.name, doc.customer_name,
-		values.get("address_line1"), values.get("city"), values.get("pincode"), dest or None,
-	)
+	# the create form posts an `addresses` repeater (each row tagged Billing/Shipping); fall
+	# back to the single legacy address fields for older callers / tests.
+	addresses = values.get("addresses")
+	if addresses:
+		addr = _create_party_addresses("Customer", doc.name, doc.customer_name, addresses, dest or None)
+	else:
+		addr = _ensure_customer_address(
+			doc.name, doc.customer_name,
+			values.get("address_line1"), values.get("city"), values.get("pincode"), dest or None,
+		)
 	contact = _ensure_party_contact(
 		"Customer", doc.name, doc.customer_name,
 		values.get("contact_person"), values.get("mobile"), values.get("email"),
@@ -345,7 +351,10 @@ def create_supplier(values) -> dict:
 			"default_merchant_export_scheme": 1 if values.get("default_merchant_export_scheme") else 0,
 		}
 	)
-	gstin = (values.get("gstin") or "").strip().upper()
+	# the create form posts an `addresses` repeater (each supplier address may carry its own
+	# GSTIN); the supplier-level GSTIN comes from the billing (first) address.
+	addresses = values.get("addresses") or []
+	gstin = (values.get("gstin") or (addresses[0].get("gstin") if addresses else "") or "").strip().upper()
 	has_gst = frappe.get_meta("Supplier").has_field("gst_category")
 	# Don't silently default an overseas supplier to India (that blocks the merchanting
 	# PO, which requires a foreign supplier). The form makes country required; a foreign
@@ -359,11 +368,14 @@ def create_supplier(values) -> dict:
 		doc.gstin = gstin
 		doc.gst_category = "Registered Regular"
 	doc.insert()
-	addr = _ensure_supplier_address(
-		doc.name, doc.supplier_name, gstin,
-		values.get("address_line1"), values.get("address_line2"),
-		values.get("city"), values.get("pincode"), doc.country,
-	)
+	if addresses:
+		addr = _create_party_addresses("Supplier", doc.name, doc.supplier_name, addresses, doc.country)
+	else:
+		addr = _ensure_supplier_address(
+			doc.name, doc.supplier_name, gstin,
+			values.get("address_line1"), values.get("address_line2"),
+			values.get("city"), values.get("pincode"), doc.country,
+		)
 	contact = _ensure_party_contact(
 		"Supplier", doc.name, doc.supplier_name,
 		values.get("contact_person"), values.get("mobile"), values.get("email"),
@@ -495,22 +507,20 @@ def get_party_contacts(party_type: str, party: str) -> dict:
 	return {"addresses": addresses, "contacts": contacts}
 
 
-@frappe.whitelist()
-def add_party_address(party_type: str, party: str, values, make_primary=0) -> dict:
-	"""Add an Address to a customer / supplier (linked via Dynamic Link). Always creates
-	(unlike the create-form helper, which is one-shot). Optionally make it the primary."""
-	frappe.has_permission(party_type, "write", throw=True)
-	_party_prefix(party_type)
-	if isinstance(values, str):
-		values = json.loads(values)
+def _make_party_address(party_type, party, title, values, make_primary=False) -> str | None:
+	"""Create one Address linked to `party` via a Dynamic Link; return its name (None when
+	there's no address content). The single home for the GST-state / effective-country
+	handling so add_party_address AND the create-party forms stay consistent. `values` may
+	carry address_line1/2, city, state, pincode, country, gstin, address_type,
+	is_shipping_address."""
 	line1 = (values.get("address_line1") or "").strip()
 	city = (values.get("city") or "").strip()
 	if not (line1 or city):
-		frappe.throw(_("Enter at least an address line or a city"))
+		return None
 	country = (values.get("country") or "").strip() or None
 	gstin = (values.get("gstin") or "").strip().upper()
-	# `state` must be a real GST state (derived from GSTIN or entered explicitly) — never
-	# the city, or india_compliance's address validation rejects it ("valid State").
+	# `state` must be a real GST state (derived from GSTIN or entered) — never the city, or
+	# india_compliance's address validation rejects it ("valid State").
 	state = _supplier_gst_state(gstin) if gstin else ((values.get("state") or "").strip() or None)
 	# Frappe backfills a blank country with the site default (India here); resolve it up
 	# front so our check matches what india_compliance will enforce on insert.
@@ -518,11 +528,10 @@ def add_party_address(party_type: str, party: str, values, make_primary=0) -> di
 	is_foreign = eff_country.lower() != "india"
 	if not is_foreign and not state:
 		frappe.throw(_("State is required for an Indian address — enter the State, or a GSTIN to derive it."))
-	make_primary = cint(make_primary)
 	addr = frappe.get_doc(
 		{
 			"doctype": "Address",
-			"address_title": _party_title(party_type, party)[:100],
+			"address_title": (title or party)[:100],
 			"address_type": values.get("address_type") or "Billing",
 			"address_line1": line1 or city,
 			"address_line2": (values.get("address_line2") or "").strip() or None,
@@ -541,9 +550,51 @@ def add_party_address(party_type: str, party: str, values, make_primary=0) -> di
 	elif is_foreign and frappe.get_meta("Address").has_field("gst_category"):
 		addr.gst_category = "Overseas"
 	addr.insert(ignore_permissions=True)
+	return addr.name
+
+
+def _create_party_addresses(party_type, party, title, addresses, default_country) -> str | None:
+	"""Create the addresses captured on the create-party form's repeater. Row 0 becomes the
+	primary billing address; any row typed 'Shipping' is flagged as the shipping address,
+	and if NO row is shipping the primary doubles as the shipping default (so the Sales
+	Order shipping picker always has something to default to). Returns the primary Address
+	name (None when nothing valid was entered)."""
+	primary = None
+	has_shipping = any(
+		(a.get("address_type") == "Shipping" or a.get("is_shipping_address")) for a in addresses
+	)
+	for i, raw in enumerate(addresses):
+		a = dict(raw)
+		if not (a.get("country") or "").strip():
+			a["country"] = default_country
+		is_primary = i == 0
+		if a.get("address_type") == "Shipping":
+			a["is_shipping_address"] = 1
+		elif is_primary and not has_shipping:
+			a["is_shipping_address"] = 1
+		name = _make_party_address(party_type, party, title, a, make_primary=is_primary)
+		if is_primary:
+			primary = name
+	return primary
+
+
+@frappe.whitelist()
+def add_party_address(party_type: str, party: str, values, make_primary=0) -> dict:
+	"""Add an Address to a customer / supplier (linked via Dynamic Link). Always creates
+	(unlike the create-form helper, which is one-shot). Optionally make it the primary."""
+	frappe.has_permission(party_type, "write", throw=True)
+	_party_prefix(party_type)
+	if isinstance(values, str):
+		values = json.loads(values)
+	if not ((values.get("address_line1") or "").strip() or (values.get("city") or "").strip()):
+		frappe.throw(_("Enter at least an address line or a city"))
+	make_primary = cint(make_primary)
+	name = _make_party_address(
+		party_type, party, _party_title(party_type, party), values, make_primary=bool(make_primary)
+	)
 	if make_primary:
-		set_party_primary_address(party_type, party, addr.name)
-	return {"name": addr.name}
+		set_party_primary_address(party_type, party, name)
+	return {"name": name}
 
 
 @frappe.whitelist()
@@ -896,8 +947,10 @@ def create_export_sales_order(deal) -> dict:
 			"conversion_rate": conversion_rate,
 			"incoterm": deal.get("incoterm") or None,
 			"named_place": deal.get("named_place"),
-			# chosen buyer address (defaults to the customer's primary); the SO print uses it
+			# chosen billing + shipping addresses (default to the customer's primary /
+			# shipping address); the SO print shows both Bill-to and Ship-to blocks
 			"customer_address": deal.get("customer_address") or None,
+			"shipping_address_name": deal.get("shipping_address") or None,
 			"payment_terms_narrative": deal.get("payment_terms_narrative"),
 			"tc_name": deal.get("tc_name") or None,
 			"terms": deal.get("terms"),
@@ -1064,6 +1117,8 @@ def get_sales_order_for_edit(name: str) -> dict:
 			"delivery_date",
 			"incoterm",
 			"named_place",
+			"customer_address",
+			"shipping_address_name",
 			"payment_terms_narrative",
 			"tc_name",
 			"terms",
@@ -1117,6 +1172,8 @@ def update_sales_order(name: str, deal) -> dict:
 	doc.conversion_rate = conversion_rate
 	doc.incoterm = deal.get("incoterm") or None
 	doc.named_place = deal.get("named_place")
+	doc.customer_address = deal.get("customer_address") or None
+	doc.shipping_address_name = deal.get("shipping_address") or None
 	doc.payment_terms_narrative = deal.get("payment_terms_narrative")
 	doc.tc_name = deal.get("tc_name") or None
 	doc.terms = deal.get("terms")

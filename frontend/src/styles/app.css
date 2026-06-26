@@ -649,3 +649,6 @@ footer b { color: var(--fg-3); font-weight: 500 }
 .pac-badge { font-size: 9.5px; text-transform: uppercase; letter-spacing: .05em; background: var(--iris-tint); color: var(--text-brand); padding: 2px 8px; border-radius: 10px; font-weight: 600 }
 .pac-form { margin: 8px 0 4px; padding: 12px; border: 1px solid var(--hairline); border-radius: 8px }
 .pac-formfoot { display: flex; justify-content: flex-end; margin-top: 4px }
+.pac-repeater { margin-top: 8px }
+.pac-rowhead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px; font-size: 11.5px }
+.pac-rowhead a { font-size: 11.5px }

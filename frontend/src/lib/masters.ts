@@ -44,6 +44,9 @@ export interface MasterDef {
 	listFields: string[];
 	columns: { key: string; label: string; dim?: boolean }[];
 	fields: MasterField[];
+	/** Customer / Supplier: render the multi-address repeater on create and the
+	 *  address+contact manager on edit (handled by MasterModal). */
+	partyAddresses?: boolean;
 }
 
 export const GRADE_OPTIONS = ['IP', 'BP', 'USP', 'EP', 'JP', 'Ph. Int.', 'Other'];
@@ -88,19 +91,12 @@ export const MASTERS: MasterDef[] = [
 			{ key: 'destination_country', label: 'Destination country', type: 'select', options: 'countries' },
 			{ key: 'default_currency', label: 'Default currency', type: 'select', options: 'currencies' },
 			{ key: 'default_incoterm', label: 'Default incoterm', type: 'select', options: 'incoterms' },
-			{
-				key: 'address_line1',
-				label: 'Address',
-				type: 'textarea',
-				createOnly: true,
-				hint: 'Consignee address — printed on the commercial invoice / packing list',
-			},
-			{ key: 'city', label: 'City', type: 'text', createOnly: true },
-			{ key: 'pincode', label: 'Postal code', type: 'text', createOnly: true },
+			// addresses are captured by the address repeater (partyAddresses), not as fields
 			{ key: 'contact_person', label: 'Contact person', type: 'text', createOnly: true, hint: 'Creates a primary contact for this customer' },
 			{ key: 'mobile', label: 'Phone / mobile', type: 'text', mono: true, createOnly: true },
 			{ key: 'email', label: 'Email', type: 'text', createOnly: true },
 		],
+		partyAddresses: true,
 	},
 	{
 		doctype: 'Supplier',
@@ -117,18 +113,7 @@ export const MASTERS: MasterDef[] = [
 		fields: [
 			{ key: 'supplier_name', label: 'Supplier name', type: 'text', required: true, createOnly: true },
 			{ key: 'country', label: 'Country', type: 'select', options: 'countries', required: true },
-			{
-				key: 'gstin',
-				label: 'GSTIN',
-				type: 'text',
-				mono: true,
-				createOnly: true,
-				hint: 'For a domestic supplier — enables the 0.1% GST on its purchase orders',
-			},
-			{ key: 'address_line1', label: 'Address line 1', type: 'text', createOnly: true, hint: 'Street / building — prints on the purchase order' },
-			{ key: 'address_line2', label: 'Address line 2', type: 'text', createOnly: true },
-			{ key: 'city', label: 'City', type: 'text', createOnly: true },
-			{ key: 'pincode', label: 'Pincode', type: 'text', mono: true, createOnly: true },
+			// addresses (and each address's GSTIN) are captured by the address repeater below
 			{ key: 'contact_person', label: 'Contact person', type: 'text', createOnly: true, hint: 'Creates a primary contact for this supplier' },
 			{ key: 'mobile', label: 'Phone / mobile', type: 'text', mono: true, createOnly: true },
 			{ key: 'email', label: 'Email', type: 'text', createOnly: true },
@@ -138,6 +123,7 @@ export const MASTERS: MasterDef[] = [
 				type: 'check',
 			},
 		],
+		partyAddresses: true,
 	},
 	{
 		doctype: 'CHA',

@@ -381,6 +381,56 @@ class TestDropShipFlow(IntegrationTestCase):
 		with self.assertRaises(frappe.ValidationError):
 			add_party_address("Supplier", sup, {"address_line1": "Y", "city": "Mumbai", "country": "India"})
 
+	def test_create_customer_multi_address(self):
+		"""The create form's address repeater builds several ERPNext Addresses — row 0 is the
+		primary billing address; a row typed 'Shipping' becomes the customer's shipping
+		address (the SO Ship-to picker's default). Blank row country falls back to the
+		customer's destination country."""
+		from exportflow.api import create_customer, get_party_contacts
+		from exportflow.printing import address_text
+
+		cust = create_customer(
+			{
+				"customer_name": f"_Test EF MultiAddr {_suffix()}",
+				"destination_country": "Germany",
+				"addresses": [
+					{"address_type": "Billing", "address_line1": "1 Billing Strasse", "city": "Hamburg"},
+					{"address_type": "Shipping", "address_line1": "9 Ship Dock", "city": "Bremen"},
+				],
+			}
+		)["name"]
+		addrs = get_party_contacts("Customer", cust)["addresses"]
+		self.assertEqual(len(addrs), 2, "both addresses created")
+		primary = [a for a in addrs if a["is_primary"]]
+		self.assertEqual(len(primary), 1, "exactly one primary")
+		self.assertIn("Billing", primary[0]["address_line1"])
+		self.assertEqual(primary[0]["country"], "Germany", "blank row country fell back to destination")
+		ship = [a for a in addrs if a["is_shipping_address"]]
+		self.assertTrue(any("Ship Dock" in a["address_line1"] for a in ship), "the shipping row is flagged")
+		self.assertEqual(frappe.db.get_value("Customer", cust, "customer_primary_address"), primary[0]["name"])
+		# a missing pincode must NOT print as the literal 'None' (get_address_display quirk)
+		self.assertNotIn("None", address_text(primary[0]["name"]) or "")
+
+	def test_create_party_lone_address_doubles_as_shipping(self):
+		"""When the repeater has no row tagged 'Shipping', the primary billing address also
+		serves as the shipping default — so the Ship-to picker always has something."""
+		from exportflow.api import create_supplier, get_party_contacts
+
+		sup = create_supplier(
+			{
+				"supplier_name": f"_Test EF SupShip {_suffix()}",
+				"country": "India",
+				"addresses": [
+					{"address_type": "Billing", "address_line1": "Plot 9 MIDC", "city": "Pune", "state": "Maharashtra"},
+				],
+			}
+		)["name"]
+		addrs = get_party_contacts("Supplier", sup)["addresses"]
+		self.assertEqual(len(addrs), 1)
+		self.assertEqual(int(addrs[0]["is_shipping_address"]), 1, "lone address doubles as the shipping default")
+		self.assertEqual(addrs[0]["state"], "Maharashtra")
+		self.assertTrue(frappe.db.get_value("Supplier", sup, "supplier_primary_address"))
+
 	def test_default_charge_account_fills_in(self):
 		"""Feedback #11: a charge with only a name + amount (no account picked) posts
 		to the configured/standard default expense account, resolved server-side."""

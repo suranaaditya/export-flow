@@ -653,6 +653,7 @@ _PO_FOOT = '<span class="lbl">Registration</span>{% if ex.pan %}PAN <span class=
 SALES_ORDER = (
 	'{%- set ex = exporter_profile() -%}\n'
 	'{%- set cust_addr = address_text(doc.customer_address) or party_address("Customer", doc.customer) -%}\n'
+	'{%- set ship_addr = address_text(doc.shipping_address_name) -%}\n'
 	'{%- set dest = frappe.db.get_value("Customer", doc.customer, "destination_country") -%}\n'
 	+ EFX_CSS + """
 <div class="efx">""" + LH_EX + """<div class="doc">
@@ -669,7 +670,7 @@ SALES_ORDER = (
       </td>
     </tr>
     <tr class="seam">
-      <td><span class="lbl">Customer / Buyer</span><b>{{ doc.customer_name or doc.customer }}</b>{% if cust_addr %}<div class="addr muted">{{ cust_addr|e }}</div>{% endif %}{% if dest %}<div class="muted">Country of final destination: {{ dest }}</div>{% endif %}</td>
+      <td><span class="lbl">Bill to / Buyer</span><b>{{ doc.customer_name or doc.customer }}</b>{% if cust_addr %}<div class="addr muted">{{ cust_addr|e }}</div>{% endif %}{% if dest %}<div class="muted">Country of final destination: {{ dest }}</div>{% endif %}{% if ship_addr %}<div style="margin-top:6px"><span class="lbl">Ship to</span>{% if ship_addr == cust_addr %}<span class="muted">Same as bill-to</span>{% else %}<b>{{ doc.customer_name or doc.customer }}</b><div class="addr muted">{{ ship_addr|e }}</div>{% endif %}</div>{% endif %}</td>
       <td>
         <table style="width:100%">
           <tr><td class="lbl" style="border:0;padding:0 0 1px">Currency / incoterm</td></tr>
@@ -855,6 +856,8 @@ if __name__ == "__main__":
 	# PO reshaped to MN Globex's Tally-style layout (Buyer/Invoice-to + Supplier
 	# Bill-from blocks, packing column, spec sub-line, GST-treatment banner, footer)
 	PO_CLIENT_FORMAT = "2026-06-25 12:00:00.000000"
+	# SO gains a Ship-to block alongside Bill-to (separate billing / shipping addresses)
+	SO_SHIP_FORMAT = "2026-06-26 12:00:00.000000"
 	write_format(
 		"exportflow_commercial_invoice", "ExportFlow Commercial Invoice", COMMERCIAL_INVOICE, modified=CLIENT_FORMAT
 	)
@@ -871,7 +874,7 @@ if __name__ == "__main__":
 	write_format("exportflow_export_value_declaration", "ExportFlow Export Value Declaration", EXPORT_VALUE_DECL, modified=REDESIGN)
 	write_format(
 		"exportflow_sales_order", "ExportFlow Sales Order", SALES_ORDER,
-		doc_type="Sales Order", modified=PO_CLIENT_FORMAT,
+		doc_type="Sales Order", modified=SO_SHIP_FORMAT,
 	)
 	write_format(
 		"exportflow_purchase_order", "ExportFlow Purchase Order", PURCHASE_ORDER,

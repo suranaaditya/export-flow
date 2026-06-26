@@ -108,6 +108,7 @@ export interface SalesOrderForEdit {
 	name: string;
 	customer: string;
 	customer_address: string | null;
+	shipping_address_name: string | null;
 	currency: string;
 	conversion_rate: number;
 	transaction_date: string;
