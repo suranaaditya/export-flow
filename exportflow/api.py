@@ -286,8 +286,11 @@ def create_supplier(values) -> dict:
 		doc.gstin = gstin
 		doc.gst_category = "Registered Regular"
 	doc.insert()
-	if gstin and has_gst:
-		_ensure_supplier_gst_address(doc.name, doc.supplier_name, gstin, values.get("city"))
+	_ensure_supplier_address(
+		doc.name, doc.supplier_name, gstin,
+		values.get("address_line1"), values.get("address_line2"),
+		values.get("city"), values.get("pincode"), doc.country,
+	)
 	return {"name": doc.name, "supplier_name": doc.supplier_name}
 
 
@@ -301,33 +304,62 @@ def _supplier_gst_state(gstin: str) -> str | None:
 		return None
 
 
-def _ensure_supplier_gst_address(supplier: str, title: str, gstin: str, city: str | None) -> None:
-	"""Create a primary GST billing address for a domestic supplier so the Purchase
-	Order resolves supplier_gstin (PO fetch_from = supplier_address.gstin) and the 0.1%
-	merchant-export GST computes. Best-effort; idempotent on the unique GSTIN."""
-	if frappe.db.exists("Address", {"gstin": gstin}):
+def _ensure_supplier_address(
+	supplier: str, title: str, gstin: str | None,
+	address_line1: str | None, address_line2: str | None,
+	city: str | None, pincode: str | None, country: str | None,
+) -> None:
+	"""Create a primary billing Address for an app-created supplier so the Purchase
+	Order's 'Supplier (Bill from)' block prints the full address, and — for a domestic
+	GSTIN supplier — the PO resolves supplier_gstin (fetch_from = supplier_address.gstin)
+	and the 0.1% merchant-export GST computes. Created when there is address content OR a
+	GSTIN (so a foreign merchanting supplier gets an address too); idempotent on the
+	supplier's existing address / the unique GSTIN. Best-effort."""
+	gstin = (gstin or "").strip().upper()
+	address_line1 = (address_line1 or "").strip()
+	address_line2 = (address_line2 or "").strip()
+	city = (city or "").strip()
+	pincode = str(pincode or "").strip()
+	if not (address_line1 or city or gstin):
 		return
-	state = _supplier_gst_state(gstin)
-	place = (city or "").strip() or state or title
+	if gstin and frappe.db.exists("Address", {"gstin": gstin}):
+		return
+	if frappe.db.get_value(
+		"Dynamic Link",
+		{"parenttype": "Address", "link_doctype": "Supplier", "link_name": supplier},
+		"parent",
+	):
+		return
+	is_india = (country or "").lower() == "india" or bool(gstin)
+	state = _supplier_gst_state(gstin) if gstin else None
+	has_gst = frappe.get_meta("Address").has_field("gst_category")
 	try:
-		frappe.get_doc(
+		addr = frappe.get_doc(
 			{
 				"doctype": "Address",
-				"address_title": title,
+				"address_title": (title or supplier)[:100],
 				"address_type": "Billing",
-				"address_line1": place,
-				"city": place,
-				"state": state,
-				"country": "India",
-				"gstin": gstin,
-				"gst_category": "Registered Regular",
+				"address_line1": address_line1 or city or state or title,
+				"address_line2": address_line2 or None,
+				# an Indian address carries a state line (from the GSTIN); a foreign one
+				# puts its region in city and leaves the Indian-state field empty
+				"city": city or (state if is_india else None) or None,
+				"state": state if is_india else (city or None),
+				"country": country or ("India" if is_india else None),
+				"pincode": pincode or None,
 				"is_primary_address": 1,
 				"links": [{"link_doctype": "Supplier", "link_name": supplier}],
 			}
-		).insert(ignore_permissions=True)
+		)
+		if gstin and has_gst:
+			addr.gstin = gstin
+			addr.gst_category = "Registered Regular"
+		elif not is_india and has_gst:
+			addr.gst_category = "Overseas"
+		addr.insert(ignore_permissions=True)
 	except Exception:
 		frappe.log_error(
-			title=f"Supplier GST address failed: {supplier}", message=frappe.get_traceback()
+			title=f"Supplier address failed: {supplier}", message=frappe.get_traceback()
 		)
 
 

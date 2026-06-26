@@ -122,7 +122,10 @@ export const MASTERS: MasterDef[] = [
 				createOnly: true,
 				hint: 'For a domestic supplier — enables the 0.1% GST on its purchase orders',
 			},
-			{ key: 'city', label: 'City', type: 'text', createOnly: true, hint: 'For the GST address of a domestic supplier' },
+			{ key: 'address_line1', label: 'Address line 1', type: 'text', createOnly: true, hint: 'Street / building — prints on the purchase order' },
+			{ key: 'address_line2', label: 'Address line 2', type: 'text', createOnly: true },
+			{ key: 'city', label: 'City', type: 'text', createOnly: true },
+			{ key: 'pincode', label: 'Pincode', type: 'text', mono: true, createOnly: true },
 			{
 				key: 'default_merchant_export_scheme',
 				label: 'Usually supplies under the 0.1% GST scheme',

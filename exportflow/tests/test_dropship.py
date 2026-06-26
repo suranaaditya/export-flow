@@ -220,6 +220,44 @@ class TestDropShipFlow(IntegrationTestCase):
 			"no address fields entered → no address",
 		)
 
+	def test_create_supplier_builds_address(self):
+		"""An app-created supplier with address fields gets a primary Address so the PO
+		'Supplier (Bill from)' block prints the full address — including a foreign
+		supplier entered without a GSTIN."""
+		from exportflow.api import create_supplier
+
+		name = create_supplier(
+			{
+				"supplier_name": f"_Test EF Sup Addr {_suffix()}",
+				"country": "Germany",
+				"address_line1": "12 Hafenstrasse",
+				"city": "Hamburg",
+				"pincode": "20457",
+			}
+		)["name"]
+		addr = frappe.db.get_value(
+			"Dynamic Link",
+			{"parenttype": "Address", "link_doctype": "Supplier", "link_name": name},
+			"parent",
+		)
+		self.assertTrue(addr, "a foreign supplier with an address must get one (no GSTIN needed)")
+		row = frappe.db.get_value(
+			"Address", addr, ["address_line1", "country", "is_primary_address"], as_dict=True
+		)
+		self.assertEqual(row.address_line1, "12 Hafenstrasse")
+		self.assertEqual(row.country, "Germany")
+		self.assertEqual(int(row.is_primary_address), 1)
+		# no address fields + no GSTIN → no address
+		bare = create_supplier({"supplier_name": f"_Test EF Sup Bare {_suffix()}", "country": "Germany"})["name"]
+		self.assertFalse(
+			frappe.db.get_value(
+				"Dynamic Link",
+				{"parenttype": "Address", "link_doctype": "Supplier", "link_name": bare},
+				"parent",
+			),
+			"no address fields + no GSTIN → no address",
+		)
+
 	def test_default_charge_account_fills_in(self):
 		"""Feedback #11: a charge with only a name + amount (no account picked) posts
 		to the configured/standard default expense account, resolved server-side."""
