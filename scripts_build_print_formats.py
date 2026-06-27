@@ -653,31 +653,28 @@ _PO_FOOT = '<span class="lbl">Registration</span>{% if ex.pan %}PAN <span class=
 SALES_ORDER = (
 	'{%- set ex = exporter_profile() -%}\n'
 	'{%- set cust_addr = address_text(doc.customer_address) or party_address("Customer", doc.customer) -%}\n'
-	'{%- set ship_addr = address_text(doc.shipping_address_name) -%}\n'
+	'{%- set ship_addr = address_text(doc.shipping_address_name) or cust_addr -%}\n'
 	'{%- set dest = frappe.db.get_value("Customer", doc.customer, "destination_country") -%}\n'
 	+ EFX_CSS + """
 <div class="efx">""" + LH_EX + """<div class="doc">
   <div class="title">Sales Order<small>Export order confirmation{% if doc.docstatus == 0 %} &middot; DRAFT{% endif %}</small></div>
   <table class="grid">
     <tr class="seam">
-      <td style="width:58%"><span class="lbl">Exporter / Seller</span><b>{{ ex.company_name }}</b><div style="margin-top:3px">{% if ex.iec %}IEC <span class="mono">{{ ex.iec }}</span>{% endif %}{% if ex.gstin %} &nbsp; GSTIN <span class="mono">{{ ex.gstin }}</span>{% endif %}</div></td>
+      <td style="width:50%"><span class="lbl">Exporter / Seller</span><b>{{ ex.company_name }}</b><div style="margin-top:3px">{% if ex.iec %}IEC <span class="mono">{{ ex.iec }}</span>{% endif %}{% if ex.gstin %} &nbsp; GSTIN <span class="mono">{{ ex.gstin }}</span>{% endif %}</div></td>
       <td>
         <table style="width:100%">
           <tr><td class="lbl" style="border:0;padding:0 0 1px">Order no &amp; date</td></tr>
           <tr><td style="border:0;padding:0 0 3px"><b class="mono">{{ doc.name }}</b> &middot; {{ frappe.utils.formatdate(doc.transaction_date, "dd MMM yyyy") }}</td></tr>
-          {% if doc.delivery_date %}<tr><td class="lbl" style="border:0;padding:0 0 1px">Delivery by</td></tr><tr><td style="border:0;padding:0">{{ frappe.utils.formatdate(doc.delivery_date, "dd MMM yyyy") }}</td></tr>{% endif %}
+          {% if doc.delivery_date %}<tr><td class="lbl" style="border:0;padding:0 0 1px">Delivery by</td></tr><tr><td style="border:0;padding:0 0 3px">{{ frappe.utils.formatdate(doc.delivery_date, "dd MMM yyyy") }}</td></tr>{% endif %}
+          <tr><td class="lbl" style="border:0;padding:0 0 1px">Currency / incoterm</td></tr>
+          <tr><td style="border:0;padding:0{% if doc.po_no %} 0 3px{% endif %}"><span class="mono">{{ doc.currency }}</span>{% if doc.incoterm %} &middot; {{ doc.incoterm }}{% if doc.named_place %} ({{ doc.named_place }}){% endif %}{% endif %}</td></tr>
+          {% if doc.po_no %}<tr><td class="lbl" style="border:0;padding:0 0 1px">Buyer's ref</td></tr><tr><td style="border:0;padding:0"><span class="mono">{{ doc.po_no }}</span></td></tr>{% endif %}
         </table>
       </td>
     </tr>
     <tr class="seam">
-      <td><span class="lbl">Bill to / Buyer</span><b>{{ doc.customer_name or doc.customer }}</b>{% if cust_addr %}<div class="addr muted">{{ cust_addr|e }}</div>{% endif %}{% if dest %}<div class="muted">Country of final destination: {{ dest }}</div>{% endif %}{% if ship_addr %}<div style="margin-top:6px"><span class="lbl">Ship to</span>{% if ship_addr == cust_addr %}<span class="muted">Same as bill-to</span>{% else %}<b>{{ doc.customer_name or doc.customer }}</b><div class="addr muted">{{ ship_addr|e }}</div>{% endif %}</div>{% endif %}</td>
-      <td>
-        <table style="width:100%">
-          <tr><td class="lbl" style="border:0;padding:0 0 1px">Currency / incoterm</td></tr>
-          <tr><td style="border:0;padding:0 0 3px"><span class="mono">{{ doc.currency }}</span>{% if doc.incoterm %} &middot; {{ doc.incoterm }}{% if doc.named_place %} ({{ doc.named_place }}){% endif %}{% endif %}</td></tr>
-          {% if doc.po_no %}<tr><td class="lbl" style="border:0;padding:0 0 1px">Buyer's ref</td></tr><tr><td style="border:0;padding:0 0 3px"><span class="mono">{{ doc.po_no }}</span></td></tr>{% endif %}
-        </table>
-      </td>
+      <td style="width:50%"><span class="lbl">Bill to / Buyer</span><b>{{ doc.customer_name or doc.customer }}</b>{% if cust_addr %}<div class="addr muted">{{ cust_addr|e }}</div>{% endif %}{% if dest %}<div class="muted">Country of final destination: {{ dest }}</div>{% endif %}</td>
+      <td><span class="lbl">Ship to / Consignee</span><b>{{ doc.customer_name or doc.customer }}</b>{% if ship_addr %}<div class="addr muted">{{ ship_addr|e }}</div>{% endif %}{% if ship_addr == cust_addr %}<div class="muted" style="font-size:8.6px;margin-top:2px">(same as bill-to)</div>{% endif %}</td>
     </tr>
   </table>
 """ + EFX_TXN_LINES + EFX_TXN_TOTALS + _TERMS + _efx_txn_sign(_SYS_GEN) + """
@@ -856,8 +853,8 @@ if __name__ == "__main__":
 	# PO reshaped to MN Globex's Tally-style layout (Buyer/Invoice-to + Supplier
 	# Bill-from blocks, packing column, spec sub-line, GST-treatment banner, footer)
 	PO_CLIENT_FORMAT = "2026-06-25 12:00:00.000000"
-	# SO gains a Ship-to block alongside Bill-to (separate billing / shipping addresses)
-	SO_SHIP_FORMAT = "2026-06-26 12:00:00.000000"
+	# SO shows Bill-to | Ship-to side-by-side; the full ship-to address always prints
+	SO_SHIP_FORMAT = "2026-06-27 09:00:00.000000"
 	write_format(
 		"exportflow_commercial_invoice", "ExportFlow Commercial Invoice", COMMERCIAL_INVOICE, modified=CLIENT_FORMAT
 	)
