@@ -12,6 +12,7 @@ from exportflow.api import (
 	create_purchase_order,
 	create_purchase_order_draft,
 	create_shipment,
+	get_sales_order_for_edit,
 	get_shipment_detail,
 	preview_purchase_order,
 	get_shippable_lines,
@@ -243,6 +244,34 @@ class TestLogistics(IntegrationTestCase):
 				],
 			}
 		)
+
+	def test_buyer_po_carries_from_so_to_shipment(self):
+		"""The customer's PO no/date entered on the SO round-trips through edit AND carries
+		onto a shipment booked from it (which then prints on the commercial invoice)."""
+		sfx = _suffix()
+		item = make_plain_item(f"_Test EF PO Item {sfx}")
+		customer = make_customer(f"_Test EF PO Cust {sfx}")
+		company_currency = frappe.db.get_value("Company", self.company, "default_currency")
+		res = create_export_sales_order(
+			{
+				"customer": customer,
+				"delivery_date": add_days(nowdate(), 30),
+				"currency": "EUR" if company_currency != "EUR" else "USD",
+				"conversion_rate": 83,
+				"po_no": "PO-BUYER-77",
+				"po_date": "2026-06-10",
+				"items": [{"item_code": item, "qty": 50, "rate": 20}],
+			}
+		)
+		edit = get_sales_order_for_edit(res["name"])
+		self.assertEqual(edit["po_no"], "PO-BUYER-77")
+		self.assertEqual(str(edit["po_date"]), "2026-06-10")
+		submit_sales_order(res["name"])
+		so = frappe.get_doc("Sales Order", res["name"])
+		ship = self.make_test_shipment(so, customer, qty=50)
+		shp = frappe.get_doc("Export Shipment", ship["name"])
+		self.assertEqual(shp.buyer_order_no, "PO-BUYER-77", "buyer's PO carried from the SO")
+		self.assertEqual(str(shp.buyer_order_date), "2026-06-10")
 
 	def test_shipment_milestones_and_qty_validation(self):
 		so, customer, _s1, _s2 = self.setup_deal(qty_a=100)

@@ -64,6 +64,9 @@ export function NewSalesOrder() {
 	const [rateTouched, setRateTouched] = useState(false);
 	const [incoterm, setIncoterm] = useState('');
 	const [namedPlace, setNamedPlace] = useState('');
+	// the buyer's own PO (the customer's PO to us) — prints on the SO + invoice
+	const [poNo, setPoNo] = useState('');
+	const [poDate, setPoDate] = useState('');
 	const [paymentTerms, setPaymentTerms] = useState('');
 	// payment-terms picker selection — display-only within the session (the chosen
 	// template just fills the narrative, which is the saved/printed value; the ref is
@@ -95,6 +98,8 @@ export function NewSalesOrder() {
 		setRateTouched(true); // keep the order's stored rate, don't auto-suggest over it
 		setIncoterm(d.incoterm ?? '');
 		setNamedPlace(d.named_place ?? '');
+		setPoNo(d.po_no ?? '');
+		setPoDate(d.po_date ?? '');
 		setPaymentTerms(d.payment_terms_narrative ?? '');
 		setTcName(d.tc_name ?? '');
 		setTcText(d.terms ?? '');
@@ -215,6 +220,8 @@ export function NewSalesOrder() {
 			conversion_rate: Number(rate) || 1,
 			incoterm: incoterm || null,
 			named_place: namedPlace,
+			po_no: poNo || null,
+			po_date: poDate || null,
 			payment_terms_narrative: paymentTerms,
 			tc_name: tcName || null,
 			terms: tcText,
@@ -363,6 +370,12 @@ export function NewSalesOrder() {
 									</option>
 								))}
 							</datalist>
+						</Field>
+						<Field label="Buyer's PO number" hint="The customer's own PO, if they issued one — prints on the SO & invoice">
+							<TextInput value={poNo} onChange={setPoNo} placeholder="e.g. PO-4521" />
+						</Field>
+						<Field label="Buyer's PO date">
+							<TextInput type="date" value={poDate} onChange={setPoDate} />
 						</Field>
 						<Field label="Payment terms template" hint="Payment templates — manage in Settings">
 							<SearchSelect

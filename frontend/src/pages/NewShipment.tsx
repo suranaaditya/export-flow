@@ -36,6 +36,8 @@ interface ShipmentDefaults {
 	customer_name: string;
 	incoterm: string | null;
 	named_place: string | null;
+	po_no: string | null;
+	po_date: string | null;
 	letter_of_credit: string | null;
 	lc_number: string | null;
 	so_details: string[];
@@ -78,6 +80,9 @@ export function NewShipment() {
 	const [consigneeAddrText, setConsigneeAddrText] = useState('');
 	const [etd, setEtd] = useState('');
 	const [eta, setEta] = useState('');
+	// the buyer's PO no/date — carried from the linked SO; prints on the commercial invoice
+	const [buyerOrderNo, setBuyerOrderNo] = useState('');
+	const [buyerOrderDate, setBuyerOrderDate] = useState('');
 	const [lc, setLc] = useState('');
 	const [sel, setSel] = useState<Record<string, LineSel>>({});
 	const [err, setErr] = useState<string | null>(null);
@@ -87,10 +92,18 @@ export function NewShipment() {
 	// and the exact values applied — so removing that SO clears the still-untouched
 	// prefill instead of silently carrying its (SO-specific) LC onto another deal
 	const [prefillSo, setPrefillSo] = useState<string | null>(null);
-	const prefilled = useRef<{ incoterm: string; finalDestination: string; lc: string }>({
+	const prefilled = useRef<{
+		incoterm: string;
+		finalDestination: string;
+		lc: string;
+		buyerOrderNo: string;
+		buyerOrderDate: string;
+	}>({
 		incoterm: '',
 		finalDestination: '',
 		lc: '',
+		buyerOrderNo: '',
+		buyerOrderDate: '',
 	});
 	// the user has made a manual choice — guards the async deep-link prefill from
 	// clobbering a customer/SO the user picked while its fetch was in flight
@@ -303,11 +316,15 @@ export function NewShipment() {
 		const inc = d.incoterm || '';
 		const dest = d.named_place || '';
 		const lcv = d.letter_of_credit || '';
+		const pon = d.po_no || '';
+		const pod = d.po_date || '';
 		setIncoterm((v) => v || inc);
 		setFinalDestination((v) => v || dest);
 		setLc((v) => v || lcv);
+		setBuyerOrderNo((v) => v || pon);
+		setBuyerOrderDate((v) => v || pod);
 		setPrefillSo(so);
-		prefilled.current = { incoterm: inc, finalDestination: dest, lc: lcv };
+		prefilled.current = { incoterm: inc, finalDestination: dest, lc: lcv, buyerOrderNo: pon, buyerOrderDate: pod };
 	}
 
 	/** Clear the still-untouched prefill that `so` supplied (if any). */
@@ -317,9 +334,11 @@ export function NewShipment() {
 		setIncoterm((v) => (v === pf.incoterm ? '' : v));
 		setFinalDestination((v) => (v === pf.finalDestination ? '' : v));
 		setLc((v) => (v === pf.lc ? '' : v));
+		setBuyerOrderNo((v) => (v === pf.buyerOrderNo ? '' : v));
+		setBuyerOrderDate((v) => (v === pf.buyerOrderDate ? '' : v));
 		setPrefillSo(null);
 		prefillClaimed.current = false;
-		prefilled.current = { incoterm: '', finalDestination: '', lc: '' };
+		prefilled.current = { incoterm: '', finalDestination: '', lc: '', buyerOrderNo: '', buyerOrderDate: '' };
 	}
 
 	// SOs added before their lines loaded (deep link) get ticked when lines arrive;
@@ -356,11 +375,13 @@ export function NewShipment() {
 		setLc('');
 		setIncoterm('');
 		setFinalDestination('');
+		setBuyerOrderNo('');
+		setBuyerOrderDate('');
 		setConsigneeAddrName('');
 		setConsigneeAddrText('');
 		setPrefillSo(null);
 		prefillClaimed.current = false;
-		prefilled.current = { incoterm: '', finalDestination: '', lc: '' };
+		prefilled.current = { incoterm: '', finalDestination: '', lc: '', buyerOrderNo: '', buyerOrderDate: '' };
 		setErr(null);
 	}
 
@@ -464,6 +485,8 @@ export function NewShipment() {
 					port_of_discharge: pod || null,
 					final_destination: finalDestination,
 					consignee_address: consigneeAddrText || null,
+					buyer_order_no: buyerOrderNo || null,
+					buyer_order_date: buyerOrderDate || null,
 					etd: etd || null,
 					eta: eta || null,
 					letter_of_credit: lc || null,
@@ -702,6 +725,12 @@ export function NewShipment() {
 						</Field>
 						<Field label="ETA">
 							<TextInput type="date" value={eta} onChange={setEta} />
+						</Field>
+						<Field label="Buyer's PO number" hint="Carried from the sales order; prints on the commercial invoice">
+							<TextInput value={buyerOrderNo} onChange={setBuyerOrderNo} placeholder="e.g. PO-4521" />
+						</Field>
+						<Field label="Buyer's PO date">
+							<TextInput type="date" value={buyerOrderDate} onChange={setBuyerOrderDate} />
 						</Field>
 					</div>
 

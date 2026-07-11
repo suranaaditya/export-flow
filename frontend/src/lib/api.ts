@@ -115,6 +115,8 @@ export interface SalesOrderForEdit {
 	delivery_date: string | null;
 	incoterm: string | null;
 	named_place: string | null;
+	po_no: string | null;
+	po_date: string | null;
 	payment_terms_narrative: string | null;
 	tc_name: string | null;
 	terms: string | null;

@@ -959,6 +959,10 @@ def create_export_sales_order(deal) -> dict:
 			"conversion_rate": conversion_rate,
 			"incoterm": deal.get("incoterm") or None,
 			"named_place": deal.get("named_place"),
+			# the buyer's own purchase order (the customer's PO to us) — prints on the SO and
+			# carries forward to the shipment + commercial invoice
+			"po_no": deal.get("po_no") or None,
+			"po_date": deal.get("po_date") or None,
 			# chosen billing + shipping addresses (default to the customer's primary /
 			# shipping address); the SO print shows both Bill-to and Ship-to blocks
 			"customer_address": deal.get("customer_address") or None,
@@ -1129,6 +1133,8 @@ def get_sales_order_for_edit(name: str) -> dict:
 			"delivery_date",
 			"incoterm",
 			"named_place",
+			"po_no",
+			"po_date",
 			"customer_address",
 			"shipping_address_name",
 			"payment_terms_narrative",
@@ -1184,6 +1190,8 @@ def update_sales_order(name: str, deal) -> dict:
 	doc.conversion_rate = conversion_rate
 	doc.incoterm = deal.get("incoterm") or None
 	doc.named_place = deal.get("named_place")
+	doc.po_no = deal.get("po_no") or None
+	doc.po_date = deal.get("po_date") or None
 	doc.customer_address = deal.get("customer_address") or None
 	doc.shipping_address_name = deal.get("shipping_address") or None
 	doc.payment_terms_narrative = deal.get("payment_terms_narrative")
@@ -1573,6 +1581,27 @@ def _default_charge_account(company: str, create_if_missing: bool = True) -> str
 	)
 
 
+def _merchant_export_gst_template(company, supplier, supplier_address=None) -> str | None:
+	"""The india_compliance purchase-GST template a 0.1% merchant-export PO needs so the
+	concessional GST actually computes, picked by place of supply: intra-state (supplier's
+	GST state == the company's) → 'Input GST In-state' (CGST+SGST), else inter-state → 'Input
+	GST Out-state' (IGST). None when the supplier isn't GST-registered (no concessional GST to
+	charge) or the template doesn't exist (e.g. the test site without india_compliance). The
+	scheme override (overrides/purchase_order.py) then rescales those rows to total 0.1%."""
+	if not frappe.get_meta("Company").has_field("gstin"):
+		return None
+	company_gstin = frappe.db.get_value("Company", company, "gstin")
+	sup_gstin = frappe.db.get_value("Address", supplier_address, "gstin") if supplier_address else None
+	if not sup_gstin and frappe.get_meta("Supplier").has_field("gstin"):
+		sup_gstin = frappe.db.get_value("Supplier", supplier, "gstin")
+	if not (company_gstin and sup_gstin and len(company_gstin) >= 2 and len(sup_gstin) >= 2):
+		return None
+	intra = company_gstin[:2] == sup_gstin[:2]
+	abbr = frappe.db.get_value("Company", company, "abbr")
+	name = f"Input GST {'In' if intra else 'Out'}-state - {abbr}"
+	return name if frappe.db.exists("Purchase Taxes and Charges Template", name) else None
+
+
 def _build_po_doc(
 	podata,
 	validate_remaining: bool = True,
@@ -1656,6 +1685,11 @@ def _build_po_doc(
 	# taxes: template rows first, then freeform charge heads (cartage etc.)
 	taxes = []
 	taxes_template = podata.get("taxes_template")
+	# a 0.1% merchant-export PO needs a GST template for the concessional GST to compute at
+	# all; auto-apply the right one (by place of supply) when the user picked none, so ticking
+	# the scheme box is enough and the preview / total / print all show the 0.1%.
+	if podata.get("merchant_export_scheme") and not podata.get("merchanting_trade") and not taxes_template:
+		taxes_template = _merchant_export_gst_template(company, supplier, podata.get("supplier_address"))
 	if taxes_template:
 		from erpnext.controllers.accounts_controller import get_taxes_and_charges
 
@@ -2972,7 +3006,7 @@ def get_shipment_defaults(sales_order: str) -> dict:
 	so = frappe.db.get_value(
 		"Sales Order",
 		sales_order,
-		["customer", "customer_name", "incoterm", "named_place", "docstatus"],
+		["customer", "customer_name", "incoterm", "named_place", "po_no", "po_date", "docstatus"],
 		as_dict=True,
 	)
 	if not so:
@@ -2994,6 +3028,9 @@ def get_shipment_defaults(sales_order: str) -> dict:
 		"customer_name": so.customer_name,
 		"incoterm": so.incoterm,
 		"named_place": so.named_place,
+		# the buyer's PO carries onto the shipment (buyer_order_no/date) → commercial invoice
+		"po_no": so.po_no,
+		"po_date": str(so.po_date) if so.po_date else None,
 		"letter_of_credit": lc[0].name if lc else None,
 		"lc_number": lc[0].lc_number if lc else None,
 		# for preselecting this SO's lines in the picker
@@ -3089,6 +3126,17 @@ def create_shipment(payload) -> dict:
 	if not items:
 		frappe.throw(_("Pick at least one line to ship"))
 
+	# carry the buyer's PO no/date from the linked sales order(s) when the form didn't send
+	# its own — the customer's PO flows SO → shipment → commercial invoice
+	buyer_order_no = payload.get("buyer_order_no")
+	buyer_order_date = payload.get("buyer_order_date")
+	if not buyer_order_no:
+		for so_name in sorted({r.get("sales_order") for r in items if r.get("sales_order")}):
+			so_po = frappe.db.get_value("Sales Order", so_name, ["po_no", "po_date"], as_dict=True)
+			if so_po and so_po.po_no:
+				buyer_order_no, buyer_order_date = so_po.po_no, so_po.po_date
+				break
+
 	doc = frappe.get_doc(
 		{
 			"doctype": "Export Shipment",
@@ -3109,8 +3157,8 @@ def create_shipment(payload) -> dict:
 			"inr_rate": flt(payload.get("inr_rate")) or None,
 			"freight_amount": flt(payload.get("freight_amount")) or None,
 			"insurance_amount": flt(payload.get("insurance_amount")) or None,
-			"buyer_order_no": payload.get("buyer_order_no"),
-			"buyer_order_date": payload.get("buyer_order_date") or None,
+			"buyer_order_no": buyer_order_no,
+			"buyer_order_date": buyer_order_date or None,
 			"consignee_to_order": 1 if payload.get("consignee_to_order") else 0,
 			"consignee_name": payload.get("consignee_name"),
 			"consignee_address": payload.get("consignee_address"),

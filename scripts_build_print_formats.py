@@ -177,7 +177,7 @@ def _efx_head(title, subtitle, show_money_meta=True, invoice_from_ctx=False):
 	inv_no = "ctx.invoice_number or doc.document_number or doc.name" if invoice_from_ctx else "doc.document_number or doc.name"
 	inv_date = """{% if ctx.invoice_date %} &middot; {{ frappe.utils.formatdate(ctx.invoice_date, "dd MMM yyyy") }}{% endif %}""" if invoice_from_ctx else """{% if doc.document_date %} &middot; {{ frappe.utils.formatdate(doc.document_date, "dd MMM yyyy") }}{% endif %}"""
 	meta = """
-        {% if ctx.buyer_order_no %}<tr><td class="lbl" style="border:0;padding:0 0 1px">Buyer's order no &amp; date</td></tr>
+        {% if ctx.buyer_order_no %}<tr><td class="lbl" style="border:0;padding:0 0 1px">Buyer's PO no &amp; date</td></tr>
         <tr><td style="border:0;padding:0 0 3px"><span class="mono">{{ ctx.buyer_order_no }}</span>{% if ctx.buyer_order_date %} &middot; {{ frappe.utils.formatdate(ctx.buyer_order_date, "dd MMM yyyy") }}{% endif %}</td></tr>{% endif %}
         {% if ctx.gstin %}<tr><td class="lbl" style="border:0;padding:0 0 1px">GST no</td></tr><tr><td style="border:0;padding:0 0 3px"><span class="mono">{{ ctx.gstin }}</span></td></tr>{% endif %}
         {% if ctx.lut_number %}<tr><td class="lbl" style="border:0;padding:0 0 1px">ARN no</td></tr><tr><td style="border:0;padding:0 0 3px"><span class="mono">{{ ctx.lut_number }}</span></td></tr>{% endif %}
@@ -668,7 +668,7 @@ SALES_ORDER = (
           {% if doc.delivery_date %}<tr><td class="lbl" style="border:0;padding:0 0 1px">Delivery by</td></tr><tr><td style="border:0;padding:0 0 3px">{{ frappe.utils.formatdate(doc.delivery_date, "dd MMM yyyy") }}</td></tr>{% endif %}
           <tr><td class="lbl" style="border:0;padding:0 0 1px">Currency / incoterm</td></tr>
           <tr><td style="border:0;padding:0{% if doc.po_no %} 0 3px{% endif %}"><span class="mono">{{ doc.currency }}</span>{% if doc.incoterm %} &middot; {{ doc.incoterm }}{% if doc.named_place %} ({{ doc.named_place }}){% endif %}{% endif %}</td></tr>
-          {% if doc.po_no %}<tr><td class="lbl" style="border:0;padding:0 0 1px">Buyer's ref</td></tr><tr><td style="border:0;padding:0"><span class="mono">{{ doc.po_no }}</span></td></tr>{% endif %}
+          {% if doc.po_no %}<tr><td class="lbl" style="border:0;padding:0 0 1px">Buyer's PO no &amp; date</td></tr><tr><td style="border:0;padding:0"><span class="mono">{{ doc.po_no }}</span>{% if doc.po_date %} &middot; {{ frappe.utils.formatdate(doc.po_date, "dd MMM yyyy") }}{% endif %}</td></tr>{% endif %}
         </table>
       </td>
     </tr>
@@ -849,12 +849,13 @@ if __name__ == "__main__":
 	# (marks/pkgs/description columns, DBK + RoDTEP banners, full banker block, MFG
 	# line); the shared _efx_head also moved GST/ARN into the meta strip, so the
 	# shipping instruction (same head) re-syncs too.
-	CLIENT_FORMAT = "2026-06-24 20:00:00.000000"
+	# buyer's PO no/date label + it now flows from the SO onto the shipment
+	CLIENT_FORMAT = "2026-06-27 10:00:00.000000"
 	# PO reshaped to MN Globex's Tally-style layout (Buyer/Invoice-to + Supplier
 	# Bill-from blocks, packing column, spec sub-line, GST-treatment banner, footer)
 	PO_CLIENT_FORMAT = "2026-06-25 12:00:00.000000"
 	# SO shows Bill-to | Ship-to side-by-side; the full ship-to address always prints
-	SO_SHIP_FORMAT = "2026-06-27 09:00:00.000000"
+	SO_SHIP_FORMAT = "2026-06-27 10:00:00.000000"
 	write_format(
 		"exportflow_commercial_invoice", "ExportFlow Commercial Invoice", COMMERCIAL_INVOICE, modified=CLIENT_FORMAT
 	)
