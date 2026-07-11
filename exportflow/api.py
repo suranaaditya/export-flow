@@ -708,10 +708,14 @@ ITEM_SCALAR_FIELDS = (
 
 
 def _item_has_gst_hsn() -> bool:
-	"""india_compliance adds gst_hsn_code to Item — present on the GST site, not
-	on the test site. Cache-safe meta check so the tax plumbing degrades cleanly
-	where GST isn't installed."""
-	return frappe.get_meta("Item").has_field("gst_hsn_code")
+	"""india_compliance adds gst_hsn_code to Item AND the 'GST HSN Code' master — present on
+	the GST site, not on the test site. Require BOTH: an uninstalled india_compliance can
+	leave the gst_hsn_code custom field behind without its master, and validating an HSN
+	against a master doctype that no longer exists would wrongly reject every item. Cache-safe
+	meta check so the tax plumbing degrades cleanly where GST isn't (fully) installed."""
+	return frappe.get_meta("Item").has_field("gst_hsn_code") and frappe.db.exists(
+		"DocType", "GST HSN Code"
+	)
 
 
 def _apply_item_tax_fields(doc, values) -> None:
@@ -1685,11 +1689,15 @@ def _build_po_doc(
 	# taxes: template rows first, then freeform charge heads (cartage etc.)
 	taxes = []
 	taxes_template = podata.get("taxes_template")
-	# a 0.1% merchant-export PO needs a GST template for the concessional GST to compute at
-	# all; auto-apply the right one (by place of supply) when the user picked none, so ticking
-	# the scheme box is enough and the preview / total / print all show the 0.1%.
-	if podata.get("merchant_export_scheme") and not podata.get("merchanting_trade") and not taxes_template:
-		taxes_template = _merchant_export_gst_template(company, supplier, podata.get("supplier_address"))
+	# a 0.1% merchant-export PO's GST is DERIVED from the place of supply, not user-chosen —
+	# so whenever the scheme is on, override whatever template the form sent (it pre-fills the
+	# company default, which may be a non-GST or wrong-state template) with the state-correct
+	# india_compliance GST template. Only overrides when one resolves (registered domestic
+	# supplier); an unregistered/foreign supplier keeps the picked template (no concessional GST).
+	if podata.get("merchant_export_scheme") and not podata.get("merchanting_trade"):
+		auto = _merchant_export_gst_template(company, supplier, podata.get("supplier_address"))
+		if auto:
+			taxes_template = auto
 	if taxes_template:
 		from erpnext.controllers.accounts_controller import get_taxes_and_charges
 
@@ -2060,6 +2068,9 @@ def get_po_detail(name: str) -> dict:
 			"name": po.name,
 			"supplier": po.supplier,
 			"supplier_name": po.supplier_name,
+			# the chosen Bill-from address must round-trip so an edit doesn't wipe it (and the
+			# place-of-supply GST keeps resolving from it)
+			"supplier_address": po.get("supplier_address"),
 			"transaction_date": po.transaction_date,
 			"schedule_date": po.schedule_date,
 			"status": po.status,

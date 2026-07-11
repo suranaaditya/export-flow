@@ -724,12 +724,20 @@ export function NewPurchaseOrder() {
 					{/* ---- taxes & charges (after items, per ERPNext) ---- */}
 					<div className="docgrp">Taxes &amp; charges</div>
 					<div className="formgrid" style={{ paddingBottom: 4 }}>
-						<Field label="Taxes template" hint="GST autofills from the item/HSN tax setup">
+						<Field
+							label="Taxes template"
+							hint={
+								mes && !supplierIsForeign
+									? 'Auto-applied: concessional 0.1% GST by place of supply — no need to pick one'
+									: 'GST autofills from the item/HSN tax setup'
+							}
+						>
 							<SearchSelect
-								value={taxesTemplate}
+								value={mes && !supplierIsForeign ? '' : taxesTemplate}
 								onChange={setTaxesTemplate}
 								options={taxTemplateOptions}
-								placeholder="Search tax templates…"
+								placeholder={mes && !supplierIsForeign ? '0.1% merchant-export GST (auto)' : 'Search tax templates…'}
+								disabled={mes && !supplierIsForeign}
 							/>
 						</Field>
 					</div>

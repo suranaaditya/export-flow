@@ -157,7 +157,9 @@ class TestItemTax(IntegrationTestCase):
 		self.assertAlmostEqual(by[b]["tax"], 60.0, places=1, msg="6% template rate")
 
 	def test_gst_hsn_code_skipped_without_india_compliance(self):
-		# erptest has no gst_hsn_code field — passing it must not raise
+		# without the 'GST HSN Code' master (india_compliance not installed — even if a
+		# stray gst_hsn_code custom field lingers from an uninstall), passing an HSN must
+		# not raise; the code degrades to skipping HSN handling
 		item = create_item({"item_name": f"_Test EF HSN {_suffix()}", "gst_hsn_code": "29420090"})
 		self.assertTrue(frappe.db.exists("Item", item["name"]))
 
